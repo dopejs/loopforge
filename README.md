@@ -4,19 +4,61 @@ Loopforge is a portable game-development toolkit built from Agent Skills and a
 deterministic CLI. It helps coding agents move from a game idea to tested,
 evidence-backed playable builds without hiding project state inside a chat.
 
-The project is now in early implementation. The Python CLI includes project
-initialization, hash-chained event state, locking, reconciliation, read-only
-project diagnostics, artifact integrity validation, evidence registration,
-hypothesis records, guarded stage
-advancement, a Godot build/test adapter, playtest import, and atomic prototype
-decisions. `status` also derives scoped quality claims and marks them stale when
-the source identity changes. The first repository-local workflow skills are
-included. Validation against a real Godot installation and production-stage
-release skills are not implemented yet. The production art workflow now covers
-representative-target approval, provenance-aware asset manifests, deterministic
-technical checks, and runtime visual review. The game-design workflow now
-connects a kept prototype to an approved player promise, loop/system contract,
-scope gate, production risks, and vertical-slice handoffs.
+Loopforge combines workflow Skills with a local state and evidence engine. The
+coding agent remains the executor; Loopforge makes the work resumable,
+reviewable, and explicit about what has or has not been proven.
+
+## What Loopforge provides
+
+### An evidence-backed game workflow
+
+Loopforge organizes work around a repeatable learning loop rather than a
+feature checklist:
+
+```text
+game idea -> falsifiable hypothesis -> smallest playable experiment
+           -> technical checks -> human playtest -> keep / kill / refactor
+           -> justified investment in design, art, and a vertical slice
+```
+
+Every stage has required outputs and gates. A prototype can be killed or
+refactored without pretending that unfinished work is a failure.
+
+### Five production Skills
+
+- `loopforge-router` reads project state and selects the next applicable
+  workflow.
+- `prototype-gameplay` turns an idea into a bounded prototype, playtest, and
+  explicit decision.
+- `build-godot-game` implements and verifies a small Godot 4 gameplay loop.
+- `design-game` turns a kept prototype into a scoped, testable game design
+  contract.
+- `direct-game-art` defines art direction, representative targets, asset
+  manifests, provenance, and runtime visual review.
+
+### A deterministic project CLI
+
+The `loopforge` CLI stores project state in `.loopforge` and provides:
+
+- hash-chained events, file locking, snapshots, and recovery checks;
+- hypothesis records, stage gates, and atomic keep/kill/refactor decisions;
+- Godot build and test commands with structured run evidence;
+- evidence registration with checksums and source identity tracking;
+- `status`, `doctor`, `validate`, and JSON output for agent automation.
+
+### Guardrails for production work
+
+Loopforge keeps technical correctness, visual quality, playtest observations,
+and evidence of fun separate. It refuses unsafe state transitions, detects
+stale artifacts, preserves local Skill changes during updates, and leaves
+creative and release-sensitive decisions with a human reviewer.
+
+### Current scope
+
+The project is in alpha. The CLI, workflow contracts, and repository Skills are
+implemented and tested; the current engine workflow focuses on Godot 4.
+Full real-engine validation, broader engine adapters, hosted collaboration,
+and release-production automation are not yet part of the MVP.
 
 ## Installation
 
