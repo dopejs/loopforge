@@ -1,4 +1,4 @@
 interface:
   display_name: "Game Design"
-  short_description: "Turn validated gameplay into a scoped design contract"
-  default_prompt: "Use $design-game to turn this game idea or prototype into a scoped, testable design contract."
+  short_description: "Deliver a complete GDD and testable design contract"
+  default_prompt: "Use $design-game to turn this game idea or validated prototype into a complete user-facing GDD and synchronized, testable design contract."

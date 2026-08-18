@@ -9,9 +9,9 @@
     },
     {
       "id": "kept-prototype-contract",
-      "prompt": "A desktop hazard-dash prototype was kept after external playtesting showed players intentionally charge near hazards. Plan the production design contract for moment, session, and meta play without claiming the game is already production-ready. Provide text only and do not call tools.",
-      "skill_files": ["SKILL.md", "references/design-framework.md", "references/scope-and-handoff.md", "assets/design-contract.json"],
-      "expected_behavior": "Preserve the evidenced risk tradeoff as the design nucleus, define aligned player promises and all three loops, add only systems with behavior/feedback/validation/delete contracts, separate evidence from assumptions, scope MVP and vertical slice with dependencies, and require explicit design approval before art or implementation expansion."
+      "prompt": "A desktop hazard-dash prototype was kept after external playtesting showed players intentionally charge near hazards. The user says 'continue' and expects the finished game-planning deliverable, not another outline or question. Produce the deliverable as text only without calling tools or claiming the game is already production-ready.",
+      "skill_files": ["SKILL.md", "references/design-framework.md", "references/scope-and-handoff.md", "assets/game-design.md", "assets/design-contract.json"],
+      "expected_behavior": "Deliver a complete user-facing GDD rather than only a contract or plan, covering product context, evidenced nucleus, player promises, verbs/controls, moment/session/meta loops, systems, progression/economy, content, UX/accessibility, narrative, art/audio, technical constraints, scope, vertical slice, production plan, risks, validation, non-goals, and pending approval. Preserve the evidenced risk tradeoff, separate evidence from assumptions and unknowns, use stable scope/system IDs ready for the contract, clearly mark contract/checksum/validation as not run in this text-only task, avoid duplicating the GDD in pseudo-valid JSON, and require explicit approval before downstream expansion."
     },
     {
       "id": "solo-overscope-gate",

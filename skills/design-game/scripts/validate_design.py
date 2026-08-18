@@ -13,11 +13,41 @@ from pathlib import Path
 from typing import Any
 
 PLACEHOLDER = re.compile(r"<[^<>]+>|\bTODO\b")
+CHECKSUM = re.compile(r"sha256:[0-9a-f]{64}\Z")
+MARKDOWN_HEADING = re.compile(r"^##[ \t]+(.+?)[ \t]*$")
 BUCKETS = {"mvp", "vertical_slice", "later", "cut"}
 LOOPS = {"moment", "session", "meta"}
 CONFIDENCE = {"low", "medium", "high"}
 IMPACT = {"low", "medium", "high"}
 ASSUMPTION_STATUS = {"planned", "validated", "invalidated", "unknown"}
+GDD_REQUIRED_SECTIONS = (
+    "Document Identity",
+    "Executive Summary",
+    "Source Inventory",
+    "Design Nucleus",
+    "Target Player and Product Context",
+    "Player Promise",
+    "Player Verbs, Controls, and Goals",
+    "Moment Loop",
+    "Session Loop",
+    "Meta Loop",
+    "Systems",
+    "Progression and Economy",
+    "Content and Experience Coverage",
+    "UX, Onboarding, and Accessibility",
+    "Narrative and World",
+    "Art and Audio Direction",
+    "Technical and Platform Constraints",
+    "Scope Gate",
+    "Vertical Slice",
+    "Production Plan",
+    "Assumption and Evidence Ledger",
+    "Risk Register",
+    "Validation and Investment Decision",
+    "Non-Goals",
+    "Approval",
+    "Version History",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -63,6 +93,92 @@ def relative_path(project: Path, value: Any) -> tuple[Path | None, str | None]:
     except ValueError:
         return None, "path escapes project root"
     return resolved, None
+
+
+def markdown_sections(text: str) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in text.splitlines():
+        heading = MARKDOWN_HEADING.match(line)
+        if heading:
+            current = heading.group(1).strip().casefold()
+            sections.setdefault(current, [])
+        elif current is not None:
+            sections[current].append(line)
+    return sections
+
+
+def section_is_complete(lines: list[str]) -> bool:
+    body = "\n".join(lines)
+    if PLACEHOLDER.search(body):
+        return False
+    for line in lines:
+        value = line.strip()
+        if not value or value.startswith("#"):
+            continue
+        if re.fullmatch(r"\|?[\s:|-]+\|?", value):
+            continue
+        return True
+    return False
+
+
+def check_design_document(
+    path: Path, checksum: Any, errors: list[dict[str, Any]]
+) -> None:
+    if not isinstance(checksum, str) or not CHECKSUM.fullmatch(checksum):
+        errors.append(
+            issue(
+                "CHECKSUM_INVALID",
+                "design_document.checksum must be a sha256 digest",
+                path="design_document.checksum",
+            )
+        )
+    if not path.is_file():
+        errors.append(
+            issue(
+                "DOCUMENT_MISSING",
+                "the complete game design document does not exist",
+                path=str(path),
+            )
+        )
+        return
+    if (
+        isinstance(checksum, str)
+        and CHECKSUM.fullmatch(checksum)
+        and checksum != sha256(path)
+    ):
+        errors.append(
+            issue(
+                "DOCUMENT_CHECKSUM",
+                "design document checksum does not match",
+                path=str(path),
+            )
+        )
+    try:
+        sections = markdown_sections(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError) as exc:
+        errors.append(issue("DOCUMENT_READ", str(exc), path=str(path)))
+        return
+    for section in GDD_REQUIRED_SECTIONS:
+        body = sections.get(section.casefold())
+        if body is None:
+            errors.append(
+                issue(
+                    "DOCUMENT_SECTION_MISSING",
+                    f"design document is missing section: {section}",
+                    path=str(path),
+                    section=section,
+                )
+            )
+        elif not section_is_complete(body):
+            errors.append(
+                issue(
+                    "DOCUMENT_SECTION_INCOMPLETE",
+                    f"design document section is incomplete: {section}",
+                    path=str(path),
+                    section=section,
+                )
+            )
 
 
 def require_text(
@@ -242,32 +358,8 @@ def check_contract(
             errors.append(
                 issue("DOCUMENT_PATH", path_error, path="design_document.path")
             )
-        checksum = document.get("checksum")
-        if checksum != "" and not concrete(checksum):
-            errors.append(
-                issue(
-                    "CHECKSUM_INVALID",
-                    "design_document.checksum must be sha256 or empty for draft",
-                )
-            )
-        approval_status = (data.get("approval") or {}).get("status")
-        if path and approval_status == "approved":
-            if not path.is_file():
-                errors.append(
-                    issue(
-                        "DOCUMENT_MISSING",
-                        "approved design document does not exist",
-                        path=str(path),
-                    )
-                )
-            elif checksum != sha256(path):
-                errors.append(
-                    issue(
-                        "DOCUMENT_CHECKSUM",
-                        "design document checksum does not match",
-                        path=str(path),
-                    )
-                )
+        if path:
+            check_design_document(path, document.get("checksum"), errors)
 
     nucleus = data.get("design_nucleus")
     if not isinstance(nucleus, dict):

@@ -33,8 +33,9 @@ refactored without pretending that unfinished work is a failure.
 - `prototype-gameplay` turns an idea into a bounded prototype, playtest, and
   explicit decision.
 - `build-godot-game` implements and verifies a small Godot 4 gameplay loop.
-- `design-game` turns a kept prototype into a scoped, testable game design
-  contract.
+- `design-game` delivers a complete, user-facing game design document (GDD), a
+  synchronized scoped contract, and an evidence-aware review for a kept
+  prototype.
 - `direct-game-art` defines art direction, representative targets, asset
   manifests, provenance, and runtime visual review.
 

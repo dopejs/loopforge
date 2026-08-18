@@ -10,6 +10,34 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR = ROOT / "skills" / "design-game" / "scripts" / "validate_design.py"
+GDD_SECTIONS = (
+    "Document Identity",
+    "Executive Summary",
+    "Source Inventory",
+    "Design Nucleus",
+    "Target Player and Product Context",
+    "Player Promise",
+    "Player Verbs, Controls, and Goals",
+    "Moment Loop",
+    "Session Loop",
+    "Meta Loop",
+    "Systems",
+    "Progression and Economy",
+    "Content and Experience Coverage",
+    "UX, Onboarding, and Accessibility",
+    "Narrative and World",
+    "Art and Audio Direction",
+    "Technical and Platform Constraints",
+    "Scope Gate",
+    "Vertical Slice",
+    "Production Plan",
+    "Assumption and Evidence Ledger",
+    "Risk Register",
+    "Validation and Investment Decision",
+    "Non-Goals",
+    "Approval",
+    "Version History",
+)
 
 
 class DesignGameContractTests(unittest.TestCase):
@@ -21,7 +49,24 @@ class DesignGameContractTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def write_design_document(self, sections: tuple[str, ...] = GDD_SECTIONS) -> Path:
+        document = self.project / "docs" / "game-design.md"
+        document.parent.mkdir(exist_ok=True)
+        content = ["# Test Game Design Document", ""]
+        for section in sections:
+            content.extend(
+                (
+                    f"## {section}",
+                    "",
+                    f"Concrete project-specific content for {section}.",
+                    "",
+                )
+            )
+        document.write_text("\n".join(content), encoding="utf-8")
+        return document
+
     def contract(self) -> dict[str, object]:
+        document = self.write_design_document()
         return {
             "schema_version": 1,
             "project": {
@@ -31,7 +76,11 @@ class DesignGameContractTests(unittest.TestCase):
                 "source_identity": "sha256:source",
                 "platform": "desktop",
             },
-            "design_document": {"path": "docs/game-design.md", "checksum": ""},
+            "design_document": {
+                "path": "docs/game-design.md",
+                "checksum": "sha256:"
+                + hashlib.sha256(document.read_bytes()).hexdigest(),
+            },
             "design_nucleus": {
                 "summary": "Choose between immediate safety and multiplier growth.",
                 "behavior_change": "Players deliberately remain near moving hazards.",
@@ -158,14 +207,26 @@ class DesignGameContractTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("APPROVAL_PENDING", self.error_codes(result))
 
-    def test_approved_contract_requires_matching_document_checksum(self) -> None:
+    def test_pending_contract_requires_complete_design_document(self) -> None:
         contract = self.contract()
-        document = self.project / "docs" / "game-design.md"
-        document.parent.mkdir()
-        document.write_text("# Approved design\n", encoding="utf-8")
+        (self.project / "docs" / "game-design.md").unlink()
+        code, result = self.run_validator(contract)
+        self.assertEqual(code, 2)
+        self.assertIn("DOCUMENT_MISSING", self.error_codes(result))
+
+    def test_incomplete_design_document_is_rejected(self) -> None:
+        contract = self.contract()
+        document = self.write_design_document(("Document Identity",))
         contract["design_document"]["checksum"] = (
             "sha256:" + hashlib.sha256(document.read_bytes()).hexdigest()
         )
+        code, result = self.run_validator(contract)
+        self.assertEqual(code, 2)
+        self.assertIn("DOCUMENT_SECTION_MISSING", self.error_codes(result))
+
+    def test_approved_contract_requires_matching_document_checksum(self) -> None:
+        contract = self.contract()
+        document = self.project / "docs" / "game-design.md"
         contract["approval"] = {
             "status": "approved",
             "approver_id": "local:designer",

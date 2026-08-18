@@ -7,8 +7,9 @@ in [the skill system design](../docs/skills.md):
 - `prototype-gameplay` turns one idea into a hypothesis, playable experiment,
   external playtest, and human-confirmed decision;
 - `build-godot-game` implements and verifies the smallest Godot 4 loop;
-- `design-game` turns validated gameplay learning into a human-approved player
-  promise, loop/system contract, bounded scope, risks, and validation plan;
+- `design-game` turns validated gameplay learning into a complete user-facing
+  GDD plus a human-approved player promise, loop/system contract, bounded
+  scope, risks, and validation plan;
 - `direct-game-art` turns an approved gameplay direction into a human-approved
   representative target, traceable asset manifest, validated runtime assets,
   and in-engine visual evidence.

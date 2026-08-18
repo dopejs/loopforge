@@ -31,9 +31,10 @@ restart path.
 
 ### `design-game`
 
-Turn a kept prototype or reviewed idea into a player promise, linked moment,
-session, and meta loops, system contracts, scope gates, production risks, and a
-validated vertical-slice handoff. Keep assumptions and human approval explicit.
+Deliver a complete user-facing GDD for a kept prototype or reviewed idea,
+alongside linked moment, session, and meta loops, a synchronized machine
+contract, scope gates, production risks, and a validated vertical-slice
+handoff. Keep assumptions and human approval explicit.
 
 ### `run-playtest`
 

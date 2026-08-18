@@ -1,6 +1,6 @@
 ---
 name: design-game
-description: Turn a validated game idea or kept Loopforge prototype into a production-bounded, testable game design contract and reviewable GDD. Use when defining player promise, design pillars, moment/session/meta loops, systems, progression, economy, content structure, scope, vertical slice, production risks, or when reviewing an existing GDD before art or implementation expansion. Do not use for proving that gameplay is fun, writing engine code, producing art assets, release approval, or unsupported market and revenue claims.
+description: Turn a validated game idea or kept Loopforge prototype into a complete user-facing GDD plus a production-bounded, machine-checkable design contract. Use when defining player promise, design pillars, moment/session/meta loops, systems, progression, economy, content structure, scope, vertical slice, production risks, when the user asks to continue or finish game planning, or when reviewing an existing GDD before art or implementation expansion. Do not use for proving that gameplay is fun, writing engine code, producing art assets, release approval, or unsupported market and revenue claims.
 ---
 
 # Design Game
@@ -37,13 +37,18 @@ workflow.
 | Mode | Use when | Required outcome |
 |---|---|---|
 | `TRIAGE` | An idea has several plausible directions | Two to four design-nucleus options, assumptions, and one next decision |
-| `DESIGN_CONTRACT` | A prototype was kept or a direction was selected | Player promise, loops, systems, scope, risks, and validation contract |
-| `VERTICAL_SLICE` | The team needs the next production slice | Must-prove experience, bounded content/assets, milestones, and Go/No-Go criteria |
-| `REVIEW` | A GDD or system plan already exists | Findings-first review, corrected contract, change log, and remaining unknowns |
+| `DESIGN_CONTRACT` | A prototype was kept or a direction was selected | Complete user-facing GDD, synchronized contract, review, and approval request |
+| `VERTICAL_SLICE` | The team needs the next production slice | Updated complete GDD plus must-prove experience, bounded content/assets, milestones, and Go/No-Go criteria |
+| `REVIEW` | A GDD or system plan already exists | Findings-first review, corrected GDD and contract, change log, and remaining unknowns |
 
 Do not generate an encyclopedic GDD from a sentence. In `TRIAGE`, compare the
-smallest plausible design nuclei first. If the user explicitly asks to continue
-without choosing, recommend one but leave approval `pending` and keep downstream
+smallest plausible design nuclei first and stop after the decision request. The
+TRIAGE deliverable is concise: two to four options, each with the repeated
+tradeoff, behavior change, audience fit, key assumption, and cheapest test;
+then one recommendation, one next decision, and `pending` approval. Do not
+expand loops, systems, economy, scope tables, or a full GDD in TRIAGE, even if
+the GDD template is available. If the user explicitly asks to continue without
+choosing, recommend one but leave approval `pending` and keep downstream
 production blocked.
 
 ## Required Design Sequence
@@ -82,7 +87,7 @@ production blocked.
 
 Use the stable templates in `assets/`:
 
-- `game-design.md`: human-readable design brief or GDD;
+- `game-design.md`: complete human-readable GDD and primary user deliverable;
 - `design-contract.json`: machine-checkable source of truth for loops, systems,
   scope, assumptions, risks, validation, and approval;
 - `design-review.md`: findings, evidence limits, decision, and one next action.
@@ -90,6 +95,34 @@ Use the stable templates in `assets/`:
 The Markdown document explains intent. The JSON contract owns stable IDs,
 dependencies, scope buckets, validation criteria, and approval state. Do not
 derive these fields from headings or prose during implementation.
+
+In `DESIGN_CONTRACT` and `VERTICAL_SLICE`, write all three artifacts in the
+same run. In `REVIEW`, update the GDD and contract unless the user explicitly
+requests review findings only. The task is not complete after producing JSON,
+an outline, an internal summary, or a list of proposed sections. Populate every
+GDD section with project-specific content; use `unknown` with its impact,
+owner, and resolution step when evidence is missing, and state `not applicable`
+with a reason when a section does not apply. Never leave template prompts or
+placeholders in a delivered document.
+
+Write the GDD first, compute its checksum, write the synchronized contract,
+then validate the draft:
+
+```bash
+python <skill-dir>/scripts/validate_design.py \
+  --project <project-root> --contract <design-contract.json> --format json
+```
+
+When tools or file writes are unavailable in `DESIGN_CONTRACT` or
+`VERTICAL_SLICE`, provide the complete GDD as the response deliverable, keep
+stable scope/system/assumption IDs in its tables, and end with a compact
+contract handoff naming the intended paths and marking checksum, contract
+write, and validation as `not_run`. Do not emit a pseudo-valid JSON contract
+with a fabricated path or checksum, and do not duplicate the GDD inside a
+second artifact. Do not make the user ask a second time for the actual
+planning document. This fallback does not apply to `TRIAGE`, which remains the
+concise nucleus comparison above, or to a text-only `REVIEW` that requests
+findings only.
 
 Validate before approving or handing off:
 
@@ -99,10 +132,10 @@ python <skill-dir>/scripts/validate_design.py \
   --require-approved --format json
 ```
 
-A non-zero result is blocked. Approval requires explicit approver identity,
-rationale, timestamp, a concrete design document path, and a matching checksum.
-Do not infer approval from silence, a prototype `keep` decision, or a positive
-comment.
+A non-zero draft or approval result is blocked. Approval requires explicit
+approver identity, rationale, timestamp, a complete design document path, and a
+matching checksum. Do not infer approval from silence, a prototype `keep`
+decision, or a positive comment.
 
 ## Reference Games and External Claims
 
@@ -116,6 +149,14 @@ comment.
   design pattern fits this game.
 - Keep market size, retention, conversion, revenue, and schedule estimates as
   assumptions until they have cited, current evidence.
+
+If the user asks to reproduce a commercial game or its protected expression,
+respond with a brief refusal of the copied names, text, layouts, characters,
+and exact balance. Offer two or three differentiated original nuclei based
+only on abstract player behaviors, tradeoffs, pacing, feedback, and production
+lessons, then name one smallest validation test. Do not generate a complete
+GDD, contract handoff, scope table, or art/implementation plan for this
+boundary response.
 
 ## Handoffs
 
@@ -131,10 +172,11 @@ comment.
 
 ## Completion Report
 
-Report the experiment and hypothesis revision, design-contract path/checksum,
-selected nucleus, approval status and identity, scope counts by bucket, highest
-risks, assumption states, validation criteria, changed artifacts, stale
-handoffs, limitations, and exactly one next action.
+Lead with the complete GDD path/checksum so the user can open the deliverable.
+Then report the experiment and hypothesis revision, design-contract and review
+paths, selected nucleus, approval status and identity, scope counts by bucket,
+highest risks, assumption states, validation criteria, changed artifacts,
+stale handoffs, limitations, and exactly one next action.
 
 Never report `DESIGN_APPROVED`, production scope, final balance, market fit, or
 human review unless the corresponding explicit decision and evidence exist.
