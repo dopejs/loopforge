@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 authors = [
   { name = "Loopforge contributors" }
 ]
+license = { file = "LICENSE" }
 dependencies = []
 
 [project.scripts]
@@ -29,5 +30,6 @@ include = [
   "/skills",
   "/tests",
   "/README.md",
+  "/LICENSE",
   "/pyproject.toml"
 ]
