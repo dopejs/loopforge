@@ -1,5 +1,7 @@
 # Loopforge
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Loopforge is a portable game-development toolkit built from Agent Skills and a
 deterministic CLI. It helps coding agents move from a game idea to tested,
 evidence-backed playable builds without hiding project state inside a chat.

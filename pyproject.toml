@@ -30,6 +30,7 @@ include = [
   "/skills",
   "/tests",
   "/README.md",
+  "/README.zh-CN.md",
   "/LICENSE",
   "/pyproject.toml"
 ]
