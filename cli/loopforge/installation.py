@@ -50,10 +50,7 @@ def bundled_skills_root() -> Path:
 def codex_skills_root(explicit_root: Path | None = None) -> Path:
     if explicit_root is not None:
         return explicit_root.expanduser().resolve()
-    codex_home = os.environ.get("CODEX_HOME")
-    if codex_home:
-        return (Path(codex_home).expanduser() / "skills").resolve()
-    return (Path.home() / ".codex" / "skills").resolve()
+    return (Path.home() / ".agents" / "skills").resolve()
 
 
 def install_skills(

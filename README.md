@@ -35,9 +35,9 @@ loopforge setup --host codex
 ```
 
 The package includes all official Loopforge Skills. `loopforge setup` copies
-them into `$CODEX_HOME/skills`, or `~/.codex/skills` when `CODEX_HOME` is not
-set. It is safe to run repeatedly: unchanged Skills are skipped and updates are
-applied only to installations managed by Loopforge.
+them into the shared Agent Skills directory at `~/.agents/skills`. It is safe
+to run repeatedly: unchanged Skills are skipped and updates are applied only to
+installations managed by Loopforge.
 
 Run the command from the root of a game repository to initialize it:
 

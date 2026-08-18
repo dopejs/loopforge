@@ -48,11 +48,11 @@ loopforge setup --host codex --uninstall
 ```
 
 `setup` installs the Skills bundled in the Loopforge distribution into the
-Codex Skills directory. It resolves that directory from `CODEX_HOME` or
-`~/.codex`, and accepts `--skills-root` for another host adapter or an isolated
-test environment. Installation is idempotent and records a management marker
-in each Skill. Local changes and unmanaged conflicts are rejected by default;
-`--force` preserves a timestamped backup before replacement or uninstall.
+shared Agent Skills directory at `~/.agents/skills`, and accepts
+`--skills-root` for another host adapter or an isolated test environment.
+Installation is idempotent and records a management marker in each Skill. Local
+changes and unmanaged conflicts are rejected by default; `--force` preserves a
+timestamped backup before replacement or uninstall.
 
 The JSON result is part of the CLI envelope contract and reports each Skill's
 action (`install`, `update`, `skip`, or `uninstall`), digest, destination, and

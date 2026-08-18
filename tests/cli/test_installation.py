@@ -81,19 +81,20 @@ class SkillInstallationTests(unittest.TestCase):
         self.assertEqual(payload["data"]["installed"], 5)
         self.assertFalse(self.skills_root.exists())
 
-    def test_setup_uses_codex_home_by_default(self) -> None:
-        codex_home = Path(self.temporary.name) / "codex-home"
+    def test_setup_uses_agents_skills_by_default(self) -> None:
+        home = Path(self.temporary.name) / "home"
         result = run_setup(
             None,
-            environment_overrides={"CODEX_HOME": str(codex_home)},
+            environment_overrides={"HOME": str(home)},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(
-            payload["data"]["skills_root"], str((codex_home / "skills").resolve())
+            payload["data"]["skills_root"],
+            str((home / ".agents" / "skills").resolve()),
         )
         self.assertEqual(
-            {path.name for path in (codex_home / "skills").iterdir()},
+            {path.name for path in (home / ".agents" / "skills").iterdir()},
             EXPECTED_SKILLS,
         )
 
