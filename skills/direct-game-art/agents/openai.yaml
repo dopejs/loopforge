@@ -1,0 +1,4 @@
+interface:
+  display_name: "Direct Game Art"
+  short_description: "Plan, validate, and review production game art"
+  default_prompt: "Use $direct-game-art to define an approved representative art target and production-ready asset manifest for this game."

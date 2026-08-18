@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loopforge Router"
+  short_description: "Route game work through the current Loopforge stage"
+  default_prompt: "Use $loopforge-router to inspect this game project and choose the next evidence-backed action."

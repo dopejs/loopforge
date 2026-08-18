@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "project_identity": "<project/source identity>",
+  "representative_target": {
+    "id": "<target ID>",
+    "revision": 1,
+    "approval": {
+      "status": "pending",
+      "approver_id": "<explicit approver ID>",
+      "approver_name": "<explicit approver name>",
+      "rationale": "<explicit rationale>"
+    }
+  },
+  "assets": [
+    {
+      "id": "<stable asset ID>",
+      "family": "<character, environment, prop, ui, vfx, or animation>",
+      "role": "<runtime role>",
+      "status": "planned",
+      "runtime_path": "<project-relative runtime path>",
+      "source_path": "<project-relative raw or canonical source path>",
+      "curated_path": "<project-relative curated path>",
+      "format": "png",
+      "dimensions": {"width": 256, "height": 256},
+      "max_bytes": 1048576,
+      "checksum": "<sha256 checksum required when status is runtime>",
+      "alpha": "required",
+      "variants": [],
+      "runtime": {
+        "display_size": "<pixels, world units, or fullscreen behavior>",
+        "pivot": "<normalized or pixel pivot>",
+        "frames": 1,
+        "fps": 0,
+        "loop": false
+      },
+      "provenance": {
+        "source_kind": "<human, generated, licensed, public-domain, or derived>",
+        "source_uri": "<URI or project-relative source>",
+        "creator_or_provider": "<creator, provider, or tool>",
+        "model_or_version": "<model/tool version or not_applicable>",
+        "acquired_at": "<ISO-8601 date>",
+        "license": "<SPDX ID, proprietary, or public-domain>",
+        "parent_asset_ids": [],
+        "transformations": []
+      }
+    }
+  ]
+}

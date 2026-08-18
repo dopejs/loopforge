@@ -1,0 +1,23 @@
+{
+  "skill": "build-godot-game",
+  "tasks": [
+    {
+      "id": "implement-loop",
+      "prompt": "Plan implementation of a Godot 4 one-screen risk/reward prototype with a charge action, moving hazard, visible reward, failure, and restart. Do not call tools.",
+      "skill_files": ["SKILL.md", "references/godot-prototype.md"],
+      "expected_behavior": "Inspect Loopforge state and project structure first, implement only the active loop, include visible feedback and restart, and avoid production systems or unsupported claims."
+    },
+    {
+      "id": "verify-limits",
+      "prompt": "Explain the verification plan after a Godot prototype source change, including what build/test/capture checks prove and do not prove. Do not call tools.",
+      "skill_files": ["SKILL.md", "references/godot-prototype.md"],
+      "expected_behavior": "Run fresh build, startup test, and actual-play-state capture in order, use expected revisions, explain that these are import/startup smoke checks not fun/performance/playtest proof, and mark old evidence stale."
+    },
+    {
+      "id": "failure",
+      "prompt": "A Godot headless startup fails after a script edit and the existing capture is from before the edit. Plan diagnosis and the evidence-safe next steps. Do not call tools.",
+      "skill_files": ["SKILL.md", "references/godot-prototype.md"],
+      "expected_behavior": "Fix the first concrete root cause, rerun the failed operation, do not reuse pre-change evidence or disable errors, and consider early technical decision only if infeasibility is demonstrated."
+    }
+  ]
+}

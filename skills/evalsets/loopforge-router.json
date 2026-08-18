@@ -1,0 +1,35 @@
+{
+  "skill": "loopforge-router",
+  "tasks": [
+    {
+      "id": "discovery-routing",
+      "prompt": "A new repository has no .loopforge directory, contains project.godot, and the user asks to turn a game idea into a small testable prototype. Provide the next-action routing plan as text only; do not call tools.",
+      "skill_files": ["SKILL.md"],
+      "expected_behavior": "Route through inspect/init/status, choose prototype discovery, require a falsifiable hypothesis and human approval, and avoid claiming implementation or approval already happened."
+    },
+    {
+      "id": "stale-prototype",
+      "prompt": "A Loopforge project is in PROTOTYPING with snapshot_status stale, a changed source tree, and old build/capture evidence. Provide the recovery and routing plan as text only; do not call tools.",
+      "skill_files": ["SKILL.md"],
+      "expected_behavior": "Validate and reconcile from history before mutation, preserve revision for optimistic writes, regenerate stale evidence, and route build-godot-game plus prototype workflow rather than advancing directly."
+    },
+    {
+      "id": "decision-routing",
+      "prompt": "A Loopforge project is in PROTOTYPE_DECISION with a human playtest report, automated build evidence, contradictory observations, and no release approval. Provide the next-action routing plan as text only; do not call tools.",
+      "skill_files": ["SKILL.md"],
+      "expected_behavior": "Route to prototype decision, distinguish automated evidence from human playtest, require cited evidence and confirmed approver/rationale, and leave release approval unknown."
+    },
+    {
+      "id": "vertical-slice-art-routing",
+      "prompt": "A Loopforge project is in VERTICAL_SLICE after a kept prototype. The team wants to generate a full art batch before agreeing on a visual target. Provide the next-action routing plan as text only; do not call tools.",
+      "skill_files": ["SKILL.md"],
+      "expected_behavior": "Route first to design-game because no approved design contract is stated, require approved scope before downstream production, then name direct-game-art's representative-target approval as a second independent gate before any batch; do not route engine integration or claim approvals prematurely."
+    },
+    {
+      "id": "approved-design-art-routing",
+      "prompt": "A Loopforge project is in VERTICAL_SLICE with a current, explicitly approved design contract. The user now asks for representative visual direction and a bounded environment asset family. Provide the next-action routing plan as text only; do not call tools.",
+      "skill_files": ["SKILL.md"],
+      "expected_behavior": "Recognize the current approved design handoff, route primary work to direct-game-art, use the engine skill only for bounded integration, require representative-target approval before the environment batch, and preserve status/revision/evidence guardrails."
+    }
+  ]
+}

@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "project": {
+    "experiment_id": "<experiment-id>",
+    "hypothesis_revision": 1,
+    "project_revision": 1,
+    "source_identity": "<source-identity>",
+    "platform": "<platform>"
+  },
+  "design_document": {
+    "path": "docs/game-design.md",
+    "checksum": "<sha256-after-writing>"
+  },
+  "design_nucleus": {
+    "summary": "<repeated-player-tradeoff>",
+    "behavior_change": "<observable-behavior-change>",
+    "differentiator": "<behavioral-difference-not-theme-only>",
+    "prototype_evidence_ids": []
+  },
+  "player_promise": {
+    "marketing": "<identity-action-conflict-payoff>",
+    "first_10_minutes": "<observable-first-session-promise>",
+    "long_term": "<mastery-expression-or-discovery-promise>"
+  },
+  "loops": {
+    "moment": {
+      "goal": "<goal>", "actions": ["<action>"], "choice": "<choice>",
+      "risk": "<risk>", "feedback": "<feedback>", "reward": "<reward>",
+      "next_constraint": "<next-constraint>"
+    },
+    "session": {
+      "goal": "<goal>", "actions": ["<action>"], "choice": "<choice>",
+      "risk": "<risk>", "feedback": "<feedback>", "reward": "<reward>",
+      "next_constraint": "<next-constraint>"
+    },
+    "meta": {
+      "goal": "<goal>", "actions": ["<action>"], "choice": "<choice>",
+      "risk": "<risk>", "feedback": "<feedback>", "reward": "<reward>",
+      "next_constraint": "<next-constraint>"
+    }
+  },
+  "scope": [
+    {
+      "id": "core-loop",
+      "name": "<scope-item>",
+      "bucket": "mvp",
+      "proves": "<promise-or-assumption>",
+      "dependencies": [],
+      "owner": "<owner-or-unknown>",
+      "delete_condition": "<condition>"
+    },
+    {
+      "id": "representative-slice",
+      "name": "<scope-item>",
+      "bucket": "vertical_slice",
+      "proves": "<quality-or-production-risk>",
+      "dependencies": ["core-loop"],
+      "owner": "<owner-or-unknown>",
+      "delete_condition": "<condition>"
+    }
+  ],
+  "systems": [
+    {
+      "id": "core-system",
+      "name": "<system-name>",
+      "serves_loop": "moment",
+      "scope_id": "core-loop",
+      "behavior_change": "<observable-change>",
+      "inputs": ["<input>"],
+      "outputs": ["<output>"],
+      "feedback": "<player-visible-feedback>",
+      "validation": "<smallest-test>",
+      "delete_condition": "<condition>"
+    }
+  ],
+  "assumptions": [
+    {
+      "id": "assumption-core",
+      "statement": "<testable-assumption>",
+      "confidence": "low",
+      "impact": "high",
+      "status": "planned",
+      "verification": "<method>",
+      "evidence_ids": []
+    }
+  ],
+  "risks": [
+    {
+      "id": "risk-core",
+      "cause": "<cause>",
+      "impact": "<impact>",
+      "mitigation": "<mitigation>",
+      "trigger": "<early-warning>",
+      "owner": "<owner-or-unknown>"
+    }
+  ],
+  "validation_plan": {
+    "dangerous_assumption_ids": ["assumption-core"],
+    "prototype": "<cheapest-complete-test>",
+    "pass_criteria": ["<observable-pass-criterion>"],
+    "fail_criteria": ["<observable-fail-criterion>"],
+    "next_investment_condition": "<condition>"
+  },
+  "approval": {
+    "status": "pending",
+    "approver_id": "",
+    "approver_name": "",
+    "rationale": "",
+    "approved_at": ""
+  }
+}

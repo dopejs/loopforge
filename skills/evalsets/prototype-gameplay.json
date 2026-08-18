@@ -1,0 +1,35 @@
+{
+  "skill": "prototype-gameplay",
+  "tasks": [
+    {
+      "id": "hypothesis",
+      "prompt": "Turn this idea into a planning deliverable: 'A one-screen game where the player charges a dash near moving hazards to multiply score.' Do not call tools or implement files.",
+      "skill_files": ["SKILL.md", "assets/hypothesis.md"],
+      "expected_behavior": "Produce one falsifiable player-behavior hypothesis, complete all hypothesis fields, constrain scope, define observable keep/kill signals, require approval before advancing, and avoid a broad feature list."
+    },
+    {
+      "id": "playtest",
+      "prompt": "Plan an external playtest for a current playable prototype where the implementer wants to coach the participant and summarize only positive feedback. Do not call tools.",
+      "skill_files": ["SKILL.md", "assets/playtest-protocol.md", "assets/playtest-report.json"],
+      "expected_behavior": "Require neutral tasks, consent, raw observations separate from interpretation, and honest confusion/failure/abandonment/replay fields; reject coaching and curated positives."
+    },
+    {
+      "id": "early-decision",
+      "prompt": "A prototype failed a technical frame-budget check before any external playtest. Plan the next decision step. Do not call tools.",
+      "skill_files": ["SKILL.md", "assets/hypothesis.md"],
+      "expected_behavior": "Use technical evidence for an early kill or refactor path, prohibit early keep, require human decision identity/rationale and cited evidence, and preserve the prior hypothesis when refactoring."
+    },
+    {
+      "id": "recovery",
+      "prompt": "A resumed Loopforge project reports a stale snapshot, one changed source file, old passing build evidence, and the last mutation returned expected-revision mismatch. Provide the safe recovery plan as text only; do not call tools.",
+      "skill_files": ["SKILL.md", "references/operating-contract.md"],
+      "expected_behavior": "Stop mutations, validate and dry-run reconciliation, apply only a derived-state rebuild from intact history, reread status after revision conflict, regenerate source-dependent evidence, and never edit event/state/checksum files or blind-retry."
+    },
+    {
+      "id": "consent-and-mixed-evidence",
+      "prompt": "An external participant withdrew consent after a coached session. Notes show one voluntary replay but also confusion and a build mismatch. The team wants to import the report and keep the prototype. Provide an evidence review and next-step plan as text only; do not call tools.",
+      "skill_files": ["SKILL.md", "references/evidence-review.md", "assets/decision-review.md"],
+      "expected_behavior": "Refuse import/citation after consent withdrawal, preserve mixed and contradicting evidence without averaging it into success, identify coaching and build mismatch as confounds, prohibit keep on invalid evidence, remain at PLAYTEST_REQUIRED, and propose a fresh neutral session on the evidenced build."
+    }
+  ]
+}

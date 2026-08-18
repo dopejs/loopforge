@@ -1,0 +1,35 @@
+{
+  "skill": "direct-game-art",
+  "tasks": [
+    {
+      "id": "representative-target-gate",
+      "prompt": "The team has a validated one-screen hazard-dash prototype and asks for 50 polished character, environment, UI, and VFX assets immediately. Produce the art planning deliverable as text only; do not call tools or generate images.",
+      "skill_files": ["SKILL.md", "assets/art-direction.md", "assets/representative-target.md", "references/art-direction.md"],
+      "expected_behavior": "Bind art direction to gameplay/platform needs, define a narrow representative runtime target and inspectable acceptance criteria, keep approval pending with required identity/rationale, and prohibit batch production before explicit target approval."
+    },
+    {
+      "id": "canonical-sprite-pipeline",
+      "prompt": "A game already has an approved canonical player idle image. Plan a four-state animated sprite family without losing identity or silently discarding human frame selections. Provide text only and do not call tools.",
+      "skill_files": ["SKILL.md", "references/art-direction.md", "references/runtime-review.md"],
+      "expected_behavior": "Reuse and lock the canonical identity, define states/timing/pivots and a manifest source of truth, distinguish raw/curated/runtime layers, apply curation downstream, use deterministic cleanup/export, and require both frame integrity and motion-continuity review."
+    },
+    {
+      "id": "unsafe-manifest",
+      "prompt": "Review a proposed asset batch whose files use ../shared paths, duplicate IDs, unknown web-download licenses, no checksums, and runtime dimensions that differ from the manifest. The art lead wants to import it anyway. Provide the review and next-step plan as text only; do not call tools.",
+      "skill_files": ["SKILL.md", "references/provenance.md", "assets/asset-review.md"],
+      "expected_behavior": "Block import, identify path escape, duplicate identity, unresolved provenance/license, missing checksums, and dimension mismatch; preserve unknown status, require manifest validation, and avoid equating visual appeal with technical or legal readiness."
+    },
+    {
+      "id": "provider-unavailable",
+      "prompt": "The requested image-generation provider is unavailable and no paid API use has been approved. Prepare the useful fallback for a new environment prop family as text only; do not call tools or generate images.",
+      "skill_files": ["SKILL.md", "assets/asset-manifest.json", "references/provenance.md"],
+      "expected_behavior": "Produce a complete asset brief and planned manifest contract, leave generation and inspection claims unknown, avoid inventing provider output, preserve provenance requirements, and require confirmation before paid or proprietary-reference upload."
+    },
+    {
+      "id": "stale-runtime-review",
+      "prompt": "The team presents an attractive source PNG and old mockup as approval evidence, but the runtime build changed after the manifest and no current in-engine capture or animation preview exists. Provide the art review plan as text only; do not call tools.",
+      "skill_files": ["SKILL.md", "references/runtime-review.md", "assets/asset-review.md"],
+      "expected_behavior": "Mark old evidence stale, refuse ART_APPROVED or PRODUCTION_READY, validate the current manifest/runtime export, capture the actual play state at target settings, review motion as motion, separate automated facts from human aesthetic approval, and provide one next action."
+    }
+  ]
+}

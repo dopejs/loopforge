@@ -1,0 +1,25 @@
+{
+  "build_identity": "<Exact evidenced build or source identity>",
+  "participant_context": "<Relevant experience, relationship, and first exposure status>",
+  "consent_status": "obtained",
+  "assistance_given": "<None, or every intervention and reason>",
+  "raw_observations": [
+    "<Timestamped or ordered observable behavior without interpretation>"
+  ],
+  "comprehension_time": "<Duration or not observed>",
+  "confusion_points": [
+    "<Observed confusion>"
+  ],
+  "failure_points": [
+    "<Observed failure>"
+  ],
+  "abandonment_points": [
+    "<Where the participant stopped or disengaged>"
+  ],
+  "strategies": [
+    "<Observed strategy>"
+  ],
+  "replay_behavior": "<Voluntary replay, prompted replay, or no replay>",
+  "interpretation": "<Separate analysis, confounds, sampling limitations, confidence, and relation to keep/kill signals>",
+  "sensitive_data": "<What was collected, retention limit, and deletion plan; use none when applicable>"
+}

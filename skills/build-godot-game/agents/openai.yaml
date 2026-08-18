@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Godot Game"
+  short_description: "Implement and verify small Godot gameplay prototypes"
+  default_prompt: "Use $build-godot-game to implement and verify this Godot gameplay prototype."

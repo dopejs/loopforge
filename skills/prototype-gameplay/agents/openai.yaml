@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prototype Gameplay"
+  short_description: "Run an evidence-gated gameplay prototype workflow"
+  default_prompt: "Use $prototype-gameplay to take this game idea through one auditable hypothesis, playable test, external playtest, and decision."

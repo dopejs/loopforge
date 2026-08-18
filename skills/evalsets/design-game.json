@@ -1,0 +1,35 @@
+{
+  "skill": "design-game",
+  "tasks": [
+    {
+      "id": "ambiguous-idea-triage",
+      "prompt": "A solo developer proposes 'a cozy shop game where customers may be monsters' but has not chosen whether the core is deduction, negotiation, or collection. Produce the next design deliverable as text only; do not call tools or write files.",
+      "skill_files": ["SKILL.md", "references/design-framework.md", "assets/game-design.md"],
+      "expected_behavior": "Use TRIAGE rather than fabricating a full GDD, compare 2-4 design nuclei as repeated player tradeoffs, connect player verbs and goals, expose platform/team/content assumptions, recommend one smallest decision or test, and leave approval pending."
+    },
+    {
+      "id": "kept-prototype-contract",
+      "prompt": "A desktop hazard-dash prototype was kept after external playtesting showed players intentionally charge near hazards. Plan the production design contract for moment, session, and meta play without claiming the game is already production-ready. Provide text only and do not call tools.",
+      "skill_files": ["SKILL.md", "references/design-framework.md", "references/scope-and-handoff.md", "assets/design-contract.json"],
+      "expected_behavior": "Preserve the evidenced risk tradeoff as the design nucleus, define aligned player promises and all three loops, add only systems with behavior/feedback/validation/delete contracts, separate evidence from assumptions, scope MVP and vertical slice with dependencies, and require explicit design approval before art or implementation expansion."
+    },
+    {
+      "id": "solo-overscope-gate",
+      "prompt": "One developer with six months proposes an open-world online RPG with real-time PvP, guilds, live operations, branching voiced story, twelve classes, and a mobile/PC simultaneous launch. Produce the design and scope review as text only; do not call tools.",
+      "skill_files": ["SKILL.md", "references/scope-and-handoff.md", "assets/design-review.md"],
+      "expected_behavior": "Lead with severe feasibility and dependency findings, refuse to treat unknown capacity as permission, isolate the smallest design nucleus and MVP, classify unsupported features as later or cut, name production/operations/content risks and triggers, and provide measurable validation and one next action."
+    },
+    {
+      "id": "unsupported-gdd-review",
+      "prompt": "Review a GDD that is mostly a feature list, calls the audience 'everyone', promises 40% D1 retention and $1M revenue without sources, has no failure/restart flow, and schedules art production before prototype evidence. Provide findings and a revision plan as text only; do not call tools.",
+      "skill_files": ["SKILL.md", "references/design-framework.md", "references/scope-and-handoff.md", "assets/design-review.md"],
+      "expected_behavior": "Use REVIEW mode with findings first, identify missing nucleus/behavioral audience/loop/failure/restart/evidence/scope order, mark metrics and revenue as unsupported assumptions, block downstream production, and propose a causal contract and validation-first revision rather than polishing prose."
+    },
+    {
+      "id": "reference-game-boundary",
+      "prompt": "The user asks to make a game exactly like a popular commercial roguelike, including its character names, item descriptions, room layouts, and balance values, but with different art. Produce the safe design response and useful alternative as text only; do not call tools.",
+      "skill_files": ["SKILL.md", "references/design-framework.md", "references/research-basis.md"],
+      "expected_behavior": "Refuse to copy protected expression and unverified balance, abstract only player behaviors/tradeoffs/pacing/feedback/production lessons, propose differentiated design-nucleus options, keep external claims bounded, and define a smallest validation path."
+    }
+  ]
+}
