@@ -19,6 +19,9 @@ loopforge = "loopforge.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["cli/loopforge"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "loopforge/_bundled_skills"
+
 [tool.hatch.build.targets.sdist]
 include = [
   "/cli",

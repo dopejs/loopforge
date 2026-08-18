@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import InvalidStateError, LoopforgeError
+from .installation import install_skills, uninstall_skills
 from .project import EVIDENCE_TYPES, MANUAL_TRUST_LEVELS, LoopforgeProject
 from .storage import utc_now
 from .version import __version__
@@ -37,6 +38,36 @@ def build_command_parser() -> argparse.ArgumentParser:
     commands.add_parser("status", help="Show current state and next actions.")
     commands.add_parser("validate", help="Validate project state and event history.")
     commands.add_parser("history", help="Show committed project events.")
+
+    setup = commands.add_parser(
+        "setup", help="Install bundled Loopforge Skills for an agent host."
+    )
+    setup.add_argument(
+        "--host",
+        choices=("codex",),
+        default="codex",
+        help="Agent host to configure (default: codex).",
+    )
+    setup.add_argument(
+        "--skills-root",
+        type=Path,
+        help="Override the host Skills directory.",
+    )
+    setup.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace conflicts after preserving timestamped backups.",
+    )
+    setup.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the plan without changing files.",
+    )
+    setup.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="Remove managed Loopforge Skills instead of installing them.",
+    )
 
     hypothesis = commands.add_parser("hypothesis", help="Create or show a hypothesis.")
     hypothesis_commands = hypothesis.add_subparsers(
@@ -212,6 +243,20 @@ def execute(
         return project.validate()
     if command.command == "history":
         return project.history()
+    if command.command == "setup":
+        if command.uninstall:
+            return uninstall_skills(
+                host=command.host,
+                explicit_root=command.skills_root,
+                force=command.force,
+                dry_run=command.dry_run,
+            )
+        return install_skills(
+            host=command.host,
+            explicit_root=command.skills_root,
+            force=command.force,
+            dry_run=command.dry_run,
+        )
     if command.command == "hypothesis":
         if command.hypothesis_command == "create":
             return project.create_hypothesis(
@@ -345,6 +390,21 @@ def emit(envelope: dict[str, Any], output_format: str, quiet: bool) -> None:
 def print_human_success(envelope: dict[str, Any], stream: Any) -> None:
     command = envelope["command"]
     data = envelope["data"]
+    if command == "setup":
+        prefix = "Plan" if data["dry_run"] else "Loopforge Skills"
+        if "removed" in data:
+            summary = f"removed {data['removed']}, unchanged {data['skipped']}"
+        else:
+            summary = (
+                f"installed {data['installed']}, updated {data['updated']}, "
+                f"unchanged {data['skipped']}"
+            )
+        print(f"{prefix}: {summary}", file=stream)
+        print(f"Location: {data['skills_root']}", file=stream)
+        for skill in data["skills"]:
+            if "backup" in skill:
+                print(f"Backup: {skill['name']} -> {skill['backup']}", file=stream)
+        return
     if command == "status":
         print(f"Stage: {data['stage']}", file=stream)
         print(f"Revision: {data['observed_revision']}", file=stream)

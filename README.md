@@ -27,7 +27,66 @@ scope gate, production risks, and vertical-slice handoffs.
 - Git;
 - Godot 4 only when using the Godot build workflow.
 
-### Clone and verify
+### Install Loopforge
+
+```bash
+uv tool install git+https://github.com/dopejs/loopforge.git
+loopforge setup --host codex
+```
+
+The package includes all official Loopforge Skills. `loopforge setup` copies
+them into `$CODEX_HOME/skills`, or `~/.codex/skills` when `CODEX_HOME` is not
+set. It is safe to run repeatedly: unchanged Skills are skipped and updates are
+applied only to installations managed by Loopforge.
+
+Run the command from the root of a game repository to initialize it:
+
+```bash
+loopforge inspect --format json
+loopforge init --format json
+loopforge doctor --format json
+loopforge status --format json
+```
+
+Then invoke `$loopforge-router` in Codex. It reads durable project state and
+routes the next action to gameplay prototyping, Godot implementation, game
+design, or art production.
+
+### Update
+
+```bash
+uv tool install --force git+https://github.com/dopejs/loopforge.git
+loopforge setup --host codex
+```
+
+Before changing files, inspect what an update would do:
+
+```bash
+loopforge setup --host codex --dry-run
+```
+
+Loopforge refuses to overwrite a Skill that has local changes or an unmanaged
+Skill with the same name. After reviewing the conflict, `--force` preserves the
+existing directory as a timestamped backup before installing the bundled copy.
+For reproducible environments, append a reviewed tag or commit to the Git URL,
+for example `git+https://github.com/dopejs/loopforge.git@<commit>`.
+
+### Uninstall
+
+Remove the managed Skills before removing the CLI:
+
+```bash
+loopforge setup --host codex --uninstall
+uv tool uninstall loopforge
+```
+
+Uninstall also refuses to remove locally modified Skills. `--force` moves each
+modified Skill to a timestamped backup instead of deleting it. Uninstalling the
+CLI and Skills does not remove project-owned `.loopforge` history or evidence.
+
+### Develop from source
+
+Clone the repository only when developing Loopforge or changing its Skills:
 
 ```bash
 git clone https://github.com/dopejs/loopforge.git
@@ -37,71 +96,15 @@ uv run loopforge --help
 uv run python -m unittest discover -s tests -v
 ```
 
-`uv sync --locked` creates an isolated environment from the committed lockfile.
-Use this setup when developing Loopforge or changing its Skills.
-
-### Install the CLI
-
-From the cloned repository:
+To test the repository Skills without replacing a personal installation, use a
+temporary Skills root:
 
 ```bash
-uv tool install .
-loopforge --help
+uv run loopforge setup --skills-root /tmp/loopforge-skills
 ```
 
-To update the tool after pulling a newer revision:
-
-```bash
-uv tool install --force .
-```
-
-The package has not been published to PyPI, so install it from a reviewed clone
-or a pinned Git revision rather than assuming `uv tool install loopforge` refers
-to this project.
-
-### Install the Codex Skills
-
-The portable Skills live under [`skills/`](skills/). For a personal Codex
-installation, symlink each Skill into `~/.codex/skills` from the repository
-root:
-
-```bash
-mkdir -p ~/.codex/skills
-ln -s "$PWD/skills/loopforge-router" ~/.codex/skills/loopforge-router
-ln -s "$PWD/skills/prototype-gameplay" ~/.codex/skills/prototype-gameplay
-ln -s "$PWD/skills/build-godot-game" ~/.codex/skills/build-godot-game
-ln -s "$PWD/skills/design-game" ~/.codex/skills/design-game
-ln -s "$PWD/skills/direct-game-art" ~/.codex/skills/direct-game-art
-```
-
-The commands intentionally do not overwrite an existing installation. Remove or
-rename an older Skill only after reviewing local changes. Other Agent
-Skills-compatible hosts can load the same directories using their host-specific
-Skill path.
-
-### Initialize a game project
-
-Run the installed CLI from the root of the game repository:
-
-```bash
-loopforge inspect --format json
-loopforge init --format json
-loopforge doctor --format json
-loopforge status --format json
-```
-
-Then invoke `$loopforge-router` in the coding agent. It reads durable project
-state and routes the next action to gameplay prototyping, Godot implementation,
-game design, or art production without treating chat history as project state.
-
-### Uninstall
-
-```bash
-uv tool uninstall loopforge
-```
-
-Remove only the Skill symlinks that point to this clone. Project-owned
-`.loopforge` history and evidence are not removed by uninstalling the CLI.
+The package has not been published to PyPI, so do not assume
+`uv tool install loopforge` refers to this project.
 
 ## Product principles
 

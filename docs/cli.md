@@ -5,11 +5,12 @@
 The `loopforge` CLI is a deterministic project-state and evidence tool. It does
 not contain an LLM, judge subjective quality, or replace the coding agent.
 
-The current alpha implements `init`, `inspect`, `doctor`, `status`, `validate`,
-`history`, `reconcile`, `hypothesis create/show`, `gate check`, `advance`, `run
-build/test`, `capture screenshot`, `playtest create/import`, `decide`, and
-`evidence add/list`. Real Godot runtime validation and production-stage skills
-remain planned work; their contracts below describe the target MVP interface.
+The current alpha implements `setup`, `init`, `inspect`, `doctor`, `status`,
+`validate`, `history`, `reconcile`, `hypothesis create/show`, `gate check`,
+`advance`, `run build/test`, `capture screenshot`, `playtest create/import`,
+`decide`, and `evidence add/list`. Real Godot runtime validation and
+production-stage skills remain planned work; their contracts below describe the
+target MVP interface.
 
 ## 2. Command principles
 
@@ -36,6 +37,26 @@ control. A mismatch leaves state unchanged and returns exit code 5. Agent-driven
 workflows should pass the revision returned by the latest read command.
 
 ## 3. MVP commands
+
+### Product installation
+
+```bash
+uv tool install git+https://github.com/dopejs/loopforge.git
+loopforge setup --host codex
+loopforge setup --host codex --dry-run
+loopforge setup --host codex --uninstall
+```
+
+`setup` installs the Skills bundled in the Loopforge distribution into the
+Codex Skills directory. It resolves that directory from `CODEX_HOME` or
+`~/.codex`, and accepts `--skills-root` for another host adapter or an isolated
+test environment. Installation is idempotent and records a management marker
+in each Skill. Local changes and unmanaged conflicts are rejected by default;
+`--force` preserves a timestamped backup before replacement or uninstall.
+
+The JSON result is part of the CLI envelope contract and reports each Skill's
+action (`install`, `update`, `skip`, or `uninstall`), digest, destination, and
+backup path when one was created.
 
 ### Project lifecycle
 
