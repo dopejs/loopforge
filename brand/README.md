@@ -16,8 +16,15 @@ paired with a Space Grotesk Bold wordmark (outlined to paths).
 | `svg/loopforge-mark-mono-ink.svg` | Single-color mark, `#0D1420`, for light backgrounds |
 | `svg/loopforge-mark-mono-paper.svg` | Single-color mark, `#F4F6FA`, for dark backgrounds |
 | `svg/loopforge-favicon.svg` | Simplified mark (no weave, heavier stroke) for ≤32 px |
+| `svg/loopforge-badge-square.svg` | Full-bleed square badge (no rounded corners) for apple-touch-icon / maskable contexts |
 | `png/badge-dark-512.png`, `png/badge-dark-180.png` | Raster app icons |
 | `png/favicon-32.png`, `png/favicon-16.png` | Raster favicons |
+| `png/favicon.ico` | Multi-resolution ICO (16 + 32), legacy `/favicon.ico` path |
+| `png/apple-touch-icon.png` | 180 × 180, opaque full-bleed (iOS composites transparency on black) |
+| `png/icon-192.png` | PWA manifest icon |
+| `png/social-preview.png` | 1280 × 640 GitHub social preview (upload in repo Settings → General) |
+| `site.webmanifest` | PWA manifest template — adjust `name`/`description` per deployment |
+| `ascii.txt` | CLI banner variants: `l∞pforge` (Unicode) / `l8pforge` (pure ASCII) |
 
 ## Construction
 
@@ -48,6 +55,22 @@ paired with a Space Grotesk Bold wordmark (outlined to paths).
 - **Do not** re-tint the gradient, remove or change the −12° tilt, add
   shadows/effects, redraw the weave below 48 px, or place the ember mark on
   warm/orange backgrounds (use mono-paper instead).
+
+## Web integration (favicon kit)
+
+The docs site does not exist yet; when it ships, copy these to its web root
+(`favicon.svg` = a copy of `svg/loopforge-favicon.svg`):
+
+```html
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+```
+
+`favicon.ico` stays first as the legacy fallback; modern browsers pick the
+SVG. The social preview image cannot be referenced from the repo — upload
+`png/social-preview.png` in GitHub repo Settings → General → Social preview.
 
 ## Regenerating
 

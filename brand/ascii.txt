@@ -1,0 +1,17 @@
+Loopforge CLI banner — Unicode and pure-ASCII variants.
+
+Unicode (preferred, terminals with UTF-8):
+
+  l∞pforge
+
+Pure ASCII fallback (no ∞ glyph available):
+
+  l8pforge
+
+Full form:
+
+  loopforge
+
+Usage note: the loop glyph stands in for the double-o, matching the logo
+wordmark. Keep it lowercase; no trailing tagline in the banner itself —
+`loopforge status` already reports state.
