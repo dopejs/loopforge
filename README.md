@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/svg/loopforge-horizontal-dark.svg">
+    <img alt="Loopforge" src="brand/svg/loopforge-horizontal-light.svg" width="340">
+  </picture>
+</p>
+
 # Loopforge
 
 [English](README.md) | [简体中文](README.zh-CN.md)
