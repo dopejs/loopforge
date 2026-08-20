@@ -9,80 +9,166 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Loopforge is an independent local game-development agent. It uses internal
-Skills and deterministic workflow tooling to move from a game idea to tested,
-evidence-backed playable builds without hiding project state inside a chat.
+Loopforge is an independent, local game-development agent. It works inside a
+normal game repository, turns ideas into playable experiments, gathers
+technical and human evidence, and helps make explicit keep, kill, or refactor
+decisions.
 
-The Loopforge Agent is the product control plane. Its CLI remains available for
-headless automation and debugging, while its Skills are versioned internal
-capabilities rather than the primary user interface.
+The Loopforge Agent is the product control plane. The desktop Workbench is its
+primary user interface. The CLI and versioned Skills remain available as
+internal execution, automation, and debugging capabilities; users should not
+have to start the Agent or orchestrate those capabilities manually.
 
-## Local agent workbench
+## The product
 
-Loopforge provides a Kura-powered local game-development workbench:
+The Workbench opens a game repository as a project through the native folder
+picker. Selecting a project starts or reconnects its Loopforge Agent
+automatically and loads constrained project context without exposing provider
+credentials, environment variables, or access tokens.
 
-- the independent Loopforge Agent owns project context, planning, internal
-  Skills and deterministic tools;
-- Kura supplies generic model, session and runtime capabilities without
-  containing Loopforge domain behavior;
-- the Tauri + React client talks only to the Loopforge Agent contract;
-- Deckle (`@dopejs/deckle-*`) owns visual artifacts, canvases, and revisions;
-- Doper (`@dopejs/doper`) owns high-performance native rendering, scrolling,
-  editing, and input;
-- versioned JSON Schemas in `contracts/` belong to Loopforge and are translated
-  by application-owned adapters into the public Deckle, Doper, and Kura
-  contracts. Those libraries do not depend on Loopforge domain types. Kura is
-  the runtime source of truth, while Loopforge remains authoritative for
-  game-project state and evidence.
+The interface is organized around the project rather than the Agent process:
 
-In an initialized game project, the first local-workbench workflow is:
+- the project menu switches repositories and project-level views;
+- the project header contains project identity and necessary actions;
+- the main work area hosts mode-specific game-development tools;
+- a floating mode toolbar switches between exploration, design, build, and
+  test contexts;
+- the Agent chat remains available beside the work rather than replacing it.
 
-```bash
-loopforge agent start --format json
-loopforge agent status --format json
-loopforge agent context --format json
+Project state and evidence stay in the game repository. Chat history is not the
+only record of what happened.
+
+## Architecture and ownership
+
+```text
+User
+  |
+  v
+Workbench (Tauri + React)
+  |-- opens projects and presents tools, evidence, and chat
+  |-- owns only the Loopforge Agent sidecar lifecycle
+  v
+Loopforge Agent
+  |-- owns project context, planning, sessions, and tool selection
+  |-- invokes internal Skills and deterministic operations
+  v
+Loopforge core + CLI adapter ----> game repository + .loopforge state
+  |
+  `----> Kura generic model/session/runtime capabilities
 ```
 
-`agent context` exposes only constrained project metadata such as the project
-path, stage, revision, and capabilities. It does not include environment
-variables, provider credentials, or access tokens.
+The boundaries are deliberate:
 
-To build the desktop client from source, initialize its pinned Kura submodule:
+- `apps/agent` contains Loopforge's domain Agent and user-visible behavior.
+- `apps/workbench` contains the desktop product interface and its narrow native
+  boundary.
+- `cli` contains deterministic project operations plus a headless compatibility
+  and diagnostics adapter. It is not the product control plane.
+- `skills` contains versioned Agent capabilities for workflows requiring
+  contextual judgment. They are not the primary UI.
+- `contracts` contains Loopforge-owned, versioned wire and project schemas.
+- Kura supplies generic model, session, and runtime behavior. It contains no
+  Loopforge routes, types, files, or domain state.
+- Deckle and Doper are public libraries for visual artifacts and native
+  rendering. Loopforge-specific behavior belongs in application adapters, not
+  in those libraries.
+
+The release application embeds the Loopforge Agent and its pinned Kura sidecar.
+The Workbench talks to the Loopforge Agent contract; it does not call Kura or
+spawn workflow commands directly.
+
+## Repository layout
+
+```text
+loopforge/
+├── apps/
+│   ├── agent/                 # independent Loopforge Agent
+│   └── workbench/             # Tauri + React desktop application
+│       └── vendor/kura/       # pinned generic runtime submodule
+├── cli/                       # deterministic core and headless adapter
+├── contracts/                 # Loopforge-owned versioned schemas
+├── skills/                    # internal Agent workflow capabilities
+├── tests/                     # Agent, CLI, and Skill tests
+├── docs/                      # product, architecture, and decisions
+└── dev.sh                     # root development launcher
+```
+
+## Develop the Workbench
+
+Prerequisites:
+
+- Git;
+- Node.js 22 and pnpm;
+- Rust and Cargo;
+- Python 3.11+ and [uv](https://docs.astral.sh/uv/);
+- Godot 4 only when developing or testing the Godot workflow.
+
+Start the complete native development environment from the repository root:
+
+```bash
+git clone https://github.com/dopejs/loopforge.git
+cd loopforge
+./dev.sh
+```
+
+On the first run, the launcher initializes the pinned Kura submodule, installs
+Workbench dependencies, and builds missing Agent and Kura sidecars. Later runs
+reuse those sidecars and start the native Tauri app with Vite hot module
+replacement.
+
+Frontend React and CSS changes update without rebuilding release packages.
+Rust or native configuration changes restart the Tauri development process.
+Rebuild sidecars only when their code changes:
+
+```bash
+./dev.sh --rebuild-agent
+./dev.sh --rebuild-kura
+./dev.sh --rebuild-sidecars
+```
+
+For browser-only interface work:
+
+```bash
+cd apps/workbench
+pnpm dev
+```
+
+Build the release desktop application and its embedded sidecars with:
 
 ```bash
 git submodule update --init --recursive
 cd apps/workbench
-pnpm install
+pnpm install --frozen-lockfile
 pnpm build:desktop
 ```
 
-The release build embeds both the Loopforge Agent and the submodule's `dope-cli`
-binary as Tauri resources, so end users install neither sidecar separately.
-`dope-cli` is Kura's current upstream package name.
+## Internal CLI and Skills
 
-Start the development environment directly from the repository root:
+The Python package is useful for developing deterministic operations, running
+headless automation, and diagnosing project state. It is not required to use a
+bundled Workbench release.
 
 ```bash
-./dev.sh
+uv sync --locked
+uv run loopforge --help
+uv run loopforge inspect --format json
+uv run loopforge doctor --format json
+uv run python -m unittest discover -s tests -v
 ```
 
-The first run installs Workbench dependencies, initializes the Kura submodule,
-and builds any missing Agent and Kura sidecars. Later runs reuse those sidecars
-and start the native Tauri shell with Vite hot module replacement without
-producing release packages. After changing Agent or Kura code, use
-`--rebuild-agent`, `--rebuild-kura`, or `--rebuild-sidecars`. Use `pnpm dev`
-from `apps/workbench` when only the browser shell is needed.
+The package also contains the official Loopforge Skills. Developers testing
+Skill installation can use an isolated destination:
 
-Add game projects with the Workbench's native folder picker. Selecting a
-project automatically starts or reconnects its Loopforge Agent; users do not
-manually manage Agent startup.
+```bash
+uv run loopforge setup --skills-root /tmp/loopforge-skills
+```
 
-## What Loopforge provides
+The package has not been published to PyPI. Do not assume
+`uv tool install loopforge` refers to this repository.
 
-### An evidence-backed game workflow
+## Evidence-backed workflow
 
-Loopforge organizes work around a repeatable learning loop rather than a
-feature checklist:
+Loopforge organizes game development around a repeatable learning loop:
 
 ```text
 game idea -> falsifiable hypothesis -> smallest playable experiment
@@ -90,144 +176,37 @@ game idea -> falsifiable hypothesis -> smallest playable experiment
            -> justified investment in design, art, and a vertical slice
 ```
 
-Every stage has required outputs and gates. A prototype can be killed or
-refactored without pretending that unfinished work is a failure.
+Its current internal workflow capabilities cover routing, gameplay
+prototyping, Godot 4 implementation, game design, and art direction. The
+deterministic core records hash-chained events, stage transitions, build and
+test evidence, playtest records, and recovery state under `.loopforge`.
 
-### Five production Skills
+Technical correctness, visual quality, playtest observations, and evidence of
+fun remain separate claims. Creative, playtest, scope, and release-sensitive
+decisions stay with a human reviewer.
 
-- `loopforge-router` reads project state and selects the next applicable
-  workflow.
-- `prototype-gameplay` turns an idea into a bounded prototype, playtest, and
-  explicit decision.
-- `build-godot-game` implements and verifies a small Godot 4 gameplay loop.
-- `design-game` delivers a complete, user-facing game design document (GDD), a
-  synchronized scoped contract, and an evidence-aware review for a kept
-  prototype.
-- `direct-game-art` defines art direction, representative targets, asset
-  manifests, provenance, and runtime visual review.
+## Current scope
 
-### A deterministic project CLI
-
-The `loopforge` CLI stores project state in `.loopforge` and provides:
-
-- hash-chained events, file locking, snapshots, and recovery checks;
-- hypothesis records, stage gates, and atomic keep/kill/refactor decisions;
-- Godot build and test commands with structured run evidence;
-- evidence registration with checksums and source identity tracking;
-- `status`, `doctor`, `validate`, and JSON output for agent automation.
-
-### Guardrails for production work
-
-Loopforge keeps technical correctness, visual quality, playtest observations,
-and evidence of fun separate. It refuses unsafe state transitions, detects
-stale artifacts, preserves local Skill changes during updates, and leaves
-creative and release-sensitive decisions with a human reviewer.
-
-### Current scope
-
-The project is in alpha. The independent Agent, CLI, workflow contracts, and repository Skills are
-implemented and tested; the current engine workflow focuses on Godot 4.
-Full real-engine validation, broader engine adapters, hosted collaboration,
-and release-production automation are not yet part of the MVP.
-
-## Installation
-
-### Prerequisites
-
-- Python 3.11 or newer;
-- [uv](https://docs.astral.sh/uv/getting-started/installation/);
-- Git;
-- Godot 4 only when using the Godot build workflow.
-
-### Install Loopforge
-
-```bash
-uv tool install git+https://github.com/dopejs/loopforge.git
-loopforge setup --host codex
-```
-
-The package includes all official Loopforge Skills. `loopforge setup` copies
-them into the shared Agent Skills directory at `~/.agents/skills`. It is safe
-to run repeatedly: unchanged Skills are skipped and updates are applied only to
-installations managed by Loopforge.
-
-Run the command from the root of a game repository to initialize it:
-
-```bash
-loopforge inspect --format json
-loopforge init --format json
-loopforge doctor --format json
-loopforge status --format json
-```
-
-Then invoke `$loopforge-router` in Codex. It reads durable project state and
-routes the next action to gameplay prototyping, Godot implementation, game
-design, or art production.
-
-### Update
-
-```bash
-uv tool install --force git+https://github.com/dopejs/loopforge.git
-loopforge setup --host codex
-```
-
-Before changing files, inspect what an update would do:
-
-```bash
-loopforge setup --host codex --dry-run
-```
-
-Loopforge refuses to overwrite a Skill that has local changes or an unmanaged
-Skill with the same name. After reviewing the conflict, `--force` preserves the
-existing directory as a timestamped backup before installing the bundled copy.
-For reproducible environments, append a reviewed tag or commit to the Git URL,
-for example `git+https://github.com/dopejs/loopforge.git@<commit>`.
-
-### Uninstall
-
-Remove the managed Skills before removing the CLI:
-
-```bash
-loopforge setup --host codex --uninstall
-uv tool uninstall loopforge
-```
-
-Uninstall also refuses to remove locally modified Skills. `--force` moves each
-modified Skill to a timestamped backup instead of deleting it. Uninstalling the
-CLI and Skills does not remove project-owned `.loopforge` history or evidence.
-
-### Develop from source
-
-Clone the repository only when developing Loopforge or changing its Skills:
-
-```bash
-git clone https://github.com/dopejs/loopforge.git
-cd loopforge
-uv sync --locked
-uv run loopforge --help
-uv run python -m unittest discover -s tests -v
-```
-
-To test the repository Skills without replacing a personal installation, use a
-temporary Skills root:
-
-```bash
-uv run loopforge setup --skills-root /tmp/loopforge-skills
-```
-
-The package has not been published to PyPI, so do not assume
-`uv tool install loopforge` refers to this project.
+Loopforge is in alpha. The independent Agent, Workbench shell, deterministic
+core, CLI adapter, workflow contracts, and repository Skills are implemented
+and tested. The current engine workflow focuses on Godot 4. Mode-specific
+Workbench tools, broader engine adapters, hosted collaboration, and release
+production automation are still under development.
 
 ## Product principles
 
-- Optimize for learning whether a game idea works, not merely for completing a
+- Make the independent Agent the product control plane and the Workbench the
+  primary user experience.
+- Keep CLI and Skills available behind the Agent boundary instead of requiring
+  users to orchestrate them.
+- Optimize for learning whether a game idea works, not merely completing a
   feature list.
-- Keep creative judgment in skills and human review.
-- Keep state transitions, validation, evidence, and recovery in the CLI.
-- Use existing coding agents instead of building a proprietary agent runtime.
+- Keep state transitions, evidence, validation, and recovery deterministic and
+  inspectable.
+- Keep Loopforge domain behavior out of generic public libraries.
 - Make every meaningful iteration playable or inspectable.
-- Distinguish technical correctness, visual quality, human playtesting, and
-  evidence of fun.
+- Preserve human authority over creative direction, playtest interpretation,
+  scope, and release decisions.
 
 ## Documents
 
@@ -237,24 +216,13 @@ The package has not been published to PyPI, so do not assume
 - [Stage and gate contracts](docs/gates.md)
 - [CLI design](docs/cli.md)
 - [Skill system](docs/skills.md)
-- [Repository skills](skills/README.md)
-- [Reference research](docs/research.md)
+- [Repository Skills](skills/README.md)
 - [Roadmap](docs/planning/roadmap.md)
 - [MVP plan](docs/planning/mvp.md)
 - [Open questions](docs/planning/open-questions.md)
-- [ADR 0001: Product shape](docs/decisions/0001-product-shape.md)
-- [ADR 0002: Quality claims](docs/decisions/0002-quality-claims.md)
-- [ADR 0003: State and recovery](docs/decisions/0003-state-transactions-and-recovery.md)
-- [ADR 0004: Evidence and claims](docs/decisions/0004-evidence-identity-and-claims.md)
-- [ADR 0005: CLI language](docs/decisions/0005-cli-language.md)
+- [Architecture decisions](docs/decisions/)
 
 ## License
 
 Copyright 2026 Loopforge contributors. Licensed under the
 [Apache License 2.0](LICENSE).
-
-## Working definition
-
-> Loopforge helps an existing coding agent repeatedly turn game ideas into
-> playable experiments, collect evidence, and make explicit keep, kill, or
-> refactor decisions.
