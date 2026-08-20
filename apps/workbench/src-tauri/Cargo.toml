@@ -4,6 +4,7 @@ version = "0.1.0-alpha.1"
 description = "Native Loopforge game development workbench"
 authors = ["Loopforge contributors"]
 edition = "2021"
+license = "Apache-2.0"
 
 [lib]
 name = "loopforge_workbench_lib"

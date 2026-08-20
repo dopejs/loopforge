@@ -248,6 +248,11 @@ The package has not been published to PyPI, so do not assume
 - [ADR 0004: Evidence and claims](docs/decisions/0004-evidence-identity-and-claims.md)
 - [ADR 0005: CLI language](docs/decisions/0005-cli-language.md)
 
+## License
+
+Copyright 2026 Loopforge contributors. Licensed under the
+[Apache License 2.0](LICENSE).
+
 ## Working definition
 
 > Loopforge helps an existing coding agent repeatedly turn game ideas into

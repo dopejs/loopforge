@@ -57,17 +57,11 @@ failure cases before accepting an engine ADR.
 
 ## 3. Repository license
 
-The repository currently has no license.
-
-Decision criteria:
-
-- intended open-source contribution model;
-- whether commercial use and hosted derivatives should be allowed;
-- compatibility with referenced code and future dependencies;
-- whether skills, CLI code, templates, and bundled assets need different terms.
-
-Until a license is chosen, do not copy implementation or substantial text from
-external repositories. Research documents may link to and summarize sources.
+Decision for the open-source Agent release: license the repository under the
+Apache License 2.0. This permits commercial use and hosted derivatives while
+providing an explicit patent grant and requiring preservation of applicable
+license and attribution notices. Third-party dependencies and referenced works
+remain governed by their own licenses.
 
 ## 4. Distribution model
 

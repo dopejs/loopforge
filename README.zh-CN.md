@@ -219,6 +219,11 @@ uv run loopforge setup --skills-root /tmp/loopforge-skills
 - [ADR 0004：证据与声明](docs/decisions/0004-evidence-identity-and-claims.md)
 - [ADR 0005：CLI 语言](docs/decisions/0005-cli-language.md)
 
+## 许可证
+
+Copyright 2026 Loopforge contributors。本项目采用
+[Apache License 2.0](LICENSE) 许可证。
+
 ## 工作定义
 
 > Loopforge 帮助现有编码智能体持续地将游戏想法转化为可玩的实验，收集证据，
