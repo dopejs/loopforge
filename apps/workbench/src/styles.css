@@ -1,12 +1,12 @@
-:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #1f2933; background: #edf1f5; }
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #1f2933; background: #f5f7fa; }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
-body { margin: 0; min-width: 960px; overflow: hidden; background: #edf1f5; }
-.shell { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 8px; }
-.topbar { flex: 0 0 52px; padding: 0 18px 0 82px; display: flex; align-items: center; gap: 22px; border: 1px solid #d3dae5; border-bottom: 0; border-radius: 12px 12px 0 0; background: #fff; user-select: none; }
+body { margin: 0; min-width: 960px; overflow: hidden; background: #f5f7fa; }
+.shell { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.topbar { flex: 0 0 60px; padding: 0 18px 0 82px; display: flex; align-items: center; gap: 22px; border-bottom: 1px solid #d8dee8; background: #fff; user-select: none; }
 .topbar > div { flex: 1; }
 .muted { color: #687386; font-size: 13px; }
-.workspace { display: grid; flex: 1; grid-template-columns: 280px 1fr; min-height: 0; overflow: hidden; border: 1px solid #d3dae5; border-radius: 0 0 12px 12px; background: #f5f7fa; box-shadow: 0 8px 24px rgba(37, 49, 68, .08); }
+.workspace { display: grid; flex: 1; grid-template-columns: 280px 1fr; min-height: 0; overflow: hidden; background: #f5f7fa; }
 .sidebar { overflow: auto; padding: 24px; border-right: 1px solid #d8dee8; background: #fff; }
 .sidebar h2, .sidebar h3 { margin: 0 0 14px; font-size: 14px; }
 .sidebar h3 { margin-top: 26px; }
