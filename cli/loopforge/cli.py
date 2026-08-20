@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from .agent import AgentSupervisor
 from .errors import InvalidStateError, LoopforgeError
 from .installation import install_skills, uninstall_skills
 from .project import EVIDENCE_TYPES, MANUAL_TRUST_LEVELS, LoopforgeProject
@@ -38,6 +39,27 @@ def build_command_parser() -> argparse.ArgumentParser:
     commands.add_parser("status", help="Show current state and next actions.")
     commands.add_parser("validate", help="Validate project state and event history.")
     commands.add_parser("history", help="Show committed project events.")
+
+    agent = commands.add_parser("agent", help="Manage the project-local Kura daemon.")
+    agent_commands = agent.add_subparsers(dest="agent_command", required=True)
+    agent_start = agent_commands.add_parser(
+        "start", help="Start and synchronize the local agent daemon."
+    )
+    agent_start.add_argument("--port", type=int)
+    agent_start.add_argument("--dope-binary")
+    agent_stop = agent_commands.add_parser(
+        "stop", help="Stop the project-local agent daemon."
+    )
+    agent_stop.add_argument("--dope-binary")
+    agent_commands.add_parser("status", help="Show daemon health and version.")
+    agent_doctor = agent_commands.add_parser(
+        "doctor", help="Diagnose the local agent integration."
+    )
+    agent_doctor.add_argument("--dope-binary")
+    agent_commands.add_parser("context", help="Show the redacted game-project context.")
+    agent_commands.add_parser(
+        "sync", help="Synchronize game-project context to the daemon."
+    )
 
     setup = commands.add_parser(
         "setup", help="Install bundled Loopforge Skills for an agent host."
@@ -243,6 +265,25 @@ def execute(
         return project.validate()
     if command.command == "history":
         return project.history()
+    if command.command == "agent":
+        supervisor = AgentSupervisor(
+            project,
+            getattr(command, "dope_binary", None),
+        )
+        if command.agent_command == "start":
+            status = supervisor.start(command.port)
+            synchronized = supervisor.sync_context()
+            return {"status": status, **synchronized}
+        if command.agent_command == "stop":
+            return supervisor.stop()
+        if command.agent_command == "status":
+            return supervisor.status()
+        if command.agent_command == "doctor":
+            return supervisor.doctor()
+        if command.agent_command == "context":
+            return supervisor.context()
+        if command.agent_command == "sync":
+            return supervisor.sync_context()
     if command.command == "setup":
         if command.uninstall:
             return uninstall_skills(
@@ -335,6 +376,8 @@ def canonical_command_name(command: argparse.Namespace) -> str:
         return f"capture.{command.capture_command}"
     if command.command == "playtest":
         return f"playtest.{command.playtest_command}"
+    if command.command == "agent":
+        return f"agent.{command.agent_command}"
     return command.command
 
 

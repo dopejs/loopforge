@@ -15,6 +15,37 @@ Loopforge 是一套由 Agent Skills 和确定性 CLI 组成的可移植游戏开
 Loopforge 将工作流 Skills 与本地状态、证据引擎组合在一起。编码智能体仍然负责执行工作；
 Loopforge 负责让工作可恢复、可审查，并明确区分哪些结论已经得到验证、哪些尚未得到验证。
 
+## 本地 Agent 工作台
+
+Loopforge 正在演进为一个由 Kura 驱动的本地游戏开发工作台：
+
+- `loopforge agent` 管理项目专属的 test daemon，默认使用项目内 `.loopforge/agent/data`，不会触碰生产数据；
+- Tauri + React 客户端通过原生代理访问 daemon，提供项目状态、Agent 对话和后续可视化工具入口；
+- Deckle（`@dopejs/deckle-*`）负责可视化 artifact、画布和 revision；
+- Doper（`@dopejs/doper`）负责高性能原生渲染、滚动、编辑和输入；
+- `contracts/` 中的版本化 JSON Schema 归 Loopforge 所有，由应用侧 adapter 转换为 Deckle、Doper 和 Kura 的公共契约；公共库不依赖 Loopforge 领域类型。daemon 是运行状态事实源，Loopforge 是游戏项目与证据事实源。
+
+在已初始化的游戏项目中，可以这样启动第一版本地工作台链路：
+
+```bash
+loopforge agent start --format json
+loopforge agent status --format json
+loopforge agent context --format json
+```
+
+`agent context` 只返回项目路径、阶段、revision 和能力列表等经过约束的上下文，不会返回环境变量、provider credential 或 access token。
+
+从源码构建桌面客户端时，先初始化固定版本的 Kura submodule。桌面客户端会自己管理 Kura daemon 生命周期，因此不需要另外安装 daemon；当前 alpha 仍使用 `loopforge` CLI 初始化项目并同步权威上下文：
+
+```bash
+git submodule update --init --recursive
+cd apps/loopforge-desktop
+pnpm install
+pnpm build:desktop
+```
+
+发布构建会把 Kura submodule 中编译出的 `dope-cli` 放进 Tauri 应用资源。`dope-cli` 是 Kura 当前上游包名，产品界面和仓库名称统一使用 Kura。
+
 ## Loopforge 提供什么
 
 ### 由证据驱动的游戏开发流程

@@ -184,7 +184,9 @@ class PrototypeWorkspaceTests(unittest.TestCase):
                     "abandonment_points": [],
                     "strategies": ["Waited for the hazard to pass."],
                     "replay_behavior": "Restarted once without prompting.",
-                    "interpretation": "One participant understood the timing risk; sample is limited.",
+                    "interpretation": (
+                        "One participant understood the timing risk; sample is limited."
+                    ),
                     "sensitive_data": "None; anonymous notes deleted after decision.",
                 }
             )

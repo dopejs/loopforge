@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopforge.dev/contracts/visual-artifact-v1.schema.json",
+  "title": "Loopforge visual artifact reference v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_id", "artifact_revision", "kind", "source"],
+  "properties": {
+    "schema_version": {"const": "visual-artifact-v1"},
+    "artifact_id": {"type": "string", "minLength": 1},
+    "artifact_revision": {"type": "integer", "minimum": 0},
+    "kind": {"enum": ["scene", "canvas", "asset", "evidence", "preview"]},
+    "source": {"type": "string", "minLength": 1},
+    "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "frame": {"type": "object", "additionalProperties": false, "required": ["x", "y", "width", "height"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "width": {"type": "number", "minimum": 0}, "height": {"type": "number", "minimum": 0}}}
+  }
+}

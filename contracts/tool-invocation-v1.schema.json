@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopforge.dev/contracts/tool-invocation-v1.schema.json",
+  "title": "Loopforge tool invocation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "invocation_id", "tool", "project_id", "expected_revision"],
+  "properties": {
+    "schema_version": {"const": "tool-invocation-v1"},
+    "invocation_id": {"type": "string", "minLength": 1},
+    "tool": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "minLength": 1},
+    "expected_revision": {"type": "integer", "minimum": 0},
+    "arguments": {"type": "object"},
+    "approval": {"enum": ["not_required", "pending", "approved", "denied"]}
+  }
+}

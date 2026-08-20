@@ -191,7 +191,8 @@ class LoopforgeProject:
                     doctor_check(
                         "PROJECT_STATE",
                         "failed",
-                        "The .loopforge directory contains partial initialization state.",
+                        "The .loopforge directory contains partial "
+                        "initialization state.",
                     )
                 )
                 diagnostics.append(
@@ -206,7 +207,8 @@ class LoopforgeProject:
                     doctor_check(
                         "PROJECT_STATE",
                         "warning",
-                        "Loopforge is not initialized; run `loopforge init` before recording work.",
+                        "Loopforge is not initialized; run `loopforge init` "
+                        "before recording work.",
                     )
                 )
 
@@ -220,7 +222,8 @@ class LoopforgeProject:
                     doctor_check(
                         "GODOT_EXECUTABLE",
                         "failed",
-                        "A Godot project was detected but no Godot executable is available.",
+                        "A Godot project was detected but no Godot executable "
+                        "is available.",
                     )
                 )
                 diagnostics.append(
@@ -261,7 +264,8 @@ class LoopforgeProject:
                     diagnostics.append(
                         doctor_diagnostic(
                             "GODOT_VERSION_UNSUPPORTED",
-                            "The detected Godot version is not supported by this adapter.",
+                            "The detected Godot version is not supported by "
+                            "this adapter.",
                             {"version": version, "required_major": 4},
                         )
                     )
@@ -331,7 +335,8 @@ class LoopforgeProject:
             diagnostics.append(
                 doctor_diagnostic(
                     "GODOT_MAIN_SCENE_MISSING",
-                    "Configure application/run/main_scene before running startup evidence.",
+                    "Configure application/run/main_scene before running "
+                    "startup evidence.",
                 )
             )
             return
@@ -635,7 +640,8 @@ class LoopforgeProject:
                     diagnostics.append(
                         diagnostic(
                             "DECISION_EVIDENCE_UNKNOWN",
-                            "Decision references evidence that is not present in history.",
+                            "Decision references evidence that is not present "
+                            "in history.",
                             event["event_id"],
                             {"missing": missing},
                         )
@@ -914,7 +920,8 @@ class LoopforgeProject:
         state, _ = self.store.current_state()
         if state["stage"] != "PLAYTEST_REQUIRED":
             raise InvalidStateError(
-                "A playtest protocol can only be created while playtesting is required.",
+                "A playtest protocol can only be created while playtesting "
+                "is required.",
                 "PLAYTEST_STAGE_INVALID",
                 {"stage": state["stage"]},
             )
@@ -1065,7 +1072,8 @@ class LoopforgeProject:
         ]
         if wrong_subject:
             raise InvalidStateError(
-                "The decision cites evidence from a different experiment or hypothesis revision.",
+                "The decision cites evidence from a different experiment or "
+                "hypothesis revision.",
                 "DECISION_EVIDENCE_OUT_OF_SCOPE",
                 {"evidence_ids": wrong_subject},
             )
@@ -1235,7 +1243,8 @@ class LoopforgeProject:
         if approver_id or approver_name or rationale:
             if not all((approver_id, approver_name, rationale)):
                 raise InvalidStateError(
-                    "Approver ID, approver name, and rationale must be supplied together.",
+                    "Approver ID, approver name, and rationale must be supplied "
+                    "together.",
                     "APPROVAL_INCOMPLETE",
                 )
             approval = {
@@ -1393,12 +1402,14 @@ class LoopforgeProject:
                         "satisfied"
                         if reason in {"technical", "scope", "abandon"}
                         else "missing",
-                        "An early decision reason must be technical, scope, or abandon.",
+                        "An early decision reason must be technical, scope, or "
+                        "abandon.",
                     ),
                     requirement(
                         "EARLY_DECISION_EVIDENCE",
                         "satisfied" if early_evidence else "missing",
-                        "Technical, scope, abandonment, or failed run evidence is required.",
+                        "Technical, scope, abandonment, or failed run evidence "
+                        "is required.",
                         [early_evidence["evidence_id"]] if early_evidence else [],
                     ),
                     requirement(
@@ -1406,7 +1417,8 @@ class LoopforgeProject:
                         "satisfied"
                         if all((approver_id, approver_name, rationale))
                         else "missing",
-                        "A human approver and rationale are required for an early decision.",
+                        "A human approver and rationale are required for an "
+                        "early decision.",
                     ),
                 ]
             )
@@ -1419,7 +1431,8 @@ class LoopforgeProject:
                 requirement(
                     "PLAYTEST_REPORT",
                     "satisfied" if record else "missing",
-                    "An external playtest report scoped to the active hypothesis is required.",
+                    "An external playtest report scoped to the active "
+                    "hypothesis is required.",
                     [record["evidence_id"]] if record else [],
                 )
             )

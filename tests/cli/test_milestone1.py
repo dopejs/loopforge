@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PYTHON = sys.executable
 sys.path.insert(0, str(ROOT / "cli"))
-from loopforge.locking import ProjectLock
-from loopforge.storage import EventStore
+from loopforge.locking import ProjectLock  # noqa: E402
+from loopforge.storage import EventStore  # noqa: E402
 
 
 def run_cli(
@@ -689,7 +689,8 @@ class Milestone1Tests(unittest.TestCase):
         fake_bin.mkdir()
         fake_godot = fake_bin / "godot"
         fake_godot.write_text(
-            '#!/bin/sh\nif [ "$1" = "--version" ]; then echo \'Godot Fake 4.0\'; fi\nexit 0\n'
+            '#!/bin/sh\nif [ "$1" = "--version" ]; then '
+            "echo 'Godot Fake 4.0'; fi\nexit 0\n"
         )
         fake_godot.chmod(0o755)
         environment = {"PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"}
@@ -726,7 +727,8 @@ class Milestone1Tests(unittest.TestCase):
         fake_bin.mkdir()
         fake_godot = fake_bin / "godot"
         fake_godot.write_text(
-            '#!/bin/sh\nif [ "$1" = "--version" ]; then echo \'Godot Fake 4.0\'; fi\nexit 0\n'
+            '#!/bin/sh\nif [ "$1" = "--version" ]; then '
+            "echo 'Godot Fake 4.0'; fi\nexit 0\n"
         )
         fake_godot.chmod(0o755)
         environment = {"PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"}
@@ -785,7 +787,9 @@ class Milestone1Tests(unittest.TestCase):
         report.write_text(
             json.dumps(
                 {
-                    "participant_context": "Experienced developer, first exposure to this build.",
+                    "participant_context": (
+                        "Experienced developer, first exposure to this build."
+                    ),
                     "consent_status": "obtained",
                     "raw_observations": ["Started charging after seeing the hazard."],
                     "comprehension_time": "42 seconds",
@@ -794,7 +798,9 @@ class Milestone1Tests(unittest.TestCase):
                     "abandonment_points": [],
                     "strategies": ["Waited for a safe opening."],
                     "replay_behavior": "Retried twice without prompting.",
-                    "interpretation": "The risk was understood and the reward was visible.",
+                    "interpretation": (
+                        "The risk was understood and the reward was visible."
+                    ),
                 }
             )
         )

@@ -2,20 +2,28 @@
 
 ## 1. Overview
 
-Loopforge separates probabilistic judgment from deterministic execution.
+Loopforge separates probabilistic judgment from deterministic execution and
+uses Kura as its local runtime rather than creating a second agent
+orchestration layer.
 
 ```text
 User
   |
   v
-Coding agent (Codex first)
-  |-- reads Loopforge skills
-  |-- edits the game project
-  |-- invokes Loopforge CLI
-  |-- asks for human decisions
-  v
-Loopforge CLI
+Tauri + React desktop client
+  |-- invokes native supervisor commands
+  |-- reads Loopforge-owned project context
+  |-- sends generic chat requests to Kura
+  |                         |
+  |                         v
+Kura daemon (test environment by default)
+  |-- owns agent sessions, LLM dispatch, and runtime state
+  |
+  |    Loopforge does not add domain routes or state to Kura
+  |
+Loopforge CLI + Skills
   |-- validates state and schemas
+  |-- writes .loopforge/agent/context.json for the workbench
   |-- runs engine/build/test adapters
   |-- records evidence and decisions
   |-- enforces transition gates
@@ -23,8 +31,14 @@ Loopforge CLI
 Normal game repository + .loopforge state
 ```
 
-The coding agent is already the agent runtime. Loopforge does not add another
-LLM orchestration layer in the initial architecture.
+The versioned schemas in [`../contracts`](../contracts) are owned by Loopforge.
+Application adapters map them to public Kura, Deckle, and Doper contracts; the
+public libraries do not import Loopforge types or expose Loopforge-named APIs.
+React never spawns subprocesses or imports daemon internals. Deckle and Doper
+are consumed through public packages and Loopforge-owned adapters.
+The desktop app pins Kura as a git submodule and embeds its release
+binary as a Tauri resource; the gitlink is the reviewed runtime version and the
+application never silently substitutes a globally installed daemon.
 
 ## 2. Component responsibilities
 
@@ -239,7 +253,9 @@ a fallback that produces an asset brief and manifest.
 
 ## 8. Evolution threshold
 
-A separate agent service is justified only when Loopforge needs unattended
-queues, remote wake-up, multi-project scheduling, multi-tenant access, or model
-routing independent of an interactive coding agent. Until then, skills plus CLI
-remain the simpler and more portable architecture.
+Loopforge uses Kura for local runtime capabilities instead of building an
+independent agent service. Unattended queues, remote wake-up, multi-project
+scheduling, multi-tenant access, or model routing must remain Kura capabilities
+behind the versioned boundary. Loopforge should add only game-domain contracts,
+deterministic tools, and evidence workflows; replacing or bypassing Kura would
+require a new architecture decision.

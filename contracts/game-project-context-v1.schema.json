@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopforge.dev/contracts/game-project-context-v1.schema.json",
+  "title": "Loopforge game project context v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_id", "project_root", "observed_revision", "stage", "engine", "capabilities"],
+  "properties": {
+    "schema_version": {"const": "game-project-context-v1"},
+    "project_id": {"type": "string", "minLength": 1},
+    "project_root": {"type": "string", "minLength": 1},
+    "observed_revision": {"type": "integer", "minimum": 0},
+    "stage": {"type": "string", "minLength": 1},
+    "engine": {"type": ["string", "null"]},
+    "capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "next_actions": {"type": "array", "items": {"type": "string"}},
+    "redactions": {"type": "array", "items": {"type": "string"}}
+  }
+}

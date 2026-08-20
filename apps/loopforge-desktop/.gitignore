@@ -1,0 +1,6 @@
+resources/dope-cli
+resources/dope-cli.exe
+node_modules/
+vendor/kura/crates/target/
+dist/
+src-tauri/target/

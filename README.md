@@ -17,6 +17,48 @@ Loopforge combines workflow Skills with a local state and evidence engine. The
 coding agent remains the executor; Loopforge makes the work resumable,
 reviewable, and explicit about what has or has not been proven.
 
+## Local agent workbench
+
+Loopforge is evolving into a Kura-powered local game-development workbench:
+
+- `loopforge agent` manages a project-specific test daemon under
+  `.loopforge/agent/data` without touching production data;
+- the Tauri + React client uses a native proxy for project status, agent chat,
+  and future visual tools;
+- Deckle (`@dopejs/deckle-*`) owns visual artifacts, canvases, and revisions;
+- Doper (`@dopejs/doper`) owns high-performance native rendering, scrolling,
+  editing, and input;
+- versioned JSON Schemas in `contracts/` belong to Loopforge and are translated
+  by application-owned adapters into the public Deckle, Doper, and Kura
+  contracts. Those libraries do not depend on Loopforge domain types. Kura is
+  the runtime source of truth, while Loopforge remains authoritative for
+  game-project state and evidence.
+
+In an initialized game project, the first local-workbench workflow is:
+
+```bash
+loopforge agent start --format json
+loopforge agent status --format json
+loopforge agent context --format json
+```
+
+`agent context` exposes only constrained project metadata such as the project
+path, stage, revision, and capabilities. It does not include environment
+variables, provider credentials, or access tokens.
+
+To build the desktop client from source, initialize its pinned Kura submodule:
+
+```bash
+git submodule update --init --recursive
+cd apps/loopforge-desktop
+pnpm install
+pnpm build:desktop
+```
+
+The release build embeds the submodule's `dope-cli` binary as a Tauri resource,
+so end users do not install a daemon separately. `dope-cli` is Kura's current
+upstream package name; the product UI and repository use the Kura name.
+
 ## What Loopforge provides
 
 ### An evidence-backed game workflow

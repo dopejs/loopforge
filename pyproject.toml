@@ -22,10 +22,12 @@ packages = ["cli/loopforge"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "skills" = "loopforge/_bundled_skills"
+"contracts" = "loopforge/_contracts"
 
 [tool.hatch.build.targets.sdist]
 include = [
   "/cli",
+  "/contracts",
   "/docs",
   "/skills",
   "/tests",
@@ -34,3 +36,10 @@ include = [
   "/LICENSE",
   "/pyproject.toml"
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

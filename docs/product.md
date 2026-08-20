@@ -26,15 +26,19 @@ a good game. It gives an existing coding agent a disciplined way to:
 4. make an explicit `keep`, `kill`, or `refactor` decision;
 5. advance only when the next investment is justified.
 
-The product consists of two primary parts:
+The product consists of three cooperating surfaces:
 
 - **Skills** provide game-design heuristics, production workflows, review
   methods, and tool-selection guidance.
 - **CLI** provides persistent state, schemas, gates, evidence capture, command
   execution, and recovery.
+- **Local Workbench** provides a native Tauri + React surface over the
+  Kura daemon. It exposes project context, agent sessions, evidence
+  timelines and visual tools without making the UI another source of truth.
 
 Codex, Claude Code, or another compatible coding agent is the executor. The
-first supported and tested host will be Codex.
+first supported and tested host will be Codex. Kura supplies the local
+runtime; Loopforge supplies the domain capabilities and deterministic tools.
 
 ## 3. Target users
 
@@ -115,9 +119,8 @@ code as measures of game quality.
 
 ## 7. Non-goals for the MVP
 
-- A graphical project dashboard.
 - A hosted service or multi-tenant backend.
-- A custom conversational agent.
+- An independent agent runtime that competes with Kura.
 - Multi-model scheduling or autonomous background queues.
 - Complete support for Godot, Unity, Unreal, Roblox, and web engines at once.
 - Production-quality generation of every art and audio category.

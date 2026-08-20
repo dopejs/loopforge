@@ -6,11 +6,11 @@ The `loopforge` CLI is a deterministic project-state and evidence tool. It does
 not contain an LLM, judge subjective quality, or replace the coding agent.
 
 The current alpha implements `setup`, `init`, `inspect`, `doctor`, `status`,
-`validate`, `history`, `reconcile`, `hypothesis create/show`, `gate check`,
-`advance`, `run build/test`, `capture screenshot`, `playtest create/import`,
-`decide`, and `evidence add/list`. Real Godot runtime validation and
-production-stage skills remain planned work; their contracts below describe the
-target MVP interface.
+`validate`, `history`, `reconcile`, `agent start/stop/status/doctor/context/sync`,
+`hypothesis create/show`, `gate check`, `advance`, `run build/test`,
+`capture screenshot`, `playtest create/import`, `decide`, and
+`evidence add/list`. Real Godot runtime validation and production-stage skills
+remain planned work; their contracts below describe the target MVP interface.
 
 ## 2. Command principles
 
@@ -88,6 +88,25 @@ loopforge advance <stage>
   observed as their implicit precondition. This keeps the convenient form safe
   under concurrent agent sessions.
 - No `--force` option should bypass creative or human gates in the MVP.
+
+### Local agent runtime
+
+```bash
+loopforge agent start
+loopforge agent status
+loopforge agent context
+loopforge agent sync
+loopforge agent doctor
+loopforge agent stop
+```
+
+The supervisor always starts Kura in its test environment, binds it to a
+loopback-only address, and stores daemon data and validated runtime metadata
+under the current project's `.loopforge/agent` directory. `start` synchronizes
+the redacted project context to `.loopforge/agent/context.json` after Kura
+becomes healthy. `sync` refreshes that Loopforge-owned snapshot after later
+project revisions and does not add domain state or routes to Kura. The desktop
+app and CLI share the `kura-runtime-v1` process metadata contract.
 
 ### Execution evidence
 
