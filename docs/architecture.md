@@ -120,10 +120,10 @@ locally entered identity is cryptographically authenticated.
 
 ```text
 loopforge/
-├── agent/
-│   └── loopforge_agent/
 ├── apps/
-│   └── loopforge-desktop/
+│   ├── agent/
+│   │   └── loopforge_agent/
+│   └── workbench/
 ├── docs/
 ├── skills/
 │   ├── loopforge-router/

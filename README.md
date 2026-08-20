@@ -51,7 +51,7 @@ To build the desktop client from source, initialize its pinned Kura submodule:
 
 ```bash
 git submodule update --init --recursive
-cd apps/loopforge-desktop
+cd apps/workbench
 pnpm install
 pnpm build:desktop
 ```

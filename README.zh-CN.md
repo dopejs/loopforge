@@ -40,7 +40,7 @@ loopforge agent context --format json
 
 ```bash
 git submodule update --init --recursive
-cd apps/loopforge-desktop
+cd apps/workbench
 pnpm install
 pnpm build:desktop
 ```

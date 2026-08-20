@@ -19,7 +19,7 @@ loopforge = "loopforge.cli:main"
 loopforge-agent = "loopforge_agent.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["cli/loopforge", "agent/loopforge_agent"]
+packages = ["cli/loopforge", "apps/agent/loopforge_agent"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "skills" = "loopforge/_bundled_skills"
@@ -28,7 +28,7 @@ packages = ["cli/loopforge", "agent/loopforge_agent"]
 [tool.hatch.build.targets.sdist]
 include = [
   "/cli",
-  "/agent",
+  "/apps/agent",
   "/contracts",
   "/docs",
   "/skills",

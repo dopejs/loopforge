@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(desktopRoot, "..", "..");
-const entrypoint = resolve(repositoryRoot, "agent", "loopforge_agent", "__main__.py");
+const agentRoot = resolve(repositoryRoot, "apps", "agent");
+const entrypoint = resolve(agentRoot, "loopforge_agent", "__main__.py");
 const resourcesRoot = resolve(desktopRoot, "resources");
 const cacheRoot = resolve(desktopRoot, ".cache", "agent-build");
 const binaryName = process.platform === "win32" ? "loopforge-agent.exe" : "loopforge-agent";
@@ -29,7 +30,7 @@ execFileSync(
     "--name",
     "loopforge-agent",
     "--paths",
-    resolve(repositoryRoot, "agent"),
+    agentRoot,
     "--paths",
     resolve(repositoryRoot, "cli"),
     "--add-data",

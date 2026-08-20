@@ -1,12 +1,12 @@
 [package]
-name = "loopforge-desktop"
+name = "loopforge-workbench"
 version = "0.1.0-alpha.1"
 description = "Native Loopforge game development workbench"
 authors = ["Loopforge contributors"]
 edition = "2021"
 
 [lib]
-name = "loopforge_desktop_lib"
+name = "loopforge_workbench_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

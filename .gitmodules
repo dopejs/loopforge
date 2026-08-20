@@ -1,4 +1,4 @@
-[submodule "apps/loopforge-desktop/vendor/kura"]
-	path = apps/loopforge-desktop/vendor/kura
+[submodule "apps/workbench/vendor/kura"]
+	path = apps/workbench/vendor/kura
 	url = git@github.com:dopejs/kura.git
 	branch = main

@@ -401,7 +401,7 @@ mod tests {
 
     fn temporary_root(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "loopforge-desktop-{name}-{}-{}",
+            "loopforge-workbench-{name}-{}-{}",
             std::process::id(),
             Uuid::new_v4()
         ));

@@ -136,18 +136,21 @@ class LoopforgeAgent:
                     return value
             except (FileNotFoundError, ModuleNotFoundError):
                 continue
-        source_path = Path(__file__).resolve().parents[2] / "skills" / name / "SKILL.md"
-        try:
+        for parent in Path(__file__).resolve().parents:
+            if not (parent / "pyproject.toml").is_file():
+                continue
+            source_path = parent / "skills" / name / "SKILL.md"
+            if not source_path.is_file():
+                continue
             value = source_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise LoopforgeAgentError(
-                f"Internal Skill is unavailable: {name}", "INTERNAL_SKILL_MISSING"
-            ) from exc
-        if len(value) > MAX_SKILL_CHARS:
-            raise LoopforgeAgentError(
-                "Internal Skill is too large.", "INTERNAL_SKILL_INVALID"
-            )
-        return value
+            if len(value) > MAX_SKILL_CHARS:
+                raise LoopforgeAgentError(
+                    "Internal Skill is too large.", "INTERNAL_SKILL_INVALID"
+                )
+            return value
+        raise LoopforgeAgentError(
+            f"Internal Skill is unavailable: {name}", "INTERNAL_SKILL_MISSING"
+        )
 
     @staticmethod
     def _runtime_summary(runtime: dict[str, Any]) -> dict[str, Any]:
