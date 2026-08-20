@@ -58,7 +58,7 @@ def build_command_parser() -> argparse.ArgumentParser:
     agent_doctor.add_argument("--dope-binary")
     agent_commands.add_parser("context", help="Show the redacted game-project context.")
     agent_commands.add_parser(
-        "sync", help="Synchronize game-project context to the daemon."
+        "sync", help="Synchronize game-project context for the internal Agent."
     )
 
     setup = commands.add_parser(

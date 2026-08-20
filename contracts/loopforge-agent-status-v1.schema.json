@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopforge.dev/contracts/loopforge-agent-status-v1.schema.json",
+  "title": "Loopforge Agent Status v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ready"],
+  "properties": {
+    "schema_version": { "const": "loopforge-agent-status-v1" },
+    "ready": { "type": "boolean" },
+    "managed": { "type": "boolean" },
+    "project": { "$ref": "game-project-context-v1.schema.json" },
+    "runtime": { "type": "object" },
+    "reason": { "type": "string" }
+  }
+}

@@ -1,7 +1,8 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io;
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -9,52 +10,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 use url::{Host, Url};
+use uuid::Uuid;
 
-const MAX_DAEMON_ERROR_BYTES: usize = 4096;
-const MAX_PROJECT_CONTEXT_BYTES: usize = 64 * 1024;
-
-fn bundled_dope_binary(app: &AppHandle) -> Option<String> {
-    if let Ok(path) =
-        std::env::var("LOOPFORGE_KURA_BIN").or_else(|_| std::env::var("LOOPFORGE_DOPE_BIN"))
-    {
-        if Path::new(&path).is_file() {
-            return Some(path);
-        }
-    }
-    let resource_dir = app.path().resource_dir().ok()?;
-    let binary_name = if cfg!(windows) {
-        "dope-cli.exe"
-    } else {
-        "dope-cli"
-    };
-    [
-        resource_dir.join("resources").join(binary_name),
-        resource_dir.join(binary_name),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
-    .map(|path| path.to_string_lossy().into_owned())
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RuntimeMetadata {
-    schema_version: String,
-    bind_addr: String,
-    data_dir: String,
-}
+const AGENT_RUNTIME_SCHEMA: &str = "loopforge-agent-runtime-v1";
+const MAX_AGENT_ERROR_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-struct LoopforgeProjectContext {
+struct AgentRuntimeMetadata {
     schema_version: String,
-    project_id: String,
+    bind_addr: String,
+    token: String,
     project_root: String,
-    observed_revision: u64,
-    stage: String,
-    engine: Option<String>,
-    capabilities: Vec<String>,
-    next_actions: Vec<String>,
-    redactions: Vec<String>,
 }
 
 fn project_root(path: &str) -> Result<PathBuf, String> {
@@ -67,88 +34,167 @@ fn project_root(path: &str) -> Result<PathBuf, String> {
 }
 
 fn runtime_path(root: &Path) -> PathBuf {
-    root.join(".loopforge").join("agent").join("runtime.json")
+    root.join(".loopforge")
+        .join("agent")
+        .join("loopforge-runtime.json")
 }
 
-fn project_context_path(root: &Path) -> PathBuf {
-    root.join(".loopforge").join("agent").join("context.json")
+fn log_path(root: &Path) -> PathBuf {
+    root.join(".loopforge")
+        .join("agent")
+        .join("logs")
+        .join("loopforge-agent.log")
 }
 
-fn load_project_context(root: &Path) -> Result<LoopforgeProjectContext, String> {
-    let path = project_context_path(root);
-    let bytes = fs::read(&path)
-        .map_err(|error| format!("cannot read Loopforge project context: {error}"))?;
-    if bytes.len() > MAX_PROJECT_CONTEXT_BYTES {
-        return Err("Loopforge project context exceeds the size limit".to_string());
+fn bundled_binary(app: &AppHandle, environment_name: &str, binary_name: &str) -> Option<String> {
+    if let Ok(path) = std::env::var(environment_name) {
+        if Path::new(&path).is_file() {
+            return Some(path);
+        }
     }
-    let context: LoopforgeProjectContext = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("Loopforge project context is invalid: {error}"))?;
-    if context.schema_version != "game-project-context-v1"
-        || context.project_id.trim().is_empty()
-        || context.stage.trim().is_empty()
-        || Path::new(&context.project_root) != root
+    let resource_dir = app.path().resource_dir().ok()?;
+    [
+        resource_dir.join("resources").join(binary_name),
+        resource_dir.join(binary_name),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
+    .map(|path| path.to_string_lossy().into_owned())
+}
+
+fn bundled_agent_binary(app: &AppHandle) -> Option<String> {
+    let name = if cfg!(windows) {
+        "loopforge-agent.exe"
+    } else {
+        "loopforge-agent"
+    };
+    bundled_binary(app, "LOOPFORGE_AGENT_BIN", name)
+}
+
+fn bundled_kura_binary(app: &AppHandle) -> Option<String> {
+    if let Ok(path) =
+        std::env::var("LOOPFORGE_KURA_BIN").or_else(|_| std::env::var("LOOPFORGE_DOPE_BIN"))
     {
-        return Err("Loopforge project context failed validation".to_string());
+        if Path::new(&path).is_file() {
+            return Some(path);
+        }
     }
-    Ok(context)
+    let name = if cfg!(windows) {
+        "dope-cli.exe"
+    } else {
+        "dope-cli"
+    };
+    bundled_binary(app, "LOOPFORGE_KURA_BIN", name)
 }
 
-fn load_runtime(root: &Path) -> Result<Option<RuntimeMetadata>, String> {
-    let path = runtime_path(root);
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let bytes =
-        fs::read(path).map_err(|error| format!("cannot read Kura runtime metadata: {error}"))?;
-    let metadata: RuntimeMetadata = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("Kura runtime metadata is invalid: {error}"))?;
-    validate_runtime(root, &metadata)?;
-    Ok(Some(metadata))
-}
-
-fn validate_runtime(root: &Path, metadata: &RuntimeMetadata) -> Result<(), String> {
-    if metadata.schema_version != "kura-runtime-v1" {
-        return Err("Kura runtime metadata has an unsupported schema version".to_string());
+fn validate_runtime(root: &Path, metadata: &AgentRuntimeMetadata) -> Result<(), String> {
+    if metadata.schema_version != AGENT_RUNTIME_SCHEMA {
+        return Err("Loopforge Agent metadata has an unsupported schema version".to_string());
     }
     let address: SocketAddr = metadata
         .bind_addr
         .parse()
-        .map_err(|_| "Kura runtime metadata has an invalid bind address".to_string())?;
+        .map_err(|_| "Loopforge Agent metadata has an invalid bind address".to_string())?;
     if !address.ip().is_loopback() || address.port() == 0 {
-        return Err("Kura runtime metadata must use a loopback port".to_string());
+        return Err("Loopforge Agent metadata must use a loopback port".to_string());
     }
-    let expected_data_dir = root.join(".loopforge").join("agent").join("data");
-    if Path::new(&metadata.data_dir) != expected_data_dir {
-        return Err("Kura runtime metadata references an unexpected data directory".to_string());
+    if metadata.token.len() < 32 {
+        return Err("Loopforge Agent metadata has an invalid token".to_string());
+    }
+    if Path::new(&metadata.project_root) != root {
+        return Err("Loopforge Agent metadata belongs to another project".to_string());
     }
     Ok(())
 }
 
-fn save_runtime(root: &Path, metadata: &RuntimeMetadata) -> Result<(), String> {
+fn load_runtime(root: &Path) -> Result<Option<AgentRuntimeMetadata>, String> {
+    let path = runtime_path(root);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let metadata: AgentRuntimeMetadata = serde_json::from_slice(
+        &fs::read(&path)
+            .map_err(|error| format!("cannot read Loopforge Agent metadata: {error}"))?,
+    )
+    .map_err(|error| format!("Loopforge Agent metadata is invalid: {error}"))?;
+    validate_runtime(root, &metadata)?;
+    Ok(Some(metadata))
+}
+
+fn save_runtime(root: &Path, metadata: &AgentRuntimeMetadata) -> Result<(), String> {
+    validate_runtime(root, metadata)?;
     let path = runtime_path(root);
     let parent = path
         .parent()
         .ok_or_else(|| "runtime path has no parent".to_string())?;
     fs::create_dir_all(parent)
-        .map_err(|error| format!("cannot create runtime directory: {error}"))?;
+        .map_err(|error| format!("cannot create Agent runtime directory: {error}"))?;
     let temporary = path.with_extension("json.tmp");
-    let bytes = serde_json::to_vec_pretty(metadata).map_err(|error| error.to_string())?;
-    fs::write(&temporary, bytes)
-        .map_err(|error| format!("cannot write runtime metadata: {error}"))?;
-    fs::rename(temporary, path).map_err(|error| format!("cannot commit runtime metadata: {error}"))
+    fs::write(
+        &temporary,
+        serde_json::to_vec_pretty(metadata).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| format!("cannot write Agent runtime metadata: {error}"))?;
+    secure_file(&temporary).map_err(|error| format!("cannot secure Agent metadata: {error}"))?;
+    fs::rename(temporary, path)
+        .map_err(|error| format!("cannot commit Agent runtime metadata: {error}"))
 }
 
-fn daemon_json(base_url: &str, path: &str) -> Result<Value, String> {
-    ureq::get(&daemon_url(base_url, path)?)
-        .timeout(Duration::from_secs(2))
-        .call()
-        .map_err(|error| format!("Kura request failed: {error}"))?
+#[cfg(unix)]
+fn secure_file(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(not(unix))]
+fn secure_file(_path: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+fn agent_url(metadata: &AgentRuntimeMetadata, path: &str) -> Result<String, String> {
+    let mut base = Url::parse(&format!("http://{}", metadata.bind_addr))
+        .map_err(|_| "Loopforge Agent URL is invalid".to_string())?;
+    let loopback = matches!(base.host(), Some(Host::Domain("localhost")))
+        || matches!(base.host(), Some(Host::Ipv4(address)) if address.is_loopback())
+        || matches!(base.host(), Some(Host::Ipv6(address)) if address.is_loopback());
+    if !loopback || base.port().is_none() || !path.starts_with('/') || path.starts_with("//") {
+        return Err("Loopforge Agent URL must use an absolute loopback path".to_string());
+    }
+    if path.contains(['?', '#']) {
+        return Err("Loopforge Agent path must not contain a query or fragment".to_string());
+    }
+    base.set_path(path);
+    Ok(base.into())
+}
+
+fn agent_request(
+    metadata: &AgentRuntimeMetadata,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+    timeout: Duration,
+) -> Result<Value, String> {
+    let url = agent_url(metadata, path)?;
+    let authorization = format!("Bearer {}", metadata.token);
+    let response = match method {
+        "GET" => ureq::get(&url)
+            .set("Authorization", &authorization)
+            .timeout(timeout)
+            .call(),
+        "POST" => ureq::post(&url)
+            .set("Authorization", &authorization)
+            .timeout(timeout)
+            .send_json(body.unwrap_or_else(|| json!({}))),
+        _ => return Err("unsupported Agent request method".to_string()),
+    };
+    response
+        .map_err(|error| format!("Loopforge Agent request failed: {error}"))?
         .into_json()
-        .map_err(|error| format!("Kura returned invalid JSON: {error}"))
+        .map_err(|error| format!("Loopforge Agent returned invalid JSON: {error}"))
 }
 
 fn command_error(stderr: &[u8]) -> String {
-    let end = stderr.len().min(MAX_DAEMON_ERROR_BYTES);
+    let end = stderr.len().min(MAX_AGENT_ERROR_BYTES);
     let message = String::from_utf8_lossy(&stderr[..end]);
     if stderr.len() > end {
         format!("{}... (truncated)", message.trim())
@@ -157,289 +203,183 @@ fn command_error(stderr: &[u8]) -> String {
     }
 }
 
-fn runtime_status(root: &Path) -> Result<Value, String> {
+fn agent_status_for_root(root: &Path) -> Result<Value, String> {
     let Some(metadata) = load_runtime(root)? else {
-        return Ok(json!({"running": false, "healthy": false, "managed": false}));
+        return Ok(json!({
+            "schema_version": "loopforge-agent-status-v1",
+            "ready": false,
+            "managed": false
+        }));
     };
-    let base_url = format!("http://{}", metadata.bind_addr);
-    match daemon_json(&base_url, "/healthz") {
-        Ok(health) => Ok(json!({
-            "running": true,
-            "healthy": health.get("ok").and_then(Value::as_bool).unwrap_or(false),
+    match agent_request(&metadata, "GET", "/v1/status", None, Duration::from_secs(2)) {
+        Ok(mut status) => {
+            if let Some(object) = status.as_object_mut() {
+                object.insert("managed".to_string(), Value::Bool(true));
+            }
+            Ok(status)
+        }
+        Err(reason) => Ok(json!({
+            "schema_version": "loopforge-agent-status-v1",
+            "ready": false,
             "managed": true,
-            "base_url": base_url,
-            "health": health,
-            "version": daemon_json(&base_url, "/version").ok()
-        })),
-        Err(error) => Ok(json!({
-            "running": false,
-            "healthy": false,
-            "managed": true,
-            "base_url": base_url,
-            "reason": error
+            "reason": reason
         })),
     }
 }
 
 #[tauri::command]
 fn agent_status(project_path: String) -> Result<Value, String> {
-    runtime_status(&project_root(&project_path)?)
-}
-
-#[tauri::command]
-fn project_context(project_path: String) -> Result<LoopforgeProjectContext, String> {
-    load_project_context(&project_root(&project_path)?)
+    agent_status_for_root(&project_root(&project_path)?)
 }
 
 #[tauri::command]
 fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
-    let current = runtime_status(&root)?;
-    if current.get("healthy").and_then(Value::as_bool) == Some(true) {
+    let current = agent_status_for_root(&root)?;
+    if current.get("ready").and_then(Value::as_bool) == Some(true) {
         return Ok(current);
     }
-    let binary = bundled_dope_binary(&app).ok_or_else(|| {
-        "bundled Kura daemon is missing; rebuild the desktop package or set LOOPFORGE_KURA_BIN"
+    if current.get("managed").and_then(Value::as_bool) == Some(true) {
+        return Err(format!(
+            "Loopforge Agent metadata exists but the Agent is unreachable; inspect {} before recovery",
+            runtime_path(&root).display()
+        ));
+    }
+    let agent_binary = bundled_agent_binary(&app).ok_or_else(|| {
+        "Loopforge Agent sidecar is missing; run pnpm build:agent or set LOOPFORGE_AGENT_BIN"
             .to_string()
     })?;
+    let kura_binary = bundled_kura_binary(&app).ok_or_else(|| {
+        "Kura runtime is missing; run pnpm build:kura or set LOOPFORGE_KURA_BIN".to_string()
+    })?;
     let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|error| format!("cannot reserve a local Kura port: {error}"))?;
+        .map_err(|error| format!("cannot reserve a local Agent port: {error}"))?;
     let port = listener
         .local_addr()
         .map_err(|error| error.to_string())?
         .port();
     drop(listener);
-    let bind_addr = format!("127.0.0.1:{port}");
-    let data_dir = root.join(".loopforge").join("agent").join("data");
-    let output = Command::new(&binary)
-        .args(["daemon", "start"])
-        .current_dir(&root)
-        .env("DOPE_ENV", "test")
-        .env("DOPE_DATA_DIR", &data_dir)
-        .env("DOPE_BIND_ADDR", &bind_addr)
-        .output()
-        .map_err(|error| format!("failed to start bundled Kura: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "Kura failed to start: {}",
-            command_error(&output.stderr)
-        ));
-    }
-    let metadata = RuntimeMetadata {
-        schema_version: "kura-runtime-v1".to_string(),
-        bind_addr: bind_addr.clone(),
-        data_dir: data_dir.to_string_lossy().into_owned(),
+    let metadata = AgentRuntimeMetadata {
+        schema_version: AGENT_RUNTIME_SCHEMA.to_string(),
+        bind_addr: format!("127.0.0.1:{port}"),
+        token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+        project_root: root.to_string_lossy().into_owned(),
     };
+    let path = log_path(&root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create Agent log directory: {error}"))?;
+    }
+    let stdout = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| format!("cannot open Agent log: {error}"))?;
+    let stderr = stdout
+        .try_clone()
+        .map_err(|error| format!("cannot clone Agent log handle: {error}"))?;
+    let mut child = Command::new(&agent_binary)
+        .args([
+            "serve",
+            "--project",
+            &metadata.project_root,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "--token",
+            &metadata.token,
+            "--kura-binary",
+            &kura_binary,
+        ])
+        .current_dir(&root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .map_err(|error| format!("failed to start Loopforge Agent: {error}"))?;
     if let Err(error) = save_runtime(&root, &metadata) {
-        let _ = Command::new(&binary)
-            .args(["daemon", "stop"])
-            .current_dir(&root)
-            .env("DOPE_ENV", "test")
-            .env("DOPE_DATA_DIR", &metadata.data_dir)
-            .env("DOPE_BIND_ADDR", &metadata.bind_addr)
-            .output();
+        let _ = child.kill();
         return Err(error);
     }
     for _ in 0..50 {
-        let status = runtime_status(&root)?;
-        if status.get("healthy").and_then(Value::as_bool) == Some(true) {
+        if agent_request(
+            &metadata,
+            "GET",
+            "/healthz",
+            None,
+            Duration::from_millis(500),
+        )
+        .is_ok()
+        {
+            let mut status = agent_request(
+                &metadata,
+                "POST",
+                "/v1/start",
+                Some(json!({})),
+                Duration::from_secs(15),
+            )?;
+            if let Some(object) = status.as_object_mut() {
+                object.insert("managed".to_string(), Value::Bool(true));
+            }
             return Ok(status);
+        }
+        if child
+            .try_wait()
+            .map_err(|error| format!("cannot inspect Loopforge Agent: {error}"))?
+            .is_some()
+        {
+            break;
         }
         thread::sleep(Duration::from_millis(200));
     }
-    let _ = Command::new(&binary)
-        .args(["daemon", "stop"])
-        .current_dir(&root)
-        .env("DOPE_ENV", "test")
-        .env("DOPE_DATA_DIR", &metadata.data_dir)
-        .env("DOPE_BIND_ADDR", &metadata.bind_addr)
-        .output();
+    let _ = child.kill();
     let _ = fs::remove_file(runtime_path(&root));
-    Err("Kura did not become healthy within 10 seconds".to_string())
+    let log_tail = fs::read(&path).unwrap_or_default();
+    Err(format!(
+        "Loopforge Agent did not become ready: {}",
+        command_error(&log_tail)
+    ))
 }
 
 #[tauri::command]
-fn agent_stop(app: AppHandle, project_path: String) -> Result<Value, String> {
+fn agent_stop(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let Some(metadata) = load_runtime(&root)? else {
-        return Ok(json!({"running": false, "healthy": false, "stopped": false}));
+        return Ok(json!({
+            "schema_version": "loopforge-agent-status-v1",
+            "ready": false,
+            "managed": false
+        }));
     };
-    let binary =
-        bundled_dope_binary(&app).ok_or_else(|| "bundled Kura daemon is missing".to_string())?;
-    let output = Command::new(binary)
-        .args(["daemon", "stop"])
-        .current_dir(&root)
-        .env("DOPE_ENV", "test")
-        .env("DOPE_DATA_DIR", &metadata.data_dir)
-        .env("DOPE_BIND_ADDR", &metadata.bind_addr)
-        .output()
-        .map_err(|error| format!("failed to stop bundled Kura: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "Kura failed to stop: {}",
-            command_error(&output.stderr)
-        ));
-    }
-    let _ = fs::remove_file(runtime_path(&root));
-    Ok(json!({"running": false, "healthy": false, "stopped": true}))
-}
-
-fn daemon_url(base_url: &str, path: &str) -> Result<String, String> {
-    let mut base = Url::parse(base_url.trim())
-        .map_err(|_| "daemon URL must be a valid loopback HTTP URL".to_string())?;
-    let loopback = matches!(base.host(), Some(Host::Domain("localhost")))
-        || matches!(base.host(), Some(Host::Ipv4(address)) if address.is_loopback())
-        || matches!(base.host(), Some(Host::Ipv6(address)) if address.is_loopback());
-    if base.scheme() != "http"
-        || !loopback
-        || !base.username().is_empty()
-        || base.password().is_some()
-        || base.port().is_none()
-    {
-        return Err("daemon URL must use a loopback HTTP address".to_string());
-    }
-    if base.path() != "/" || base.query().is_some() || base.fragment().is_some() {
-        return Err("daemon base URL must not contain a path, query, or fragment".to_string());
-    }
-    if !path.starts_with('/') || path.starts_with("//") || path.contains(['?', '#']) {
-        return Err("daemon path must be absolute".to_string());
-    }
-    base.set_path(path);
-    Ok(base.into())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn runtime_metadata_round_trip() {
-        let root =
-            std::env::temp_dir().join(format!("loopforge-supervisor-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-        let metadata = RuntimeMetadata {
-            schema_version: "kura-runtime-v1".into(),
-            bind_addr: "127.0.0.1:43210".into(),
-            data_dir: root
-                .join(".loopforge")
-                .join("agent")
-                .join("data")
-                .to_string_lossy()
-                .into_owned(),
-        };
-        save_runtime(&root, &metadata).unwrap();
-        assert_eq!(
-            load_runtime(&root).unwrap().unwrap().bind_addr,
-            metadata.bind_addr
-        );
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn rejects_non_loopback_daemon_urls() {
-        assert!(daemon_url("http://192.168.1.5:8080", "/healthz").is_err());
-        assert!(daemon_url("http://127.0.0.1:8080@evil.example", "/healthz").is_err());
-        assert!(daemon_url("https://127.0.0.1:8080", "/healthz").is_err());
-        assert!(daemon_url("http://127.0.0.1:8080", "healthz").is_err());
-        assert_eq!(
-            daemon_url("http://127.0.0.1:8080/", "/healthz").unwrap(),
-            "http://127.0.0.1:8080/healthz"
-        );
-    }
-
-    #[test]
-    fn truncates_command_errors() {
-        let stderr = vec![b'x'; MAX_DAEMON_ERROR_BYTES + 1];
-        let message = command_error(&stderr);
-        assert!(message.ends_with("... (truncated)"));
-        assert!(message.len() < stderr.len() + 20);
-    }
-
-    #[test]
-    fn rejects_tampered_runtime_metadata() {
-        let root = std::env::temp_dir().join(format!(
-            "loopforge-supervisor-tampered-{}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        let metadata = RuntimeMetadata {
-            schema_version: "kura-runtime-v1".into(),
-            bind_addr: "10.0.0.1:43210".into(),
-            data_dir: root.join("data").to_string_lossy().into_owned(),
-        };
-        assert!(validate_runtime(&root, &metadata).is_err());
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn missing_runtime_stop_state_is_idempotent() {
-        let root = std::env::temp_dir().join(format!(
-            "loopforge-supervisor-missing-{}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        assert!(load_runtime(&root).unwrap().is_none());
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn project_context_is_loopforge_owned_and_project_scoped() {
-        let root =
-            std::env::temp_dir().join(format!("loopforge-project-context-{}", std::process::id()));
-        let agent_root = root.join(".loopforge").join("agent");
-        fs::create_dir_all(&agent_root).unwrap();
-        let context = LoopforgeProjectContext {
-            schema_version: "game-project-context-v1".into(),
-            project_id: "gameproj_test".into(),
-            project_root: root.to_string_lossy().into_owned(),
-            observed_revision: 3,
-            stage: "PROTOTYPING".into(),
-            engine: Some("godot".into()),
-            capabilities: vec!["loopforge.status".into()],
-            next_actions: vec!["run build".into()],
-            redactions: vec!["access_tokens".into()],
-        };
-        fs::write(
-            project_context_path(&root),
-            serde_json::to_vec(&context).unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(load_project_context(&root).unwrap(), context);
-        let other_root = root.join("other");
-        let other_agent_root = other_root.join(".loopforge").join("agent");
-        fs::create_dir_all(&other_agent_root).unwrap();
-        fs::write(
-            project_context_path(&other_root),
-            serde_json::to_vec(&context).unwrap(),
-        )
-        .unwrap();
-        assert!(load_project_context(&other_root).is_err());
-        let _ = fs::remove_dir_all(root);
-    }
+    let result = agent_request(
+        &metadata,
+        "POST",
+        "/v1/shutdown",
+        Some(json!({})),
+        Duration::from_secs(15),
+    )?;
+    fs::remove_file(runtime_path(&root))
+        .map_err(|error| format!("Agent stopped but runtime metadata remains: {error}"))?;
+    Ok(result)
 }
 
 #[tauri::command]
-fn daemon_get(base_url: String, path: String) -> Result<Value, String> {
-    let url = daemon_url(&base_url, &path)?;
-    ureq::get(&url)
-        .timeout(std::time::Duration::from_secs(5))
-        .call()
-        .map_err(|error| format!("daemon GET failed: {error}"))?
-        .into_json()
-        .map_err(|error| format!("daemon returned invalid JSON: {error}"))
-}
-
-#[tauri::command]
-fn daemon_post(base_url: String, path: String, body: Value) -> Result<Value, String> {
-    let url = daemon_url(&base_url, &path)?;
-    ureq::post(&url)
-        .timeout(std::time::Duration::from_secs(120))
-        .send_json(body)
-        .map_err(|error| format!("daemon POST failed: {error}"))?
-        .into_json()
-        .map_err(|error| format!("daemon returned invalid JSON: {error}"))
+fn agent_query(
+    project_path: String,
+    query: String,
+    thread_id: Option<String>,
+) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/query",
+        Some(json!({"query": query, "thread_id": thread_id})),
+        Duration::from_secs(120),
+    )
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -447,12 +387,80 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             agent_status,
-            project_context,
             agent_start,
             agent_stop,
-            daemon_get,
-            daemon_post
+            agent_query
         ])
         .run(tauri::generate_context!())
         .expect("error while running Loopforge Workbench");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temporary_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "loopforge-desktop-{name}-{}-{}",
+            std::process::id(),
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn metadata(root: &Path) -> AgentRuntimeMetadata {
+        AgentRuntimeMetadata {
+            schema_version: AGENT_RUNTIME_SCHEMA.into(),
+            bind_addr: "127.0.0.1:43210".into(),
+            token: "a".repeat(64),
+            project_root: root.to_string_lossy().into_owned(),
+        }
+    }
+
+    #[test]
+    fn runtime_metadata_round_trip_is_project_scoped() {
+        let root = temporary_root("runtime");
+        let value = metadata(&root);
+        save_runtime(&root, &value).unwrap();
+        assert_eq!(load_runtime(&root).unwrap(), Some(value));
+        let other = temporary_root("other");
+        assert!(validate_runtime(&other, &metadata(&root)).is_err());
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(other);
+    }
+
+    #[test]
+    fn rejects_non_loopback_or_weak_runtime_metadata() {
+        let root = temporary_root("tampered");
+        let mut value = metadata(&root);
+        value.bind_addr = "10.0.0.1:43210".into();
+        assert!(validate_runtime(&root, &value).is_err());
+        value.bind_addr = "127.0.0.1:43210".into();
+        value.token = "weak".into();
+        assert!(validate_runtime(&root, &value).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn agent_urls_are_loopback_and_path_constrained() {
+        let root = temporary_root("url");
+        let value = metadata(&root);
+        assert_eq!(
+            agent_url(&value, "/v1/status").unwrap(),
+            "http://127.0.0.1:43210/v1/status"
+        );
+        assert!(agent_url(&value, "v1/status").is_err());
+        assert!(agent_url(&value, "//evil.example").is_err());
+        assert!(agent_url(&value, "/v1/status?token=x").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn truncates_sidecar_errors() {
+        let stderr = vec![b'x'; MAX_AGENT_ERROR_BYTES + 1];
+        let message = command_error(&stderr);
+        assert!(message.ends_with("... (truncated)"));
+        assert!(message.len() < stderr.len() + 20);
+    }
 }

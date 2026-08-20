@@ -66,11 +66,31 @@ class KuraClient:
 
     def get(self, path: str) -> dict[str, Any]:
         request = urllib.request.Request(self._url(path), method="GET")
+        return self._request(request, "GET", path)
+
+    def post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
+        request = urllib.request.Request(
+            self._url(path),
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        return self._request(request, "POST", path)
+
+    def _request(
+        self, request: urllib.request.Request, method: str, path: str
+    ) -> dict[str, Any]:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise KuraAgentError(
+                f"Kura request failed: {method} {path} returned HTTP {exc.code}",
+                "KURA_REQUEST_FAILED",
+            ) from exc
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise KuraAgentError(f"Kura request failed: GET {path}") from exc
+            raise KuraAgentError(f"Kura request failed: {method} {path}") from exc
         if not isinstance(payload, dict):
             raise KuraAgentError(
                 f"Kura returned a non-object response for {path}",

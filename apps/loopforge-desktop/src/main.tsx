@@ -1,22 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
-import { buildChatQueryBody, errorMessage } from "./daemon";
+import { errorMessage } from "./daemon";
 import "./styles.css";
-
-type DaemonState = {
-  healthy: boolean;
-  version?: string;
-  error?: string;
-  base_url?: string;
-  running?: boolean;
-  managed?: boolean;
-};
-
-type SupervisorState = Omit<DaemonState, "version"> & {
-  version?: { version?: string };
-  reason?: string;
-};
 
 type LoopforgeProjectContext = {
   schema_version: "game-project-context-v1";
@@ -30,51 +16,68 @@ type LoopforgeProjectContext = {
   redactions?: string[];
 };
 
-type ChatQueryResponse = { reply: string };
+type KuraRuntimeState = {
+  healthy?: boolean;
+  running?: boolean;
+  version?: { version?: string };
+};
+
+type AgentState = {
+  schema_version: "loopforge-agent-status-v1";
+  ready: boolean;
+  managed?: boolean;
+  project?: LoopforgeProjectContext;
+  runtime?: KuraRuntimeState;
+  reason?: string;
+};
+
+type AgentQueryResponse = {
+  schema_version: "loopforge-agent-response-v1";
+  reply: string;
+  thread_id?: string;
+};
 
 function App(): React.JSX.Element {
-  const [projectRoot, setProjectRoot] = useState(() => localStorage.getItem("loopforge.projectRoot") ?? "");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [daemon, setDaemon] = useState<DaemonState>({ healthy: false });
-  const [context, setContext] = useState<LoopforgeProjectContext | null>(null);
+  const [projectRoot, setProjectRoot] = useState(
+    () => localStorage.getItem("loopforge.projectRoot") ?? ""
+  );
+  const [agent, setAgent] = useState<AgentState>({
+    schema_version: "loopforge-agent-status-v1",
+    ready: false
+  });
   const [query, setQuery] = useState("");
   const [reply, setReply] = useState("");
+  const [threadId, setThreadId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
-  const nativeStatus = useMemo(() => async <T,>(command: string): Promise<T> => invoke<T>(command, { projectPath: projectRoot }), [projectRoot]);
+  const agentInvoke = useMemo(
+    () => async <T,>(command: string, extra: Record<string, unknown> = {}): Promise<T> =>
+      invoke<T>(command, { projectPath: projectRoot, ...extra }),
+    [projectRoot]
+  );
+
   useEffect(() => {
     let cancelled = false;
     const refresh = async (): Promise<void> => {
+      if (!projectRoot.trim()) {
+        setAgent({
+          schema_version: "loopforge-agent-status-v1",
+          ready: false,
+          reason: "Choose a game project directory to start Loopforge Agent."
+        });
+        return;
+      }
       try {
-        if (!projectRoot.trim()) {
-          setDaemon({ healthy: false, error: "Choose a game project directory to start Kura." });
-          return;
-        }
-        const [status, project] = await Promise.all([
-          nativeStatus<SupervisorState>("agent_status"),
-          nativeStatus<LoopforgeProjectContext>("project_context").catch(() => null)
-        ]);
-        if (!status.base_url) {
-          setDaemon({
-            healthy: status.healthy,
-            running: status.running,
-            managed: status.managed,
-            error: status.reason
-          });
-          setContext(project);
-          return;
-        }
-        setBaseUrl(status.base_url);
-        const [health, version] = await Promise.all([
-          invoke<{ ok?: boolean }>("daemon_get", { baseUrl: status.base_url, path: "/healthz" }),
-          invoke<{ version?: string }>("daemon_get", { baseUrl: status.base_url, path: "/version" })
-        ]);
-        if (!cancelled) {
-          setDaemon({ ...status, healthy: health.ok === true, version: version.version });
-          setContext(project);
-        }
+        const status = await agentInvoke<AgentState>("agent_status");
+        if (!cancelled) setAgent(status);
       } catch (error) {
-        if (!cancelled) setDaemon({ healthy: false, error: error instanceof Error ? error.message : "daemon unavailable" });
+        if (!cancelled) {
+          setAgent({
+            schema_version: "loopforge-agent-status-v1",
+            ready: false,
+            reason: errorMessage(error, "Loopforge Agent unavailable")
+          });
+        }
       }
     };
     void refresh();
@@ -83,18 +86,20 @@ function App(): React.JSX.Element {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [nativeStatus, projectRoot]);
+  }, [agentInvoke, projectRoot]);
 
   const startAgent = async (): Promise<void> => {
     if (!projectRoot.trim() || lifecycleBusy) return;
     setLifecycleBusy(true);
     localStorage.setItem("loopforge.projectRoot", projectRoot.trim());
     try {
-      const status = await nativeStatus<DaemonState>("agent_start");
-      setDaemon(status);
-      if (status.base_url) setBaseUrl(status.base_url);
+      setAgent(await agentInvoke<AgentState>("agent_start"));
     } catch (error) {
-      setDaemon({ healthy: false, error: errorMessage(error, "failed to start Kura") });
+      setAgent({
+        schema_version: "loopforge-agent-status-v1",
+        ready: false,
+        reason: errorMessage(error, "failed to start Loopforge Agent")
+      });
     } finally {
       setLifecycleBusy(false);
     }
@@ -104,54 +109,118 @@ function App(): React.JSX.Element {
     if (!projectRoot.trim() || lifecycleBusy) return;
     setLifecycleBusy(true);
     try {
-      await nativeStatus("agent_stop");
-      setDaemon({ healthy: false });
-      setBaseUrl("");
-      setContext(null);
+      await agentInvoke("agent_stop");
+      setAgent({ schema_version: "loopforge-agent-status-v1", ready: false });
+      setThreadId(undefined);
     } catch (error) {
-      setDaemon({ healthy: false, error: errorMessage(error, "failed to stop Kura") });
+      setAgent({
+        schema_version: "loopforge-agent-status-v1",
+        ready: false,
+        reason: errorMessage(error, "failed to stop Loopforge Agent")
+      });
     } finally {
       setLifecycleBusy(false);
     }
   };
 
   const sendQuery = async (): Promise<void> => {
-    if (!query.trim() || busy) return;
+    if (!query.trim() || busy || !agent.ready) return;
     setBusy(true);
     setReply("");
     try {
-      const result = await invoke<ChatQueryResponse>("daemon_post", {
-        baseUrl,
-        path: "/v1/chat/query",
-        body: buildChatQueryBody(query)
+      const result = await agentInvoke<AgentQueryResponse>("agent_query", {
+        query: query.trim(),
+        threadId
       });
       setReply(result.reply);
+      setThreadId(result.thread_id);
     } catch (error) {
-      setReply(errorMessage(error, "request failed"));
+      setReply(errorMessage(error, "Agent request failed"));
     } finally {
       setBusy(false);
     }
   };
 
+  const context = agent.project;
+  const runtimeVersion = agent.runtime?.version?.version;
   return (
     <main className="shell">
       <header className="topbar">
-        <div><strong>Loopforge Workbench</strong><span className="muted"> local game development agent</span></div>
-        <span className="endpoint">Kura {baseUrl || "not started"}</span>
-        <div className="lifecycle"><button type="button" onClick={() => void startAgent()} disabled={lifecycleBusy || !projectRoot.trim() || daemon.healthy}>Start</button><button type="button" onClick={() => void stopAgent()} disabled={lifecycleBusy || !projectRoot.trim() || !daemon.managed}>Stop</button></div>
-        <span className={daemon.healthy ? "status ready" : "status degraded"}>{daemon.healthy ? `ready ${daemon.version ?? ""}` : "daemon unavailable"}</span>
+        <div>
+          <strong>Loopforge Workbench</strong>
+          <span className="muted"> independent game-development agent</span>
+        </div>
+        <span className="endpoint">Agent {agent.managed ? "local" : "not started"}</span>
+        <div className="lifecycle">
+          <button
+            type="button"
+            onClick={() => void startAgent()}
+            disabled={lifecycleBusy || !projectRoot.trim() || agent.ready}
+          >
+            Start
+          </button>
+          <button
+            type="button"
+            onClick={() => void stopAgent()}
+            disabled={lifecycleBusy || !projectRoot.trim() || !agent.managed}
+          >
+            Stop
+          </button>
+        </div>
+        <span className={agent.ready ? "status ready" : "status degraded"}>
+          {agent.ready ? `ready ${runtimeVersion ?? ""}` : "agent unavailable"}
+        </span>
       </header>
       <section className="workspace">
         <aside className="sidebar">
           <h2>Project</h2>
-          <label className="project-root">Root <input value={projectRoot} onChange={(event) => setProjectRoot(event.target.value)} placeholder="/path/to/game" /></label>
-          {context ? <><div className="project-id">{context.project_id}</div><div className="stage">{context.stage}</div><p className="muted">Revision {context.observed_revision}</p><h3>Capabilities</h3><ul>{context.capabilities.map((capability) => <li key={capability}>{capability}</li>)}</ul></> : <p className="muted">Start Kura, then sync project context with <code>loopforge agent sync</code>.</p>}
+          <label className="project-root">
+            Root
+            <input
+              value={projectRoot}
+              onChange={(event) => setProjectRoot(event.target.value)}
+              placeholder="/path/to/game"
+            />
+          </label>
+          {context ? (
+            <>
+              <div className="project-id">{context.project_id}</div>
+              <div className="stage">{context.stage}</div>
+              <p className="muted">Revision {context.observed_revision}</p>
+              <h3>Capabilities</h3>
+              <ul>
+                {context.capabilities.map((capability) => (
+                  <li key={capability}>{capability}</li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="muted">Start Loopforge Agent to open this project.</p>
+          )}
         </aside>
         <section className="content">
-          <div className="section-heading"><h1>Agent session</h1><span className="muted">Context is redacted and daemon-owned</span></div>
-          <div className="chat-output">{reply || <span className="muted">Ask the agent to inspect the current game project.</span>}</div>
-          <div className="composer"><textarea value={query} onChange={(event) => setQuery(event.target.value)} placeholder="What should Loopforge inspect or plan?" /><button type="button" onClick={() => void sendQuery()} disabled={busy || !daemon.healthy}>{busy ? "Running..." : "Run"}</button></div>
-          {daemon.error && <p className="error">{daemon.error}</p>}
+          <div className="section-heading">
+            <h1>Agent session</h1>
+            <span className="muted">CLI and Skills run behind the Agent boundary</span>
+          </div>
+          <div className="chat-output">
+            {reply || <span className="muted">Ask Loopforge Agent to inspect the project.</span>}
+          </div>
+          <div className="composer">
+            <textarea
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="What should Loopforge inspect or plan?"
+            />
+            <button
+              type="button"
+              onClick={() => void sendQuery()}
+              disabled={busy || !agent.ready}
+            >
+              {busy ? "Running..." : "Run"}
+            </button>
+          </div>
+          {agent.reason && <p className="error">{agent.reason}</p>}
         </section>
       </section>
     </main>

@@ -2,15 +2,17 @@
 
 ## 1. MVP question
 
-Can Loopforge help a coding agent and a non-expert user produce a small playable
-game prototype, preserve the process across sessions, and make an evidence-based
-prototype decision without a custom agent runtime?
+Can the independent Loopforge Agent help a non-expert user produce a small
+playable game prototype, preserve the process across sessions, and make an
+evidence-based prototype decision while keeping its generic runtime and public
+libraries domain-neutral?
 
 ## 2. Scope
 
 The MVP covers:
 
-- one coding-agent host: Codex;
+- one product host: Loopforge Workbench, with Codex retained for compatibility
+  and workflow evaluation;
 - one engine and project shape, selected during implementation planning;
 - one-player, local prototypes;
 - discovery, hypothesis, prototyping, verification, playtest import, and
@@ -26,16 +28,18 @@ validated with a thin technical spike before being locked.
 
 ## 3. Representative user journey
 
-1. User opens a new or existing game repository in Codex.
-2. Codex invokes `loopforge-router` and runs `loopforge init` if needed.
-3. The discovery procedure in `prototype-gameplay` produces one hypothesis and
+1. User opens a new or existing game repository in Loopforge Workbench.
+2. Loopforge Agent opens or initializes the project through deterministic core
+   operations and routes the next action internally.
+3. The internal discovery procedure produces one hypothesis and
    a small validation plan.
 4. User confirms the hypothesis.
-5. `prototype-gameplay` guides Codex to implement the smallest playable loop.
-6. CLI runs build, smoke test, and capture operations.
+5. Loopforge Agent implements the smallest playable loop using its internal
+   prototype and engine capabilities.
+6. Deterministic core operations run build, smoke test, and capture operations.
 7. User conducts an external playtest using the generated protocol.
-8. Codex imports the report and uses the playtest procedure in
-   `prototype-gameplay` to analyze evidence.
+8. Loopforge Agent imports the report and uses its internal playtest procedure
+   to analyze evidence.
 9. User confirms `keep`, `kill`, or `refactor`.
 10. CLI records the decision and presents the next allowed action.
 
@@ -124,10 +128,11 @@ manual evidence registration as a fallback.
 Mitigation: maintain explicit positive and negative trigger sets and use a
 single router for broad game-development requests.
 
-### Scope grows into a custom agent platform
+### Agent scope grows into a generic agent platform
 
-Mitigation: treat Codex as the executor throughout the MVP. Revisit a separate
-agent only after unattended or hosted workflows become a demonstrated need.
+Mitigation: keep Loopforge Agent domain-specific and delegate generic model,
+session and execution capabilities to Kura. Do not add Loopforge domain routes
+or types to Kura.
 
 ## 8. Verification strategy
 

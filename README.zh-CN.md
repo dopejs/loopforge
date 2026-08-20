@@ -9,18 +9,19 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Loopforge 是一套由 Agent Skills 和确定性 CLI 组成的可移植游戏开发工具包。
-它帮助编码智能体把游戏想法推进为经过测试、由证据支撑的可玩版本，同时避免将项目状态困在聊天记录中。
+Loopforge 是一个独立的本地游戏开发 Agent。它使用内部 Skills 和确定性工作流工具，
+把游戏想法推进为经过测试、由证据支撑的可玩版本，同时避免将项目状态困在聊天记录中。
 
-Loopforge 将工作流 Skills 与本地状态、证据引擎组合在一起。编码智能体仍然负责执行工作；
-Loopforge 负责让工作可恢复、可审查，并明确区分哪些结论已经得到验证、哪些尚未得到验证。
+Loopforge Agent 是产品控制面。CLI 保留为无头自动化与调试入口，Skills 是随 Agent
+版本发布的内部能力，而不是要求用户自行编排的主要产品界面。
 
 ## 本地 Agent 工作台
 
-Loopforge 正在演进为一个由 Kura 驱动的本地游戏开发工作台：
+Loopforge 提供一个由 Kura 驱动的本地游戏开发工作台：
 
-- `loopforge agent` 管理项目专属的 test daemon，默认使用项目内 `.loopforge/agent/data`，不会触碰生产数据；
-- Tauri + React 客户端通过原生代理访问 daemon，提供项目状态、Agent 对话和后续可视化工具入口；
+- 独立 Loopforge Agent 负责项目上下文、规划、内部 Skills 和确定性工具；
+- Kura 只提供通用模型、会话和运行时能力，不包含 Loopforge 领域逻辑；
+- Tauri + React 客户端只调用 Loopforge Agent 契约；
 - Deckle（`@dopejs/deckle-*`）负责可视化 artifact、画布和 revision；
 - Doper（`@dopejs/doper`）负责高性能原生渲染、滚动、编辑和输入；
 - `contracts/` 中的版本化 JSON Schema 归 Loopforge 所有，由应用侧 adapter 转换为 Deckle、Doper 和 Kura 的公共契约；公共库不依赖 Loopforge 领域类型。daemon 是运行状态事实源，Loopforge 是游戏项目与证据事实源。
@@ -35,7 +36,7 @@ loopforge agent context --format json
 
 `agent context` 只返回项目路径、阶段、revision 和能力列表等经过约束的上下文，不会返回环境变量、provider credential 或 access token。
 
-从源码构建桌面客户端时，先初始化固定版本的 Kura submodule。桌面客户端会自己管理 Kura daemon 生命周期，因此不需要另外安装 daemon；当前 alpha 仍使用 `loopforge` CLI 初始化项目并同步权威上下文：
+从源码构建桌面客户端时，先初始化固定版本的 Kura submodule。Tauri 只管理 Loopforge Agent sidecar，Agent 在内部管理 Kura：
 
 ```bash
 git submodule update --init --recursive
@@ -44,7 +45,7 @@ pnpm install
 pnpm build:desktop
 ```
 
-发布构建会把 Kura submodule 中编译出的 `dope-cli` 放进 Tauri 应用资源。`dope-cli` 是 Kura 当前上游包名，产品界面和仓库名称统一使用 Kura。
+发布构建会把独立 Loopforge Agent 和 Kura submodule 中编译出的 `dope-cli` 一起放进 Tauri 应用资源。`dope-cli` 是 Kura 当前上游包名。
 
 开发前端时使用 `pnpm dev:desktop`，它会启动原生 Tauri 开发壳和 Vite 热更新，不会重新编译 Kura，也不会生成发布安装包。只需要浏览器前端时使用 `pnpm dev`。
 
@@ -88,7 +89,7 @@ Loopforge 将技术正确性、视觉质量、试玩观察和玩法乐趣的证�
 
 ### 当前范围
 
-项目目前处于 alpha 阶段。CLI、工作流契约和仓库 Skills 已经实现并经过测试，
+项目目前处于 alpha 阶段。独立 Agent、CLI、工作流契约和仓库 Skills 已经实现并经过测试，
 当前引擎工作流聚焦于 Godot 4。完整的真实引擎验证、更广泛的引擎适配、
 托管式协作以及发布生产自动化尚未包含在 MVP 中。
 

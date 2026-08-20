@@ -18,7 +18,7 @@ must join creative workflows with deterministic state and evidence management.
 ## 2. Product thesis
 
 Loopforge is not an autonomous game studio and does not promise to manufacture
-a good game. It gives an existing coding agent a disciplined way to:
+a good game. It is an independent domain Agent that helps a user:
 
 1. frame a player-experience hypothesis;
 2. create the cheapest playable experiment that can test it;
@@ -26,19 +26,22 @@ a good game. It gives an existing coding agent a disciplined way to:
 4. make an explicit `keep`, `kill`, or `refactor` decision;
 5. advance only when the next investment is justified.
 
-The product consists of three cooperating surfaces:
+The product consists of four cooperating layers:
 
-- **Skills** provide game-design heuristics, production workflows, review
-  methods, and tool-selection guidance.
-- **CLI** provides persistent state, schemas, gates, evidence capture, command
-  execution, and recovery.
+- **Loopforge Agent** owns project context, sessions, planning, internal Skill
+  selection, tool orchestration and human approval waits.
+- **Deterministic Core** provides persistent state, schemas, gates, evidence
+  capture, command execution and recovery. The CLI is its internal/headless
+  adapter.
+- **Internal Skills** provide game-design heuristics, production workflows and
+  review methods to the Agent.
 - **Local Workbench** provides a native Tauri + React surface over the
-  Kura daemon. It exposes project context, agent sessions, evidence
-  timelines and visual tools without making the UI another source of truth.
+  Loopforge Agent without making the UI another source of truth.
 
-Codex, Claude Code, or another compatible coding agent is the executor. The
-first supported and tested host will be Codex. Kura supplies the local
-runtime; Loopforge supplies the domain capabilities and deterministic tools.
+Kura supplies generic model, session and runtime capabilities behind a
+Loopforge-owned adapter. Kura remains domain-neutral. Codex and other Agent
+Skills hosts remain supported compatibility and evaluation environments, but
+they are not the product control plane.
 
 ## 3. Target users
 
@@ -48,7 +51,7 @@ runtime; Loopforge supplies the domain capabilities and deterministic tools.
   process.
 - Software engineers entering game development without production experience.
 - Small teams using coding agents to accelerate prototypes and vertical slices.
-- Skill authors who need reusable, testable game-development workflows.
+- Teams extending the Agent with reusable, testable game-development workflows.
 
 ### Not initially targeted
 
@@ -84,8 +87,8 @@ runtime; Loopforge supplies the domain capabilities and deterministic tools.
 Loopforge should:
 
 - manage game-development stages and their evidence;
-- expose small, composable game-development skills;
-- support deterministic tools through a portable CLI;
+- expose one coherent Agent backed by small, composable internal Skills;
+- support deterministic tools through a reusable core and internal CLI;
 - preserve normal engine projects rather than inventing a closed format;
 - allow human approval at creative and release-sensitive gates;
 - degrade cleanly when image, audio, browser, or engine tools are unavailable.

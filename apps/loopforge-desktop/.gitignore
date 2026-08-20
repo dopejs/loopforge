@@ -1,5 +1,8 @@
 resources/dope-cli
 resources/dope-cli.exe
+resources/loopforge-agent
+resources/loopforge-agent.exe
+.cache/
 node_modules/
 vendor/kura/crates/target/
 dist/

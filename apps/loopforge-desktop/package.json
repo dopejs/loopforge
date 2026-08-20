@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "build:kura": "node scripts/build-kura.mjs",
     "build:daemon": "pnpm build:kura",
-    "build:desktop": "pnpm build:daemon && pnpm tauri build",
+    "build:agent": "node scripts/build-agent.mjs",
+    "build:desktop": "pnpm build:daemon && pnpm build:agent && pnpm tauri build",
     "tauri": "tauri",
     "test": "vitest run"
   },

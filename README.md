@@ -9,22 +9,23 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Loopforge is a portable game-development toolkit built from Agent Skills and a
-deterministic CLI. It helps coding agents move from a game idea to tested,
+Loopforge is an independent local game-development agent. It uses internal
+Skills and deterministic workflow tooling to move from a game idea to tested,
 evidence-backed playable builds without hiding project state inside a chat.
 
-Loopforge combines workflow Skills with a local state and evidence engine. The
-coding agent remains the executor; Loopforge makes the work resumable,
-reviewable, and explicit about what has or has not been proven.
+The Loopforge Agent is the product control plane. Its CLI remains available for
+headless automation and debugging, while its Skills are versioned internal
+capabilities rather than the primary user interface.
 
 ## Local agent workbench
 
-Loopforge is evolving into a Kura-powered local game-development workbench:
+Loopforge provides a Kura-powered local game-development workbench:
 
-- `loopforge agent` manages a project-specific test daemon under
-  `.loopforge/agent/data` without touching production data;
-- the Tauri + React client uses a native proxy for project status, agent chat,
-  and future visual tools;
+- the independent Loopforge Agent owns project context, planning, internal
+  Skills and deterministic tools;
+- Kura supplies generic model, session and runtime capabilities without
+  containing Loopforge domain behavior;
+- the Tauri + React client talks only to the Loopforge Agent contract;
 - Deckle (`@dopejs/deckle-*`) owns visual artifacts, canvases, and revisions;
 - Doper (`@dopejs/doper`) owns high-performance native rendering, scrolling,
   editing, and input;
@@ -55,9 +56,9 @@ pnpm install
 pnpm build:desktop
 ```
 
-The release build embeds the submodule's `dope-cli` binary as a Tauri resource,
-so end users do not install a daemon separately. `dope-cli` is Kura's current
-upstream package name; the product UI and repository use the Kura name.
+The release build embeds both the Loopforge Agent and the submodule's `dope-cli`
+binary as Tauri resources, so end users install neither sidecar separately.
+`dope-cli` is Kura's current upstream package name.
 
 For frontend iteration, use `pnpm dev:desktop`. It runs the native shell with
 Vite hot module replacement and does not rebuild Kura or produce release
@@ -111,7 +112,7 @@ creative and release-sensitive decisions with a human reviewer.
 
 ### Current scope
 
-The project is in alpha. The CLI, workflow contracts, and repository Skills are
+The project is in alpha. The independent Agent, CLI, workflow contracts, and repository Skills are
 implemented and tested; the current engine workflow focuses on Godot 4.
 Full real-engine validation, broader engine adapters, hosted collaboration,
 and release-production automation are not yet part of the MVP.

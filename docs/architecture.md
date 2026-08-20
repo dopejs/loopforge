@@ -2,28 +2,30 @@
 
 ## 1. Overview
 
-Loopforge separates probabilistic judgment from deterministic execution and
-uses Kura as its local runtime rather than creating a second agent
-orchestration layer.
+Loopforge separates its domain Agent from deterministic workflow operations and
+from the generic Kura runtime.
 
 ```text
 User
   |
   v
 Tauri + React desktop client
-  |-- invokes native supervisor commands
-  |-- reads Loopforge-owned project context
-  |-- sends generic chat requests to Kura
+  |-- owns only the Loopforge Agent sidecar lifecycle
+  |-- calls the versioned Loopforge Agent API
+  v
+Loopforge Agent
+  |-- owns project context, sessions, planning and tool selection
+  |-- loads internal Skills and requests human approvals
+  |-- delegates generic execution to Kura
   |                         |
   |                         v
-Kura daemon (test environment by default)
-  |-- owns agent sessions, LLM dispatch, and runtime state
+  |                 Kura daemon
+  |                 |-- owns generic model/session/runtime capabilities
+  |                 `-- contains no Loopforge routes, types or state
   |
-  |    Loopforge does not add domain routes or state to Kura
-  |
-Loopforge CLI + Skills
+Loopforge Core + internal CLI
   |-- validates state and schemas
-  |-- writes .loopforge/agent/context.json for the workbench
+  |-- writes project state and Agent context
   |-- runs engine/build/test adapters
   |-- records evidence and decisions
   |-- enforces transition gates
@@ -31,16 +33,27 @@ Loopforge CLI + Skills
 Normal game repository + .loopforge state
 ```
 
-The versioned schemas in [`../contracts`](../contracts) are owned by Loopforge.
+The versioned schemas in [`../contracts`](../contracts) are owned by Loopforge,
+including the Workbench-to-Agent wire contract.
 Application adapters map them to public Kura, Deckle, and Doper contracts; the
 public libraries do not import Loopforge types or expose Loopforge-named APIs.
-React never spawns subprocesses or imports daemon internals. Deckle and Doper
-are consumed through public packages and Loopforge-owned adapters.
-The desktop app pins Kura as a git submodule and embeds its release
-binary as a Tauri resource; the gitlink is the reviewed runtime version and the
-application never silently substitutes a globally installed daemon.
+React never spawns subprocesses, calls Kura or imports runtime internals. Tauri
+starts the Loopforge Agent but does not orchestrate Kura. Deckle and Doper are
+consumed through public packages and Loopforge-owned adapters. The desktop app
+bundles the Loopforge Agent and pins Kura as a reviewed runtime dependency. The
+Agent, not the UI, owns Kura lifecycle and requests.
 
 ## 2. Component responsibilities
+
+### Agent layer
+
+Owns the domain behavior visible to users:
+
+- project opening and redacted context assembly;
+- session continuity, planning and tool selection;
+- workflow routing and approval requests;
+- delegation to deterministic core operations and generic Kura capabilities;
+- recovery status and versioned Workbench APIs.
 
 ### Skill layer
 
@@ -54,10 +67,10 @@ Owns work that requires context-sensitive judgment:
 - recommendations for `keep`, `kill`, or `refactor`;
 - review instructions and escalation rules.
 
-Skills may call scripts and the Loopforge CLI, but should not duplicate CLI
-schemas or state-transition logic.
+Skills are internal Agent capabilities. They may call scripts and deterministic
+core adapters, but should not duplicate schemas or state-transition logic.
 
-### CLI layer
+### Core and CLI layer
 
 Owns work requiring deterministic behavior:
 
@@ -72,8 +85,9 @@ Owns work requiring deterministic behavior:
 - revision checks, project locking, and reconciliation;
 - machine-readable output and exit codes.
 
-The CLI validates whether required evidence exists. It does not decide whether
-the evidence proves that a game is fun.
+The CLI remains a compatibility, debugging and headless automation adapter over
+the same deterministic behavior consumed by the Agent. It is not the product
+control plane and does not decide whether evidence proves that a game is fun.
 
 ### Adapter layer
 
@@ -106,6 +120,10 @@ locally entered identity is cryptographically authenticated.
 
 ```text
 loopforge/
+├── agent/
+│   └── loopforge_agent/
+├── apps/
+│   └── loopforge-desktop/
 ├── docs/
 ├── skills/
 │   ├── loopforge-router/
@@ -116,13 +134,8 @@ loopforge/
 │   ├── direct-game-art/
 │   ├── build-godot-game/
 │   └── review-game-release/
-├── cli/
-│   ├── commands/
-│   ├── domain/
-│   ├── schemas/
-│   ├── adapters/
-│   └── reports/
-├── templates/
+├── cli/                     # internal/headless compatibility adapter
+├── contracts/
 ├── tests/
 │   ├── cli/
 │   ├── skills/

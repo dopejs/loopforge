@@ -3,8 +3,9 @@
 ## Planning principle
 
 Each milestone must prove a product assumption with a usable artifact. The team
-should not build a hosted platform, graphical dashboard, or multi-engine layer
-before the core skill-plus-CLI workflow works on a real game.
+should not build a hosted platform, broad dashboard, or multi-engine layer
+before the independent Agent workflow works on a real game. Workbench features
+must directly support that validated workflow.
 
 ## Milestone 0: Design baseline
 
@@ -19,9 +20,9 @@ Deliverables:
 
 Exit criteria:
 
-- The relationship among coding agent, skills, CLI, engine, and human reviewer
-  is unambiguous.
-- MVP non-goals prevent an accidental autonomous-agent platform build.
+- The relationship among Loopforge Agent, internal Skills, deterministic core,
+  Kura, engine, Workbench and human reviewer is unambiguous.
+- MVP non-goals prevent an accidental generic-agent platform build.
 
 ## Milestone 1: State and evidence CLI
 

@@ -20,7 +20,7 @@ from .kura_client import KuraAgentError, KuraClient
 RUNTIME_SCHEMA = "kura-runtime-v1"
 
 
-class AgentSupervisor:
+class KuraRuntimeSupervisor:
     def __init__(
         self, project: LoopforgeProject, dope_binary: str | None = None
     ) -> None:
@@ -273,3 +273,8 @@ class AgentSupervisor:
             "context_path": str(self.context_path),
             "synchronized": True,
         }
+
+
+# Backward-compatible import for the alpha CLI surface. New application code
+# should use KuraRuntimeSupervisor and keep LoopforgeAgent as the domain Agent.
+AgentSupervisor = KuraRuntimeSupervisor

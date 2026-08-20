@@ -1,6 +1,6 @@
 # ADR 0001: Use Skills and a Deterministic CLI
 
-- Status: Accepted
+- Status: Superseded by ADR 0006
 - Date: 2026-08-18
 
 ## Context
