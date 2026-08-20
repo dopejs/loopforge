@@ -60,9 +60,18 @@ The release build embeds both the Loopforge Agent and the submodule's `dope-cli`
 binary as Tauri resources, so end users install neither sidecar separately.
 `dope-cli` is Kura's current upstream package name.
 
-For frontend iteration, use `pnpm dev:desktop`. It runs the native shell with
-Vite hot module replacement and does not rebuild Kura or produce release
-packages. Use `pnpm dev` when only the browser shell is needed.
+Start the development environment directly from the repository root:
+
+```bash
+./dev.sh
+```
+
+The first run installs Workbench dependencies, initializes the Kura submodule,
+and builds any missing Agent and Kura sidecars. Later runs reuse those sidecars
+and start the native Tauri shell with Vite hot module replacement without
+producing release packages. After changing Agent or Kura code, use
+`--rebuild-agent`, `--rebuild-kura`, or `--rebuild-sidecars`. Use `pnpm dev`
+from `apps/workbench` when only the browser shell is needed.
 
 ## What Loopforge provides
 

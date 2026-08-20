@@ -47,7 +47,17 @@ pnpm build:desktop
 
 发布构建会把独立 Loopforge Agent 和 Kura submodule 中编译出的 `dope-cli` 一起放进 Tauri 应用资源。`dope-cli` 是 Kura 当前上游包名。
 
-开发前端时使用 `pnpm dev:desktop`，它会启动原生 Tauri 开发壳和 Vite 热更新，不会重新编译 Kura，也不会生成发布安装包。只需要浏览器前端时使用 `pnpm dev`。
+在仓库根目录直接启动开发环境：
+
+```bash
+./dev.sh
+```
+
+首次运行会安装 Workbench 依赖、初始化 Kura submodule，并构建缺失的 Agent 与
+Kura sidecar。后续运行会复用 sidecar，启动原生 Tauri 开发壳和 Vite 热更新，
+不会生成发布安装包。修改 Agent 或 Kura 后，可分别使用 `--rebuild-agent` 或
+`--rebuild-kura`；使用 `--rebuild-sidecars` 可重建两者。只需要浏览器前端时，
+仍可在 `apps/workbench` 中使用 `pnpm dev`。
 
 ## Loopforge 提供什么
 
