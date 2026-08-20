@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ensureAgentReady, errorMessage } from "./daemon";
 import {
   addProjectRoot,
@@ -118,6 +119,19 @@ const MODES: Record<WorkspaceMode, ModeDefinition> = {
     ]
   }
 };
+
+function startWindowDrag(event: React.MouseEvent<HTMLElement>): void {
+  if (
+    event.button !== 0 ||
+    (event.target as HTMLElement).closest("button, input, textarea, select, a")
+  ) {
+    return;
+  }
+  if (!("__TAURI_INTERNALS__" in window)) return;
+  void getCurrentWindow().startDragging().catch((error: unknown) => {
+    console.error("Failed to start native window dragging", error);
+  });
+}
 
 function App(): React.JSX.Element {
   const [projectRoots, setProjectRoots] = useState<string[]>(() =>
@@ -266,7 +280,11 @@ function App(): React.JSX.Element {
   return (
     <main className="shell">
       <aside className="project-menu">
-        <div className="brand-region" data-tauri-drag-region>
+        <div
+          className="brand-region"
+          data-tauri-drag-region
+          onMouseDown={startWindowDrag}
+        >
           <div className="brand-mark" data-tauri-drag-region>LF</div>
           <strong data-tauri-drag-region>Loopforge</strong>
         </div>
@@ -317,7 +335,11 @@ function App(): React.JSX.Element {
       </aside>
 
       <section className="right-pane">
-        <header className="project-header" data-tauri-drag-region>
+        <header
+          className="project-header"
+          data-tauri-drag-region
+          onMouseDown={startWindowDrag}
+        >
           <div className="project-title" data-tauri-drag-region>
             <strong data-tauri-drag-region>{activeProjectName}</strong>
             {projectRoot && <span data-tauri-drag-region>{projectRoot}</span>}
