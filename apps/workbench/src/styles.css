@@ -5,11 +5,6 @@ body { margin: 0; min-width: 960px; }
 .topbar { height: 56px; padding: 0 22px; display: flex; align-items: center; gap: 22px; border-bottom: 1px solid #d8dee8; background: #fff; }
 .topbar > div { flex: 1; }
 .muted { color: #687386; font-size: 13px; }
-.endpoint { display: flex; align-items: center; gap: 8px; color: #687386; font-size: 12px; }
-.endpoint input { width: 190px; padding: 6px 8px; border: 1px solid #c7cfdb; border-radius: 4px; }
-.status { padding: 5px 8px; border-radius: 4px; font-size: 12px; }
-.ready { color: #0f6b46; background: #e3f5eb; }
-.degraded { color: #915b00; background: #fff0cf; }
 .workspace { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 56px); }
 .sidebar { padding: 24px; border-right: 1px solid #d8dee8; background: #fff; }
 .sidebar h2, .sidebar h3 { margin: 0 0 14px; font-size: 14px; }

@@ -178,7 +178,6 @@ function App(): React.JSX.Element {
   };
 
   const context = agent.project;
-  const runtimeVersion = agent.runtime?.version?.version;
   return (
     <main className="shell">
       <header className="topbar">
@@ -186,16 +185,6 @@ function App(): React.JSX.Element {
           <strong>Loopforge Workbench</strong>
           <span className="muted"> independent game-development agent</span>
         </div>
-        <span className="endpoint">Agent {agent.managed ? "local" : "not started"}</span>
-        <span className={agent.ready ? "status ready" : "status degraded"}>
-          {agent.ready
-            ? `ready ${runtimeVersion ?? ""}`
-            : lifecycleBusy
-              ? "starting agent…"
-              : projectRoot
-                ? "agent unavailable"
-                : "no project"}
-        </span>
       </header>
       <section className="workspace">
         <aside className="sidebar">
