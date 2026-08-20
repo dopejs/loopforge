@@ -9,6 +9,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
+use tauri_plugin_dialog::DialogExt;
 use url::{Host, Url};
 use uuid::Uuid;
 
@@ -233,6 +234,29 @@ fn agent_status(project_path: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
+async fn select_project_directory(app: AppHandle) -> Result<Option<String>, String> {
+    let Some(selection) = app
+        .dialog()
+        .file()
+        .set_title("Add a Loopforge project")
+        .blocking_pick_folder()
+    else {
+        return Ok(None);
+    };
+    let selected = selection
+        .into_path()
+        .map_err(|error| format!("selected project is not a local directory: {error}"))?;
+    let selected = selected
+        .to_str()
+        .ok_or_else(|| "selected project path is not valid UTF-8".to_string())?;
+    let selected = project_root(selected)?;
+    let selected = selected
+        .to_str()
+        .ok_or_else(|| "resolved project path is not valid UTF-8".to_string())?;
+    Ok(Some(selected.to_string()))
+}
+
+#[tauri::command]
 fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let current = agent_status_for_root(&root)?;
@@ -385,7 +409,9 @@ fn agent_query(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            select_project_directory,
             agent_status,
             agent_start,
             agent_stop,

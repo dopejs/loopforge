@@ -1,7 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
-import { errorMessage } from "./daemon";
+import { ensureAgentReady, errorMessage } from "./daemon";
+import {
+  addProjectRoot,
+  loadActiveProject,
+  loadProjectRoots,
+  projectName,
+  saveProjectSelection
+} from "./projects";
 import "./styles.css";
 
 type LoopforgeProjectContext = {
@@ -38,8 +45,11 @@ type AgentQueryResponse = {
 };
 
 function App(): React.JSX.Element {
+  const [projectRoots, setProjectRoots] = useState<string[]>(() =>
+    loadProjectRoots(localStorage)
+  );
   const [projectRoot, setProjectRoot] = useState(
-    () => localStorage.getItem("loopforge.projectRoot") ?? ""
+    () => loadActiveProject(localStorage, loadProjectRoots(localStorage))
   );
   const [agent, setAgent] = useState<AgentState>({
     schema_version: "loopforge-agent-status-v1",
@@ -50,6 +60,7 @@ function App(): React.JSX.Element {
   const [threadId, setThreadId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [selectingProject, setSelectingProject] = useState(false);
   const agentInvoke = useMemo(
     () => async <T,>(command: string, extra: Record<string, unknown> = {}): Promise<T> =>
       invoke<T>(command, { projectPath: projectRoot, ...extra }),
@@ -57,16 +68,13 @@ function App(): React.JSX.Element {
   );
 
   useEffect(() => {
+    saveProjectSelection(localStorage, projectRoots, projectRoot);
+  }, [projectRoot, projectRoots]);
+
+  useEffect(() => {
     let cancelled = false;
+    let timer: number | undefined;
     const refresh = async (): Promise<void> => {
-      if (!projectRoot.trim()) {
-        setAgent({
-          schema_version: "loopforge-agent-status-v1",
-          ready: false,
-          reason: "Choose a game project directory to start Loopforge Agent."
-        });
-        return;
-      }
       try {
         const status = await agentInvoke<AgentState>("agent_status");
         if (!cancelled) setAgent(status);
@@ -80,47 +88,75 @@ function App(): React.JSX.Element {
         }
       }
     };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 5000);
+    const activate = async (): Promise<void> => {
+      if (!projectRoot) {
+        setAgent({
+          schema_version: "loopforge-agent-status-v1",
+          ready: false,
+          reason: "Add a game project folder to begin."
+        });
+        return;
+      }
+      setLifecycleBusy(true);
+      setAgent({
+        schema_version: "loopforge-agent-status-v1",
+        ready: false,
+        reason: "Starting Loopforge Agent for the selected project."
+      });
+      try {
+        const status = await ensureAgentReady<AgentState>((command) =>
+          agentInvoke<AgentState>(command)
+        );
+        if (!cancelled) setAgent(status);
+      } catch (error) {
+        if (!cancelled) {
+          setAgent({
+            schema_version: "loopforge-agent-status-v1",
+            ready: false,
+            reason: errorMessage(error, "failed to start Loopforge Agent")
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setLifecycleBusy(false);
+          timer = window.setInterval(() => void refresh(), 5000);
+        }
+      }
+    };
+    void activate();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearInterval(timer);
     };
   }, [agentInvoke, projectRoot]);
 
-  const startAgent = async (): Promise<void> => {
-    if (!projectRoot.trim() || lifecycleBusy) return;
-    setLifecycleBusy(true);
-    localStorage.setItem("loopforge.projectRoot", projectRoot.trim());
+  const addProject = async (): Promise<void> => {
+    if (selectingProject || lifecycleBusy) return;
+    setSelectingProject(true);
     try {
-      setAgent(await agentInvoke<AgentState>("agent_start"));
+      const selected = await invoke<string | null>("select_project_directory");
+      if (selected) {
+        setProjectRoots((roots) => addProjectRoot(roots, selected));
+        setProjectRoot(selected);
+        setThreadId(undefined);
+        setReply("");
+      }
     } catch (error) {
       setAgent({
         schema_version: "loopforge-agent-status-v1",
         ready: false,
-        reason: errorMessage(error, "failed to start Loopforge Agent")
+        reason: errorMessage(error, "failed to select a project directory")
       });
     } finally {
-      setLifecycleBusy(false);
+      setSelectingProject(false);
     }
   };
 
-  const stopAgent = async (): Promise<void> => {
-    if (!projectRoot.trim() || lifecycleBusy) return;
-    setLifecycleBusy(true);
-    try {
-      await agentInvoke("agent_stop");
-      setAgent({ schema_version: "loopforge-agent-status-v1", ready: false });
-      setThreadId(undefined);
-    } catch (error) {
-      setAgent({
-        schema_version: "loopforge-agent-status-v1",
-        ready: false,
-        reason: errorMessage(error, "failed to stop Loopforge Agent")
-      });
-    } finally {
-      setLifecycleBusy(false);
-    }
+  const selectProject = (root: string): void => {
+    if (lifecycleBusy || root === projectRoot) return;
+    setProjectRoot(root);
+    setThreadId(undefined);
+    setReply("");
   };
 
   const sendQuery = async (): Promise<void> => {
@@ -151,37 +187,48 @@ function App(): React.JSX.Element {
           <span className="muted"> independent game-development agent</span>
         </div>
         <span className="endpoint">Agent {agent.managed ? "local" : "not started"}</span>
-        <div className="lifecycle">
-          <button
-            type="button"
-            onClick={() => void startAgent()}
-            disabled={lifecycleBusy || !projectRoot.trim() || agent.ready}
-          >
-            Start
-          </button>
-          <button
-            type="button"
-            onClick={() => void stopAgent()}
-            disabled={lifecycleBusy || !projectRoot.trim() || !agent.managed}
-          >
-            Stop
-          </button>
-        </div>
         <span className={agent.ready ? "status ready" : "status degraded"}>
-          {agent.ready ? `ready ${runtimeVersion ?? ""}` : "agent unavailable"}
+          {agent.ready
+            ? `ready ${runtimeVersion ?? ""}`
+            : lifecycleBusy
+              ? "starting agent…"
+              : projectRoot
+                ? "agent unavailable"
+                : "no project"}
         </span>
       </header>
       <section className="workspace">
         <aside className="sidebar">
-          <h2>Project</h2>
-          <label className="project-root">
-            Root
-            <input
-              value={projectRoot}
-              onChange={(event) => setProjectRoot(event.target.value)}
-              placeholder="/path/to/game"
-            />
-          </label>
+          <div className="projects-heading">
+            <h2>Projects</h2>
+            <button
+              type="button"
+              className="add-project"
+              onClick={() => void addProject()}
+              disabled={selectingProject || lifecycleBusy}
+            >
+              {selectingProject ? "Opening…" : "Add project"}
+            </button>
+          </div>
+          <div className="project-list">
+            {projectRoots.map((root) => (
+              <button
+                type="button"
+                className={root === projectRoot ? "project active" : "project"}
+                key={root}
+                onClick={() => selectProject(root)}
+                disabled={lifecycleBusy}
+                aria-pressed={root === projectRoot}
+                title={root}
+              >
+                <strong>{projectName(root)}</strong>
+                <span>{root}</span>
+              </button>
+            ))}
+            {projectRoots.length === 0 && (
+              <p className="muted">Add a folder to open it as a Loopforge project.</p>
+            )}
+          </div>
           {context ? (
             <>
               <div className="project-id">{context.project_id}</div>
@@ -195,7 +242,11 @@ function App(): React.JSX.Element {
               </ul>
             </>
           ) : (
-            <p className="muted">Start Loopforge Agent to open this project.</p>
+            <p className="muted">
+              {projectRoot
+                ? "The project context will appear when its Agent is ready."
+                : "Select a project to load its context automatically."}
+            </p>
           )}
         </aside>
         <section className="content">
@@ -227,4 +278,9 @@ function App(): React.JSX.Element {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+const root = createRoot(document.getElementById("root")!);
+root.render(<App />);
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => root.unmount());
+}

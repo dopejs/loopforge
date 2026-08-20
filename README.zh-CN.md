@@ -59,6 +59,9 @@ Kura sidecar。后续运行会复用 sidecar，启动原生 Tauri 开发壳和 V
 `--rebuild-kura`；使用 `--rebuild-sidecars` 可重建两者。只需要浏览器前端时，
 仍可在 `apps/workbench` 中使用 `pnpm dev`。
 
+Workbench 中使用原生目录选择器添加游戏项目。选中项目后，Workbench 会自动启动
+或重新连接该项目的 Loopforge Agent，不需要手动管理 Agent 的启动。
+
 ## Loopforge 提供什么
 
 ### 由证据驱动的游戏开发流程

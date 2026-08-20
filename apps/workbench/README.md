@@ -31,10 +31,11 @@ functionality is needed. Rust changes
 cause Tauri to rebuild and restart the development app; React and CSS changes
 do not.
 
-The Tauri supervisor owns only the Loopforge Agent sidecar lifecycle. Select a
-game project directory and start the Agent there; the Agent owns Kura and uses
-the deterministic Python core internally. The CLI remains available for
-headless automation and debugging.
+The Tauri supervisor owns only the Loopforge Agent sidecar lifecycle. Add a
+game project with the native folder picker; selecting a project starts or
+reconnects its Agent automatically. The Agent owns Kura and uses the
+deterministic Python core internally. The CLI remains available for headless
+automation and debugging.
 
 ## Embedded sidecar build
 

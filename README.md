@@ -73,6 +73,10 @@ producing release packages. After changing Agent or Kura code, use
 `--rebuild-agent`, `--rebuild-kura`, or `--rebuild-sidecars`. Use `pnpm dev`
 from `apps/workbench` when only the browser shell is needed.
 
+Add game projects with the Workbench's native folder picker. Selecting a
+project automatically starts or reconnects its Loopforge Agent; users do not
+manually manage Agent startup.
+
 ## What Loopforge provides
 
 ### An evidence-backed game workflow
