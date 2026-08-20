@@ -69,7 +69,8 @@ function Icon({ name }: { name: string }): React.JSX.Element {
     terminal: <><path d="m4 6 5 5-5 5M11 18h9" /></>,
     play: <path d="m7 4 13 8-13 8Z" />,
     checklist: <><path d="m4 6 2 2 4-4M4 13l2 2 4-4M13 7h7M13 14h7M4 20h16" /></>,
-    bug: <><path d="M8 9h8v8a4 4 0 0 1-8 0ZM10 5h4l2 4H8Z" /><path d="M4 13h4M16 13h4M5 19l3-2M19 19l-3-2" /></>
+    bug: <><path d="M8 9h8v8a4 4 0 0 1-8 0ZM10 5h4l2 4H8Z" /><path d="M4 13h4M16 13h4M5 19l3-2M19 19l-3-2" /></>,
+    folder: <><path d="M3 6h7l2 2h9v11H3Z" /><path d="M12 11v5M9.5 13.5h5" /></>
   };
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -356,98 +357,124 @@ function App(): React.JSX.Element {
           </div>
         </header>
 
-        <section className="workspace">
-          <nav className="mode-toolbar" aria-label="Workspace modes and tools">
-            <div className="toolbar-group">
-              {(Object.entries(MODES) as Array<[WorkspaceMode, ModeDefinition]>).map(
-                ([id, definition]) => (
-                  <button
-                    type="button"
-                    key={id}
-                    className={id === mode ? "tool-button active" : "tool-button"}
-                    onClick={() => selectMode(id)}
-                    aria-label={`${definition.label} mode`}
-                    aria-pressed={id === mode}
-                    title={`${definition.label} mode`}
-                  >
-                    {definition.icon}
-                  </button>
-                )
-              )}
-            </div>
-            <div className="toolbar-divider" />
-            <div className="toolbar-group">
-              {modeDefinition.tools.map((tool) => (
-                <button
-                  type="button"
-                  key={tool.id}
-                  className={tool.id === activeTool ? "tool-button active secondary" : "tool-button secondary"}
-                  onClick={() => setActiveTool(tool.id)}
-                  aria-label={tool.label}
-                  aria-pressed={tool.id === activeTool}
-                  title={tool.label}
-                >
-                  {tool.icon}
-                </button>
-              ))}
-            </div>
-          </nav>
-
-          <div className="work-surface">
-            <div className="surface-heading">
-              <span className="eyebrow">{modeDefinition.label} mode</span>
-              <h1>{projectRoot ? activeProjectName : "Add a project to begin"}</h1>
-              <p>{projectRoot ? modeDefinition.description : "Choose a game project folder to open it in Loopforge."}</p>
-            </div>
-            {context && (
-              <div className="context-card">
-                <span>Project context</span>
-                <strong>{context.project_id}</strong>
-                <small>{context.capabilities.length} capabilities available</small>
+        <section className={projectRoot ? "workspace" : "workspace empty-workspace"}>
+          {!projectRoot ? (
+            <div className="workspace-empty-state">
+              <div className="empty-state-icon">
+                <Icon name="folder" />
               </div>
-            )}
-          </div>
-
-          <aside className="chat-panel">
-            <div className="chat-heading">
               <div>
-                <strong>Loopforge Agent</strong>
+                <h1>Add a project to begin</h1>
+                <p>Choose a game project folder to open it in Loopforge.</p>
               </div>
-              <span className="muted">Chat</span>
-            </div>
-            <div className="chat-output">
-              {reply || (
-                <div className="empty-chat">
-                  <strong>How can I help?</strong>
-                  <span>Ask the Agent to inspect, plan, or work with this project.</span>
-                </div>
-              )}
-            </div>
-            <div className="composer">
-              <textarea
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                    event.preventDefault();
-                    void sendQuery();
-                  }
-                }}
-                placeholder="Ask Loopforge…"
-              />
               <button
                 type="button"
-                className="send-button"
-                onClick={() => void sendQuery()}
-                disabled={busy || !agent.ready}
+                className="primary-button"
+                onClick={() => void addProject()}
+                disabled={selectingProject || lifecycleBusy}
               >
-                {busy ? "Working…" : "Send"}
+                {selectingProject ? "Opening…" : "Add project"}
               </button>
             </div>
-            {projectRoot && !lifecycleBusy && agent.reason && (
-              <p className="error">{agent.reason}</p>
-            )}
-          </aside>
+          ) : (
+            <>
+              <nav className="mode-toolbar" aria-label="Workspace modes and tools">
+                <div className="toolbar-group">
+                  {(Object.entries(MODES) as Array<[WorkspaceMode, ModeDefinition]>).map(
+                    ([id, definition]) => (
+                      <button
+                        type="button"
+                        key={id}
+                        className={id === mode ? "tool-button active" : "tool-button"}
+                        onClick={() => selectMode(id)}
+                        aria-label={`${definition.label} mode`}
+                        aria-pressed={id === mode}
+                        title={`${definition.label} mode`}
+                      >
+                        {definition.icon}
+                      </button>
+                    )
+                  )}
+                </div>
+                <div className="toolbar-divider" />
+                <div className="toolbar-group">
+                  {modeDefinition.tools.map((tool) => (
+                    <button
+                      type="button"
+                      key={tool.id}
+                      className={
+                        tool.id === activeTool
+                          ? "tool-button active secondary"
+                          : "tool-button secondary"
+                      }
+                      onClick={() => setActiveTool(tool.id)}
+                      aria-label={tool.label}
+                      aria-pressed={tool.id === activeTool}
+                      title={tool.label}
+                    >
+                      {tool.icon}
+                    </button>
+                  ))}
+                </div>
+              </nav>
+
+              <div className="work-surface">
+                <div className="surface-heading">
+                  <span className="eyebrow">{modeDefinition.label} mode</span>
+                  <h1>{activeProjectName}</h1>
+                  <p>{modeDefinition.description}</p>
+                </div>
+                {context && (
+                  <div className="context-card">
+                    <span>Project context</span>
+                    <strong>{context.project_id}</strong>
+                    <small>{context.capabilities.length} capabilities available</small>
+                  </div>
+                )}
+              </div>
+
+              <aside className="chat-panel">
+                <div className="chat-heading">
+                  <div>
+                    <strong>Loopforge Agent</strong>
+                  </div>
+                  <span className="muted">Chat</span>
+                </div>
+                <div className="chat-output">
+                  {reply || (
+                    <div className="empty-chat">
+                      <strong>How can I help?</strong>
+                      <span>Ask the Agent to inspect, plan, or work with this project.</span>
+                    </div>
+                  )}
+                </div>
+                <div className="composer">
+                  <textarea
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                        event.preventDefault();
+                        void sendQuery();
+                      }
+                    }}
+                    placeholder="Ask Loopforge…"
+                  />
+                  <button
+                    type="button"
+                    className="send-button"
+                    onClick={() => void sendQuery()}
+                    disabled={busy || !agent.ready}
+                  >
+                    {busy ? "Working…" : "Send"}
+                  </button>
+                </div>
+                {!lifecycleBusy && agent.reason && (
+                  <p className="error">{agent.reason}</p>
+                )}
+              </aside>
+            </>
+          )}
         </section>
       </section>
     </main>

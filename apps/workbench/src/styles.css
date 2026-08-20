@@ -208,6 +208,46 @@ button:disabled { cursor: default; opacity: .45; }
   background-size: 24px 24px;
 }
 
+.empty-workspace {
+  display: grid;
+  place-items: center;
+}
+
+.workspace-empty-state {
+  display: grid;
+  max-width: 360px;
+  justify-items: center;
+  gap: 20px;
+  padding: 32px;
+  color: #717d90;
+  text-align: center;
+}
+
+.empty-state-icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border: 1px solid #cdd9eb;
+  border-radius: 16px;
+  color: #2c63c7;
+  background: rgba(255, 255, 255, .9);
+  box-shadow: 0 8px 22px rgba(39, 52, 72, .08);
+}
+.empty-state-icon svg { width: 27px; height: 27px; }
+.workspace-empty-state h1 { margin: 0 0 8px; color: #2a374a; font-size: 22px; letter-spacing: -.025em; }
+.workspace-empty-state p { margin: 0; font-size: 12px; line-height: 1.5; }
+.primary-button {
+  padding: 9px 15px;
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  background: #2c63c7;
+  font-size: 11px;
+  font-weight: 650;
+}
+.primary-button:not(:disabled):hover { background: #2357b4; }
+
 .mode-toolbar {
   position: absolute;
   z-index: 2;
