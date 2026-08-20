@@ -1,12 +1,13 @@
-:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #1f2933; background: #f5f7fa; }
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #1f2933; background: #edf1f5; }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 960px; }
-.shell { min-height: 100vh; }
-.topbar { height: 56px; padding: 0 22px; display: flex; align-items: center; gap: 22px; border-bottom: 1px solid #d8dee8; background: #fff; }
+html, body, #root { height: 100%; }
+body { margin: 0; min-width: 960px; overflow: hidden; background: #edf1f5; }
+.shell { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 8px; }
+.topbar { flex: 0 0 52px; padding: 0 18px 0 82px; display: flex; align-items: center; gap: 22px; border: 1px solid #d3dae5; border-bottom: 0; border-radius: 12px 12px 0 0; background: #fff; user-select: none; }
 .topbar > div { flex: 1; }
 .muted { color: #687386; font-size: 13px; }
-.workspace { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 56px); }
-.sidebar { padding: 24px; border-right: 1px solid #d8dee8; background: #fff; }
+.workspace { display: grid; flex: 1; grid-template-columns: 280px 1fr; min-height: 0; overflow: hidden; border: 1px solid #d3dae5; border-radius: 0 0 12px 12px; background: #f5f7fa; box-shadow: 0 8px 24px rgba(37, 49, 68, .08); }
+.sidebar { overflow: auto; padding: 24px; border-right: 1px solid #d8dee8; background: #fff; }
 .sidebar h2, .sidebar h3 { margin: 0 0 14px; font-size: 14px; }
 .sidebar h3 { margin-top: 26px; }
 .projects-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
@@ -22,7 +23,7 @@ body { margin: 0; min-width: 960px; }
 .project-id { font-family: ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere; }
 .stage { display: inline-block; margin-top: 12px; padding: 5px 8px; color: #1e4e8c; background: #e7f0ff; border-radius: 4px; font-size: 12px; }
 ul { padding-left: 18px; margin: 0; font-size: 12px; line-height: 1.8; }
-.content { padding: 30px 38px; max-width: 980px; width: 100%; }
+.content { overflow: auto; padding: 30px 38px; max-width: 980px; width: 100%; }
 .section-heading { display: flex; align-items: baseline; justify-content: space-between; }
 h1 { margin: 0 0 22px; font-size: 22px; }
 .chat-output { min-height: 360px; padding: 20px; border: 1px solid #d8dee8; background: #fff; white-space: pre-wrap; line-height: 1.6; }

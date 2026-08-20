@@ -180,10 +180,12 @@ function App(): React.JSX.Element {
   const context = agent.project;
   return (
     <main className="shell">
-      <header className="topbar">
-        <div>
-          <strong>Loopforge Workbench</strong>
-          <span className="muted"> independent game-development agent</span>
+      <header className="topbar" data-tauri-drag-region>
+        <div data-tauri-drag-region>
+          <strong data-tauri-drag-region>Loopforge Workbench</strong>
+          <span className="muted" data-tauri-drag-region>
+            {" "}independent game-development agent
+          </span>
         </div>
       </header>
       <section className="workspace">
