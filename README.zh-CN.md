@@ -46,6 +46,8 @@ pnpm build:desktop
 
 发布构建会把 Kura submodule 中编译出的 `dope-cli` 放进 Tauri 应用资源。`dope-cli` 是 Kura 当前上游包名，产品界面和仓库名称统一使用 Kura。
 
+开发前端时使用 `pnpm dev:desktop`，它会启动原生 Tauri 开发壳和 Vite 热更新，不会重新编译 Kura，也不会生成发布安装包。只需要浏览器前端时使用 `pnpm dev`。
+
 ## Loopforge 提供什么
 
 ### 由证据驱动的游戏开发流程

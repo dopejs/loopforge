@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:desktop": "tauri dev",
     "build": "tsc --noEmit && vite build",
     "build:kura": "node scripts/build-kura.mjs",
     "build:daemon": "pnpm build:kura",

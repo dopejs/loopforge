@@ -59,6 +59,10 @@ The release build embeds the submodule's `dope-cli` binary as a Tauri resource,
 so end users do not install a daemon separately. `dope-cli` is Kura's current
 upstream package name; the product UI and repository use the Kura name.
 
+For frontend iteration, use `pnpm dev:desktop`. It runs the native shell with
+Vite hot module replacement and does not rebuild Kura or produce release
+packages. Use `pnpm dev` when only the browser shell is needed.
+
 ## What Loopforge provides
 
 ### An evidence-backed game workflow

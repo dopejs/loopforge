@@ -11,12 +11,25 @@ public facade contracts are pinned in this repository's `contracts/` directory.
 The project context remains in `.loopforge/agent/context.json`; Kura has no
 Loopforge-specific route, type, or persisted state.
 
-Run the web shell during development:
+Run the browser-only web shell with Vite hot module replacement:
 
 ```bash
 pnpm install
 pnpm dev
 ```
+
+Run the native Tauri shell with the same frontend hot module replacement:
+
+```bash
+pnpm dev:desktop
+```
+
+Neither development command builds a release daemon or packages an app. The
+native command reuses `resources/dope-cli` when it already exists, or a daemon
+selected through `LOOPFORGE_KURA_BIN`. Run `pnpm build:kura` once when daemon
+functionality is needed and no development binary is available. Rust changes
+cause Tauri to rebuild and restart the development app; React and CSS changes
+do not.
 
 The Tauri supervisor owns daemon lifecycle. Select a game project directory in
 the desktop client and start Kura there; end users do not need a separately
