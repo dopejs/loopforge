@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopforge.dev/contracts/loopforge-provider-v1.schema.json",
+  "title": "Loopforge Provider Inventory v1",
+  "description": "A read-only projection of the generic Kura provider inventory for the Workbench. Loopforge owns no provider state: this contract exists so the Workbench calls an Agent contract rather than Kura directly, and it deliberately omits fields Kura does not model.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "providers"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "loopforge-provider-v1"
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/provider"
+      }
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why the inventory is empty or partial, when the runtime could not be reached."
+    },
+    "roles": {
+      "type": "array",
+      "description": "Model routing by modality, projected from the runtime. Absent when the runtime exposes no role routing, which is distinct from an empty array (routing exists but nothing is routed).",
+      "items": {
+        "$ref": "#/$defs/role"
+      }
+    }
+  },
+  "$defs": {
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "family",
+        "health",
+        "ready",
+        "capabilities",
+        "models"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "family": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "auth_mode": {
+          "type": "string"
+        },
+        "health": {
+          "enum": [
+            "ready",
+            "unconfigured",
+            "error"
+          ],
+          "description": "Derived from Kura readiness plus reported issues; not a Kura field."
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "is_default": {
+          "type": "boolean"
+        },
+        "base_url": {
+          "type": "string"
+        },
+        "secret_configured": {
+          "type": "boolean"
+        },
+        "account_label": {
+          "type": "string"
+        },
+        "plan": {
+          "type": "string"
+        },
+        "auth_status": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "default_model": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/model"
+          }
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "display_name",
+        "available",
+        "capabilities"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "is_default": {
+          "type": "boolean"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "chat",
+              "stream",
+              "coding",
+              "tools"
+            ]
+          }
+        }
+      }
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "provider_id",
+        "model",
+        "routed",
+        "source"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "primary",
+            "vision",
+            "image",
+            "video",
+            "embed"
+          ]
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string",
+          "description": "Empty means the provider's default model applies."
+        },
+        "routed": {
+          "type": "boolean",
+          "description": "False means the capability is unavailable; callers must not fall back to the default provider."
+        },
+        "source": {
+          "enum": [
+            "store",
+            "config",
+            "unrouted"
+          ]
+        }
+      }
+    }
+  }
+}

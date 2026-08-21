@@ -392,6 +392,23 @@ fn agent_stop(project_path: String) -> Result<Value, String> {
     Ok(result)
 }
 
+/// Reads the generic provider inventory the Agent projects from Kura. Model
+/// routing and credentials are runtime capabilities, so this is read-only and
+/// the Workbench never reaches Kura directly.
+#[tauri::command]
+fn agent_providers(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/providers",
+        None,
+        Duration::from_secs(15),
+    )
+}
+
 #[tauri::command]
 fn agent_query(
     project_path: String,
@@ -419,7 +436,8 @@ pub fn run() {
             agent_status,
             agent_start,
             agent_stop,
-            agent_query
+            agent_query,
+            agent_providers
         ])
         .run(tauri::generate_context!())
         .expect("error while running Loopforge Workbench");

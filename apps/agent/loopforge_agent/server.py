@@ -55,6 +55,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/manifest":
             self._execute(self.server.agent.manifest)
             return
+        if self.path == "/v1/providers":
+            self._execute(self.server.agent.providers)
+            return
         self._json(HTTPStatus.NOT_FOUND, self._error("ROUTE_NOT_FOUND", "Not found."))
 
     def do_POST(self) -> None:
