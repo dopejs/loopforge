@@ -32,6 +32,7 @@ class KuraRuntimeSupervisor:
             dope_binary
             or os.environ.get("LOOPFORGE_KURA_BIN")
             or os.environ.get("LOOPFORGE_DOPE_BIN")
+            or shutil.which("kura")
             or shutil.which("dope-cli")
             or shutil.which("dope")
         )
@@ -103,6 +104,42 @@ class KuraRuntimeSupervisor:
                 {"path": str(self.metadata_path)},
             )
 
+    @staticmethod
+    def _pair(base_url: str) -> str | None:
+        """Exchange a local pairing for a bearer token.
+
+        Kura protects every `/v1` route. The pairing start and complete routes
+        are deliberately unauthenticated, and `local` mode returns the code in
+        the start response, so a supervisor that already owns the daemon
+        process can complete the exchange without a human step. Reaching the
+        loopback port is itself the proof of local access.
+
+        Returns `None` rather than raising: an older runtime without pairing
+        should still start, and the caller surfaces the resulting auth failure
+        with more context than a start-time crash would.
+        """
+        client = KuraClient(base_url, timeout=10.0)
+        try:
+            started = client.post(
+                "/v1/auth/pairings/start",
+                {"mode": "local", "label": "loopforge-agent", "ttlSeconds": 300},
+            )
+            pairing = started.get("pairing")
+            code = started.get("pairingCode")
+            if not isinstance(pairing, dict) or not isinstance(code, str):
+                return None
+            pairing_id = pairing.get("pairingId")
+            if not isinstance(pairing_id, str) or not pairing_id:
+                return None
+            completed = client.post(
+                f"/v1/auth/pairings/{urllib.parse.quote(pairing_id, safe='')}/complete",
+                {"code": code},
+            )
+        except KuraAgentError:
+            return None
+        token = completed.get("accessToken")
+        return token if isinstance(token, str) and token else None
+
     def _base_url(self, metadata: dict[str, Any] | None) -> str | None:
         if not metadata:
             return None
@@ -120,7 +157,7 @@ class KuraRuntimeSupervisor:
             raise ToolUnavailableError(
                 "The Kura daemon binary was not found on PATH.",
                 {
-                    "expected": ["dope-cli", "dope"],
+                    "expected": ["kura", "dope-cli"],
                     "remediation": "Build or install Kura, then retry.",
                 },
             )
@@ -137,9 +174,14 @@ class KuraRuntimeSupervisor:
         environment = os.environ.copy()
         environment.update(
             {
-                "DOPE_ENV": "test",
-                "DOPE_DATA_DIR": str(data_dir),
-                "DOPE_BIND_ADDR": bind_addr,
+                # Loopforge supervises one Kura daemon per project and supplies
+                # the data dir and port itself. `embedded` is Kura's supported
+                # shape for that; it keeps the test isolation (per-workspace
+                # managed-provider home, no hosted billing quotas) without
+                # claiming to be a developer test daemon.
+                "KURA_ENV": "embedded",
+                "KURA_DATA_DIR": str(data_dir),
+                "KURA_BIND_ADDR": bind_addr,
             }
         )
         completed = subprocess.run(
@@ -167,6 +209,9 @@ class KuraRuntimeSupervisor:
             "data_dir": str(data_dir),
             "started_at": time.time(),
         }
+        token = self._pair(f"http://{bind_addr}")
+        if token:
+            metadata["token"] = token
         atomic_write_json(self.metadata_path, metadata)
         result = self.status()
         if not result["healthy"]:
@@ -192,9 +237,14 @@ class KuraRuntimeSupervisor:
         environment = os.environ.copy()
         environment.update(
             {
-                "DOPE_ENV": "test",
-                "DOPE_DATA_DIR": str(metadata["data_dir"]),
-                "DOPE_BIND_ADDR": str(metadata["bind_addr"]),
+                # Loopforge supervises one Kura daemon per project and supplies
+                # the data dir and port itself. `embedded` is Kura's supported
+                # shape for that; it keeps the test isolation (per-workspace
+                # managed-provider home, no hosted billing quotas) without
+                # claiming to be a developer test daemon.
+                "KURA_ENV": "embedded",
+                "KURA_DATA_DIR": str(metadata["data_dir"]),
+                "KURA_BIND_ADDR": str(metadata["bind_addr"]),
             }
         )
         completed = subprocess.run(
@@ -218,22 +268,27 @@ class KuraRuntimeSupervisor:
     def status(self) -> dict[str, Any]:
         metadata = self._metadata()
         base_url = self._base_url(metadata)
+        token = metadata.get("token") if isinstance(metadata, dict) else None
         result: dict[str, Any] = {
             "running": False,
             "healthy": False,
             "managed": metadata is not None,
             "base_url": base_url,
+            # Callers need this to reach any /v1 route; /healthz is the only
+            # unauthenticated one.
+            "token": token if isinstance(token, str) and token else None,
         }
         if not base_url:
             return result
         try:
-            health = KuraClient(base_url).get("/healthz")
+            client = KuraClient(base_url, token=result["token"])
+            health = client.get("/healthz")
             result.update(
                 {
                     "running": True,
                     "healthy": bool(health.get("ok")),
                     "health": health,
-                    "version": KuraClient(base_url).get("/version"),
+                    "version": client.get("/version"),
                 }
             )
         except KuraAgentError as exc:

@@ -1,3 +1,6 @@
+resources/kura
+resources/kura.exe
+resources/kura.build.json
 resources/dope-cli
 resources/dope-cli.exe
 resources/loopforge-agent

@@ -46,16 +46,16 @@ def build_command_parser() -> argparse.ArgumentParser:
         "start", help="Start and synchronize the local agent daemon."
     )
     agent_start.add_argument("--port", type=int)
-    agent_start.add_argument("--dope-binary")
+    agent_start.add_argument("--kura-binary", "--dope-binary", dest="kura_binary")
     agent_stop = agent_commands.add_parser(
         "stop", help="Stop the project-local agent daemon."
     )
-    agent_stop.add_argument("--dope-binary")
+    agent_stop.add_argument("--kura-binary", "--dope-binary", dest="kura_binary")
     agent_commands.add_parser("status", help="Show daemon health and version.")
     agent_doctor = agent_commands.add_parser(
         "doctor", help="Diagnose the local agent integration."
     )
-    agent_doctor.add_argument("--dope-binary")
+    agent_doctor.add_argument("--kura-binary", "--dope-binary", dest="kura_binary")
     agent_commands.add_parser("context", help="Show the redacted game-project context.")
     agent_commands.add_parser(
         "sync", help="Synchronize game-project context for the internal Agent."
@@ -268,7 +268,7 @@ def execute(
     if command.command == "agent":
         supervisor = AgentSupervisor(
             project,
-            getattr(command, "dope_binary", None),
+            getattr(command, "kura_binary", None),
         )
         if command.agent_command == "start":
             status = supervisor.start(command.port)

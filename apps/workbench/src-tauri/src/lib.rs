@@ -80,12 +80,16 @@ fn bundled_kura_binary(app: &AppHandle) -> Option<String> {
             return Some(path);
         }
     }
-    let name = if cfg!(windows) {
-        "dope-cli.exe"
+    // Kura's binary was renamed from `dope-cli` to `kura`; the old name is
+    // still checked so an existing bundle keeps working.
+    let names: [&str; 2] = if cfg!(windows) {
+        ["kura.exe", "dope-cli.exe"]
     } else {
-        "dope-cli"
+        ["kura", "dope-cli"]
     };
-    bundled_binary(app, "LOOPFORGE_KURA_BIN", name)
+    names
+        .into_iter()
+        .find_map(|name| bundled_binary(app, "LOOPFORGE_KURA_BIN", name))
 }
 
 fn validate_runtime(root: &Path, metadata: &AgentRuntimeMetadata) -> Result<(), String> {

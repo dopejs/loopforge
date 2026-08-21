@@ -1,14 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const submoduleRoot = resolve(desktopRoot, "vendor", "kura");
 const manifest = resolve(submoduleRoot, "crates", "Cargo.toml");
-const targetBinary = resolve(submoduleRoot, "crates", "target", "release", process.platform === "win32" ? "dope-cli.exe" : "dope-cli");
+const targetBinary = resolve(submoduleRoot, "crates", "target", "release", process.platform === "win32" ? "kura.exe" : "kura");
 const resourcesRoot = resolve(desktopRoot, "resources");
-const bundledBinary = resolve(resourcesRoot, process.platform === "win32" ? "dope-cli.exe" : "dope-cli");
+const bundledBinary = resolve(resourcesRoot, process.platform === "win32" ? "kura.exe" : "kura");
 
 try {
   statSync(manifest);
@@ -16,14 +16,24 @@ try {
   throw new Error("Kura submodule is not initialized; run `git submodule update --init --recursive`");
 }
 
-execFileSync("cargo", ["build", "--release", "-p", "dope-cli", "--manifest-path", manifest], {
+execFileSync("cargo", ["build", "--release", "-p", "kura-cli", "--manifest-path", manifest], {
   cwd: submoduleRoot,
   stdio: "inherit"
 });
 mkdirSync(resourcesRoot, { recursive: true });
 copyFileSync(targetBinary, bundledBinary);
 if (process.platform !== "win32") execFileSync("chmod", ["0755", bundledBinary]);
-console.log(`Bundled Kura daemon (dope-cli): ${bundledBinary}`);
+
+// Stamp the submodule commit next to the binary. `dev.sh` reuses a bundled
+// sidecar to keep the frontend loop fast, and without this it cannot tell a
+// current binary from one built before a submodule bump -- which fails
+// silently rather than loudly when the daemon's contract has changed.
+const builtCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: submoduleRoot,
+  encoding: "utf8"
+}).trim();
+writeFileSync(resolve(resourcesRoot, "kura.build.json"), `${JSON.stringify({ commit: builtCommit }, null, 2)}\n`);
+console.log(`Bundled Kura daemon (kura) from ${builtCommit.slice(0, 7)}: ${bundledBinary}`);
 
 // The binary is copied before Tauri packaging, so the large Cargo target is
 // disposable and never becomes part of the desktop source tree.

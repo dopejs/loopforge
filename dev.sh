@@ -83,7 +83,7 @@ if [[ "${OS:-}" == "Windows_NT" ]]; then
   executable_suffix=".exe"
 fi
 
-kura_binary="$workbench_root/resources/dope-cli$executable_suffix"
+kura_binary="$workbench_root/resources/kura$executable_suffix"
 agent_binary="$workbench_root/resources/loopforge-agent$executable_suffix"
 
 sidecar_ready() {
@@ -94,7 +94,20 @@ sidecar_ready() {
   fi
 }
 
-if ((rebuild_kura == 1)) || ! sidecar_ready "$kura_binary"; then
+# The Kura sidecar is only reusable if it was built from the submodule commit
+# currently checked out. A stale binary from before a submodule bump can still
+# start and then fail in confusing ways, so treat a mismatch as not-ready.
+kura_sidecar_current() {
+  sidecar_ready "$kura_binary" || return 1
+  local stamp="$workbench_root/resources/kura.build.json"
+  [[ -f "$stamp" ]] || return 1
+  local built current
+  built="$(sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([0-9a-f]*\)".*/\1/p' "$stamp")"
+  current="$(git -C "$workbench_root/vendor/kura" rev-parse HEAD 2>/dev/null)" || return 1
+  [[ -n "$built" && "$built" == "$current" ]]
+}
+
+if ((rebuild_kura == 1)) || ! kura_sidecar_current; then
   printf 'Building the Kura sidecar...\n'
   pnpm build:kura
 else

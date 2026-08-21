@@ -17,9 +17,14 @@ class KuraAgentError(RuntimeError):
 
 
 class KuraClient:
-    def __init__(self, base_url: str, timeout: float = 2.0) -> None:
+    def __init__(
+        self, base_url: str, timeout: float = 2.0, token: str | None = None
+    ) -> None:
         self.base_url = self._validate_base_url(base_url)
         self.timeout = timeout
+        # Kura protects every /v1 route with a bearer token; only /healthz is
+        # open. A client without one can check liveness but nothing else.
+        self.token = token or None
 
     @staticmethod
     def _validate_base_url(base_url: str) -> str:
@@ -51,7 +56,7 @@ class KuraClient:
             )
         return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
 
-    def _url(self, path: str) -> str:
+    def _url(self, path: str, query: dict[str, str] | None = None) -> str:
         if (
             not path.startswith("/")
             or path.startswith("//")
@@ -62,10 +67,24 @@ class KuraClient:
                 "Kura request path must be absolute",
                 "KURA_INVALID_URL",
             )
-        return f"{self.base_url}{path}"
+        url = f"{self.base_url}{path}"
+        if not query:
+            return url
+        # Query values are encoded here rather than interpolated into `path`,
+        # so the path stays subject to the checks above and a caller cannot
+        # smuggle a fragment or a second query through a parameter.
+        return f"{url}?{urllib.parse.urlencode(query)}"
 
-    def get(self, path: str) -> dict[str, Any]:
-        request = urllib.request.Request(self._url(path), method="GET")
+    def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        headers = dict(extra or {})
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
+
+    def get(self, path: str, query: dict[str, str] | None = None) -> dict[str, Any]:
+        request = urllib.request.Request(
+            self._url(path, query), headers=self._headers(), method="GET"
+        )
         return self._request(request, "GET", path)
 
     def post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -73,7 +92,7 @@ class KuraClient:
         request = urllib.request.Request(
             self._url(path),
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers=self._headers({"Content-Type": "application/json"}),
             method="POST",
         )
         return self._request(request, "POST", path)

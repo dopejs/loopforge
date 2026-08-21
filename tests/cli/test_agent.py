@@ -46,7 +46,14 @@ class AgentContractTests(unittest.TestCase):
         supervisor = AgentSupervisor(self.project, dope_binary="/bin/false")
         self.assertEqual(
             supervisor.status(),
-            {"running": False, "healthy": False, "managed": False, "base_url": None},
+            {
+                "running": False,
+                "healthy": False,
+                "managed": False,
+                "base_url": None,
+                # No pairing token without a managed daemon.
+                "token": None,
+            },
         )
 
     def test_start_uses_project_local_test_environment_and_syncs_later(self) -> None:
@@ -79,12 +86,15 @@ class AgentContractTests(unittest.TestCase):
 
         self.assertTrue(result["healthy"])
         environment = captured["kwargs"]["env"]  # type: ignore[index]
-        self.assertEqual(environment["DOPE_ENV"], "test")
-        self.assertEqual(environment["DOPE_BIND_ADDR"], "127.0.0.1:19999")
-        self.assertTrue(environment["DOPE_DATA_DIR"].endswith(".loopforge/agent/data"))
+        # Kura's embedded shape: the host owns the process, the data dir and
+        # the port. Isolation matches the test environment without borrowing
+        # its "this is a developer daemon" semantics.
+        self.assertEqual(environment["KURA_ENV"], "embedded")
+        self.assertEqual(environment["KURA_BIND_ADDR"], "127.0.0.1:19999")
+        self.assertTrue(environment["KURA_DATA_DIR"].endswith(".loopforge/agent/data"))
         metadata = json.loads(supervisor.metadata_path.read_text())
         self.assertEqual(metadata["schema_version"], "kura-runtime-v1")
-        self.assertNotEqual(environment["DOPE_DATA_DIR"], os.path.expanduser("~/.dope"))
+        self.assertNotEqual(environment["KURA_DATA_DIR"], os.path.expanduser("~/.dope"))
 
     def test_runtime_metadata_rejects_non_loopback_and_unexpected_data_dir(
         self,
@@ -164,7 +174,7 @@ class AgentContractTests(unittest.TestCase):
                 parsed = parser.parse_args(
                     ["agent", command, "--dope-binary", "/tmp/dope-cli"]
                 )
-                self.assertEqual(parsed.dope_binary, "/tmp/dope-cli")
+                self.assertEqual(parsed.kura_binary, "/tmp/dope-cli")
 
     def test_sync_persists_context_in_the_loopforge_project(self) -> None:
         self.project.init()
