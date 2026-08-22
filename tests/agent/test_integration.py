@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 
 from loopforge.agent.kura_client import KuraAgentError
+from loopforge.project import HYPOTHESIS_FIELDS
 from loopforge_agent.sessions import SessionStore
 from tests.support.kura_daemon import KuraDaemon, requires_kura
 
@@ -313,6 +314,80 @@ class SessionPersistenceIntegrationTests(unittest.TestCase):
         authors = [m["author"] for m in record["messages"]]
         self.assertEqual(authors, ["user", "agent"])
         self.assertTrue(record["messages"][1]["text"], "the streamed reply was accumulated")
+
+
+@requires_kura
+class HypothesisDraftIntegrationTests(unittest.TestCase):
+    """Drafting runs a real model round trip and records nothing."""
+
+    daemon: KuraDaemon
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.daemon = KuraDaemon().start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.daemon.stop()
+
+    def _agent(self):
+        from loopforge.project import LoopforgeProject
+        from loopforge_agent.application import LoopforgeAgent
+
+        daemon = self.daemon
+        root = Path(tempfile.mkdtemp(prefix="lf-draft-"))
+        agent = object.__new__(LoopforgeAgent)
+
+        class _Runtime:
+            def status(self) -> dict:
+                return {"healthy": True, "base_url": daemon.base_url, "token": daemon.token}
+
+            def sync_context(self) -> dict:
+                return {"context": {"schema_version": "game-project-context-v1"}}
+
+        agent.runtime = _Runtime()
+        agent.project = LoopforgeProject(root)
+        agent.project.init()
+        return agent
+
+    def test_a_draft_is_returned_without_being_recorded(self) -> None:
+        """The separation the requirement rests on: a proposal the user has
+        not read must not already be in the project."""
+        agent = self._agent()
+
+        draft = agent.draft_hypothesis("a game about charging an attack near hazards")
+
+        self.assertTrue(draft["draft"])
+        self.assertFalse(draft["present"])
+        self.assertEqual(set(draft["fields"]), set(HYPOTHESIS_FIELDS))
+        # Nothing reached the project: the active experiment still has none.
+        self.assertFalse(agent.hypothesis()["present"])
+
+    def test_an_unusable_reply_still_yields_an_editable_form(self) -> None:
+        """The built-in echo provider returns the prompt instead of an answer.
+
+        A draft that cannot be parsed into a usable hypothesis must still come
+        back as a complete editable form: refusing would leave the user with no
+        way forward. The guarantee is the form, not its content -- the user
+        reviews and corrects whatever landed there before it is recorded.
+
+        Note the echo case also shows the parser is positional: because the
+        prompt lists the headings, echoing it back leaves text under the last
+        one. That is acceptable for a draft and would be caught by the
+        completeness check on submission, but it is why nothing here asserts
+        the fields are empty.
+        """
+        draft = self._agent().draft_hypothesis("anything")
+        self.assertTrue(draft["draft"])
+        self.assertEqual(set(draft["fields"]), set(HYPOTHESIS_FIELDS))
+        self.assertTrue(draft["missing"], "an echo cannot answer a hypothesis")
+
+    def test_an_empty_brief_is_refused_before_the_model_is_called(self) -> None:
+        from loopforge_agent.application import LoopforgeAgentError
+
+        with self.assertRaises(LoopforgeAgentError) as caught:
+            self._agent().draft_hypothesis("   ")
+        self.assertEqual(caught.exception.code, "BRIEF_INVALID")
 
 
 if __name__ == "__main__":

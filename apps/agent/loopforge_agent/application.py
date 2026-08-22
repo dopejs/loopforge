@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import tempfile
 import urllib.parse
 from importlib import resources
 from pathlib import Path
@@ -11,7 +13,11 @@ from typing import Any
 from loopforge.agent import KuraRuntimeSupervisor
 from loopforge.agent.kura_client import KuraAgentError, KuraClient
 from loopforge.errors import LoopforgeError
-from loopforge.project import LoopforgeProject
+from loopforge.project import (
+    HYPOTHESIS_FIELDS,
+    HYPOTHESIS_HEADINGS,
+    LoopforgeProject,
+)
 
 from .runs import RUN_SCHEMA, RunStore
 from .sessions import SESSION_SCHEMA, SessionStore, new_session_id
@@ -20,6 +26,11 @@ AGENT_STATUS_SCHEMA = "loopforge-agent-status-v1"
 AGENT_RESPONSE_SCHEMA = "loopforge-agent-response-v1"
 PROVIDER_SCHEMA = "loopforge-provider-v1"
 PROJECT_STATUS_SCHEMA = "loopforge-project-status-v1"
+HYPOTHESIS_SCHEMA = "loopforge-hypothesis-v1"
+#: Bounds one field. Discovery answers are prose, not documents; a runaway
+#: model draft must not become an unbounded write.
+MAX_HYPOTHESIS_FIELD_CHARS = 4_000
+MAX_BRIEF_CHARS = 8_000
 #: Declared by the core; anything else comes from a newer version.
 KNOWN_CLAIM_STATUSES = frozenset({"satisfied", "failed", "stale", "unknown"})
 PROVIDER_TIMEOUT_SECONDS = 10.0
@@ -245,6 +256,210 @@ class LoopforgeAgent:
             "schema_version": RUN_SCHEMA,
             "run": detail if detail is not None else result,
         }
+
+    @staticmethod
+    def _hypothesis_markdown(fields: dict[str, str]) -> str:
+        """Render fields as the Markdown the core parses back.
+
+        The core also accepts JSON, but it archives the submitted file under a
+        `.md` name regardless. Emitting Markdown keeps that archive readable
+        and matching its own extension. Headings are derived from the field
+        names because the core normalises a heading by lowercasing and
+        stripping non-alphanumerics before looking it up -- `intended_player`
+        becomes `Intended Player` becomes `intendedplayer`. A round-trip test
+        pins that, since a heading that stops matching would silently produce
+        an empty field rather than an error.
+        """
+        lines = ["# Hypothesis", ""]
+        for key in HYPOTHESIS_FIELDS:
+            lines.append(f"## {key.replace('_', ' ').title()}")
+            lines.append("")
+            lines.append(fields.get(key, "").strip())
+            lines.append("")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _clean_hypothesis_fields(fields: Any) -> dict[str, str]:
+        if not isinstance(fields, dict):
+            raise LoopforgeAgentError(
+                "Hypothesis fields must be an object.", "HYPOTHESIS_FIELDS_INVALID"
+            )
+        unknown = sorted(set(fields) - set(HYPOTHESIS_FIELDS))
+        if unknown:
+            raise LoopforgeAgentError(
+                f"Unknown hypothesis fields: {', '.join(unknown)}",
+                "HYPOTHESIS_FIELDS_INVALID",
+            )
+        cleaned: dict[str, str] = {}
+        for key in HYPOTHESIS_FIELDS:
+            value = fields.get(key, "")
+            if not isinstance(value, str):
+                raise LoopforgeAgentError(
+                    f"Hypothesis field {key} must be a string.",
+                    "HYPOTHESIS_FIELDS_INVALID",
+                )
+            if len(value) > MAX_HYPOTHESIS_FIELD_CHARS:
+                raise LoopforgeAgentError(
+                    f"Hypothesis field {key} is too long.", "HYPOTHESIS_FIELDS_INVALID"
+                )
+            cleaned[key] = value.strip()
+        return cleaned
+
+    def hypothesis(self) -> dict[str, Any]:
+        """The active hypothesis, or the absence of one.
+
+        Having no hypothesis is the normal state of a fresh discovery project,
+        so it is reported rather than raised. `missing` is returned alongside
+        the fields so a surface can show what is still incomplete before the
+        gate refuses it with less context.
+        """
+        try:
+            record = self.project.show_hypothesis()["hypothesis"]
+        except LoopforgeError as exc:
+            if exc.diagnostic_code in {"HYPOTHESIS_MISSING", "PROJECT_NOT_INITIALIZED"}:
+                return {
+                    "schema_version": HYPOTHESIS_SCHEMA,
+                    "present": False,
+                    "fields": {key: "" for key in HYPOTHESIS_FIELDS},
+                    "missing": list(HYPOTHESIS_FIELDS),
+                }
+            raise
+        fields = {
+            key: str(record.get("fields", {}).get(key) or "") for key in HYPOTHESIS_FIELDS
+        }
+        return {
+            "schema_version": HYPOTHESIS_SCHEMA,
+            "present": True,
+            "hypothesis_id": str(record.get("hypothesis_id") or ""),
+            "revision": record.get("revision"),
+            "fields": fields,
+            "missing": [key for key in HYPOTHESIS_FIELDS if not fields[key]],
+        }
+
+    @staticmethod
+    def _parse_draft(content: str) -> dict[str, str]:
+        """Lenient counterpart to the core's hypothesis parser.
+
+        `parse_hypothesis` validates completeness and raises when a field is
+        missing. That is right for a submission and wrong for a draft: a model
+        that answered nine of the eleven headings should leave the user nine
+        filled fields to edit, not an error and a blank form.
+
+        The heading map is shared with the core rather than restated, so the
+        two always agree on what a heading means; only the completeness rule
+        differs.
+        """
+        sections: dict[str, list[str]] = {}
+        current: str | None = None
+        for line in content.splitlines():
+            if line.startswith("##"):
+                normalized = re.sub(
+                    r"[^a-z0-9]", "", line.lstrip("#").strip().lower()
+                )
+                current = HYPOTHESIS_HEADINGS.get(normalized)
+                if current:
+                    sections.setdefault(current, [])
+                continue
+            if current:
+                sections[current].append(line)
+        return {key: "\n".join(value).strip() for key, value in sections.items()}
+
+    def draft_hypothesis(self, brief: str) -> dict[str, Any]:
+        """Ask the model for a hypothesis draft. Records nothing.
+
+        A draft is a proposal, not a record: it is returned for the user to
+        edit and submit, and this method never writes to the project. That
+        separation is the point of the requirement -- an approval attributed to
+        a user has to be something they actually read.
+
+        Drafting is skill work, so the discovery procedure is supplied from
+        `prototype-gameplay` rather than restated here. A second description of
+        what a hypothesis should contain would drift from the one the Agent
+        uses everywhere else.
+
+        Fields the model leaves out come back empty and are listed in
+        `missing`; a partial draft is more useful than a refusal, because the
+        user edits it either way.
+        """
+        normalized = brief.strip()
+        if not normalized:
+            raise LoopforgeAgentError("Brief must not be empty.", "BRIEF_INVALID")
+        if len(normalized) > MAX_BRIEF_CHARS:
+            raise LoopforgeAgentError("Brief is too large.", "BRIEF_TOO_LARGE")
+        status = self.runtime.status()
+        if not status.get("healthy") or not status.get("base_url"):
+            raise LoopforgeAgentError(
+                "The Loopforge Agent runtime is not ready.", "AGENT_NOT_READY"
+            )
+        headings = "\n".join(
+            f"## {key.replace('_', ' ').title()}" for key in HYPOTHESIS_FIELDS
+        )
+        prompt = (
+            "You are drafting a Loopforge discovery hypothesis. Follow the "
+            "discovery procedure in the internal skill below.\n\n"
+            f"<loopforge_internal_skill>{self._internal_skill('prototype-gameplay')}"
+            "</loopforge_internal_skill>\n\n"
+            "Reply with Markdown containing exactly these headings, in this "
+            "order, each followed by its content. Emit no other headings and "
+            "no preamble.\n\n"
+            f"{headings}\n\n"
+            "Keep each section to a few sentences. Make the hypothesis "
+            "falsifiable, and make keep and kill signals observable.\n\n"
+            f"<user_brief_json>{json.dumps(normalized, ensure_ascii=True)}"
+            "</user_brief_json>"
+        )
+        response = KuraClient(
+            str(status["base_url"]), timeout=120.0, token=status.get("token")
+        ).post("/v1/chat/query", {"query": prompt})
+        reply = str(response.get("reply", ""))
+        # Headings the model invents are ignored rather than guessed at.
+        parsed = self._parse_draft(reply)
+        fields = {key: str(parsed.get(key) or "").strip() for key in HYPOTHESIS_FIELDS}
+        return {
+            "schema_version": HYPOTHESIS_SCHEMA,
+            "present": False,
+            "draft": True,
+            "fields": fields,
+            "missing": [key for key in HYPOTHESIS_FIELDS if not fields[key]],
+        }
+
+    def create_hypothesis(
+        self,
+        fields: Any,
+        approver_id: str | None = None,
+        approver_name: str | None = None,
+        rationale: str | None = None,
+    ) -> dict[str, Any]:
+        """Record a hypothesis from structured fields.
+
+        The Workbench sends fields, never a path: file layout under
+        `.loopforge` belongs to the core, and a UI that built paths would
+        couple to it. The rendered document is written to a temporary file
+        purely because that is the core's input shape.
+        """
+        cleaned = self._clean_hypothesis_fields(fields)
+        missing = [key for key in HYPOTHESIS_FIELDS if not cleaned[key]]
+        if missing:
+            raise LoopforgeAgentError(
+                f"Hypothesis fields are incomplete: {', '.join(missing)}",
+                "HYPOTHESIS_INCOMPLETE",
+            )
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".md", encoding="utf-8", delete=False
+        )
+        try:
+            handle.write(self._hypothesis_markdown(cleaned))
+            handle.close()
+            self.project.create_hypothesis(
+                Path(handle.name),
+                expected_revision=None,
+                approver_id=approver_id,
+                approver_name=approver_name,
+                rationale=rationale,
+            )
+        finally:
+            Path(handle.name).unlink(missing_ok=True)
+        return self.hypothesis()
 
     def init_project(self) -> dict[str, Any]:
         """Create the Loopforge project state for this directory.

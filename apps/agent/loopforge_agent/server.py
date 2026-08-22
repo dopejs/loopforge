@@ -61,6 +61,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
+        if self.path == "/v1/hypothesis":
+            self._execute(self.server.agent.hypothesis)
+            return
         if self.path == "/v1/project/status":
             self._execute(self.server.agent.project_status)
             return
@@ -105,6 +108,19 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 lambda: self.server.agent.query_stream(
                     str(body.get("query", "")),
                     str(body["thread_id"]) if body.get("thread_id") else None,
+                )
+            )
+        elif self.path == "/v1/hypothesis/draft":
+            self._execute(
+                lambda: self.server.agent.draft_hypothesis(str(body.get("brief", "")))
+            )
+        elif self.path == "/v1/hypothesis":
+            self._execute(
+                lambda: self.server.agent.create_hypothesis(
+                    body.get("fields"),
+                    str(body["approver_id"]) if body.get("approver_id") else None,
+                    str(body["approver_name"]) if body.get("approver_name") else None,
+                    str(body["rationale"]) if body.get("rationale") else None,
                 )
             )
         elif self.path == "/v1/project/init":

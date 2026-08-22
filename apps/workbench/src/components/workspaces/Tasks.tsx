@@ -3,6 +3,7 @@ import { useI18n } from "../../i18n";
 import { Card } from "../primitives";
 import { isDesktopRuntime } from "../../agent";
 import { errorMessage } from "../../daemon";
+import { HypothesisSection } from "../HypothesisEditor";
 import { type Claim, claimTone, initializeProject, useProjectStatus } from "../../project";
 import type { MessageKey } from "../../i18n/locales/en";
 
@@ -100,6 +101,8 @@ export function TasksWorkspace({ projectRoot }: { projectRoot: string }): React.
           <span className="stat-hint">{status.snapshot_status ?? ""}</span>
         </div>
       </div>
+
+      <HypothesisSection projectRoot={projectRoot} stage={status.stage ?? ""} />
 
       <div className="settings-section">
         <span className="section-title">{t("project.claims")}</span>

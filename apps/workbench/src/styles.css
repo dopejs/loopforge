@@ -2193,3 +2193,33 @@ button:disabled {
 
 .issue-card { padding: 12px 14px; border-color: var(--bad); }
 .issue-line { margin: 0; color: var(--bad); font-size: var(--font-xs); line-height: 1.6; }
+
+/* Hypothesis editor. Inputs follow .field-value's shape so the form reads as
+   the same surface as the rest of the dialog. */
+.draft-row { display: flex; gap: 8px; margin-block-end: 16px; }
+.hypothesis-brief,
+.hypothesis-text {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--font-xs);
+  line-height: 1.6;
+}
+.hypothesis-brief:focus,
+.hypothesis-text:focus { border-color: var(--accent); outline: none; }
+.hypothesis-text { resize: vertical; }
+.hypothesis-fields { display: flex; flex-direction: column; gap: 14px; }
+.hypothesis-field { display: block; }
+.hypothesis-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-block-end: 6px;
+  color: var(--dim);
+  font-size: var(--font-xs);
+}

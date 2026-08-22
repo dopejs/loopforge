@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopforge.dev/contracts/loopforge-hypothesis-v1.schema.json",
+  "title": "Loopforge hypothesis projection",
+  "description": "The active discovery hypothesis as the Agent projects it for the Workbench. Absence is represented by present=false rather than an error, since a fresh discovery project legitimately has none. `draft` marks an unrecorded model proposal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "present",
+    "fields",
+    "missing"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "loopforge-hypothesis-v1"
+    },
+    "present": {
+      "type": "boolean"
+    },
+    "draft": {
+      "type": "boolean",
+      "description": "True only for a proposal that has not been recorded."
+    },
+    "hypothesis_id": {
+      "type": "string"
+    },
+    "revision": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intended_player",
+        "platform",
+        "player_fantasy",
+        "core_verb",
+        "moment_to_moment_loop",
+        "hypothesis",
+        "constraints",
+        "non_goals",
+        "cheapest_validation",
+        "keep_signals",
+        "kill_signals"
+      ],
+      "properties": {
+        "intended_player": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "player_fantasy": {
+          "type": "string"
+        },
+        "core_verb": {
+          "type": "string"
+        },
+        "moment_to_moment_loop": {
+          "type": "string"
+        },
+        "hypothesis": {
+          "type": "string"
+        },
+        "constraints": {
+          "type": "string"
+        },
+        "non_goals": {
+          "type": "string"
+        },
+        "cheapest_validation": {
+          "type": "string"
+        },
+        "keep_signals": {
+          "type": "string"
+        },
+        "kill_signals": {
+          "type": "string"
+        }
+      }
+    },
+    "missing": {
+      "type": "array",
+      "description": "Field names still empty, computed by the Agent.",
+      "items": {
+        "enum": [
+          "intended_player",
+          "platform",
+          "player_fantasy",
+          "core_verb",
+          "moment_to_moment_loop",
+          "hypothesis",
+          "constraints",
+          "non_goals",
+          "cheapest_validation",
+          "keep_signals",
+          "kill_signals"
+        ]
+      }
+    }
+  }
+}

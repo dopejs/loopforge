@@ -503,6 +503,52 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
     );
 }
 
+/// The active hypothesis, or the absence of one.
+#[tauri::command]
+fn agent_hypothesis(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/hypothesis",
+        None,
+        Duration::from_secs(15),
+    )
+}
+
+/// Asks the model for a hypothesis draft. Records nothing.
+#[tauri::command]
+fn agent_hypothesis_draft(project_path: String, brief: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    // A model round trip, so this outlasts the Agent's own request timeout.
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/hypothesis/draft",
+        Some(json!({ "brief": brief })),
+        Duration::from_secs(180),
+    )
+}
+
+/// Records a hypothesis from reviewed fields.
+#[tauri::command]
+fn agent_hypothesis_create(project_path: String, fields: Value) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/hypothesis",
+        Some(json!({ "fields": fields })),
+        Duration::from_secs(30),
+    )
+}
+
 /// Creates Loopforge project state in this directory.
 ///
 /// Idempotent in the core, so a repeated call adopts the existing project
@@ -627,6 +673,9 @@ pub fn run() {
             agent_run,
             agent_run_engine,
             agent_project_init,
+            agent_hypothesis,
+            agent_hypothesis_draft,
+            agent_hypothesis_create,
             agent_project_status
         ])
         .run(tauri::generate_context!())
