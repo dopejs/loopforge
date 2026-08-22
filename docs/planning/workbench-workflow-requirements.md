@@ -117,6 +117,10 @@ construct file paths.
   from the conversation, and the surface is a review-and-edit view over that
   draft. This is principle 4 and the difference between this product and a
   form.
+- Drafting belongs to a skill, not to a bespoke Agent endpoint. The
+  `prototype-gameplay` skill already owns a `Discovery` section covering this
+  stage, so the requirement is to make that reachable from the Workbench rather
+  than to add a second authority on what a hypothesis should contain. See §9.
 - Every field must be individually editable after drafting.
 - Incomplete fields must be visible as incomplete before submission, because
   `HYPOTHESIS_COMPLETE` will otherwise fail at the gate with less context.
@@ -150,6 +154,11 @@ accepts `--reason {technical,scope,abandon}` plus approver fields.
   changes how a later reader interprets the project's end.
 - The next legal stages must be derivable by the user from the current one
   without consulting documentation.
+- This is the Flow workspace's purpose. Flow currently draws a generic coding
+  pipeline (`trigger → plan → edit → test → review`) belonging to a different
+  product. Loopforge's real flow is the stage machine, and unlike that pipeline
+  it has a live data source. Repointing Flow at it reuses the existing node and
+  connector layout and gives R3 a home.
 
 **Acceptance.** A project with a complete hypothesis shows an all-satisfied
 gate for PROTOTYPING and can advance. A project without one shows the missing
@@ -310,10 +319,24 @@ acceptable user-facing error.
 
 **Approver identity.** R2, R3 and R7 record an approver — four commands
 (`hypothesis create`, `gate check`, `advance`, `decide`), mandatory only on
-`decide`. The Workbench needs one configured operator identity rather than
-asking for a name at each approval. Proposed: a General settings field, written to the Agent, with
-approvals refused until it is set — a recorded approver must be a real choice.
-See open question O1.
+`decide`.
+
+Loopforge is a local agent with no cross-user collaboration, and the core
+already reflects this: every approval record carries
+`identity_source: "local-declaration"`. It does not claim the identity was
+verified, because it was not. There is no role model to build here.
+
+The approver is therefore the Workbench user, configured once as a General
+setting and sent to the Agent, with approvals refused until it is set — a
+recorded approver must be a real choice, not a default.
+
+The subagent drafts; it never approves. Where it drafts a rationale, two
+requirements follow:
+
+- the drafted text must be shown and remain editable before submission. A
+  rationale is checksummed into the record under the user's name, so accepting
+  unread agent prose would attribute an argument to someone who never made it;
+- no path may submit a draft without displaying it first.
 
 ## 6. Verification requirements
 
@@ -341,8 +364,16 @@ changed claim, and therefore the best end-to-end assertion available.
 - **Canvas, Assets, Profiler.** These serve Milestone 4, whose `VERTICAL_SLICE`
   stage is reachable only through `PROTOTYPE_DECISION`. Building them before R7
   produces surfaces no user can reach.
-- **Flow, Diff.** Neither maps to a roadmap milestone. They remain preview until
-  a product decision assigns them one or removes them. See open question O2.
+- **Diff.** Removed rather than deferred. The decisive objection is not scope
+  but that it has no data source: the core does not track code changes, no CLI
+  command produces a diff, and `source_identity` is a project fingerprint for
+  detecting stale evidence, not a change set. Building it would require a new
+  core capability over git first. Loopforge's human approval points are stage
+  gates and decisions, not individual lines. If a review surface is wanted
+  later it starts from a core capability, not from a retained placeholder.
+
+  Flow is absent from this list deliberately: it is repointed at the stage
+  machine under R3 rather than removed, because unlike Diff it has one.
 - **Multi-project or multi-user surfaces.** Explicitly deferred in
   `roadmap.md`.
 - **Engine-driven screenshot capture.** R5 registers existing files; making the
@@ -368,16 +399,47 @@ R8 diagnostics ── independent, but a stale snapshot blocks every gate above,
 R1→R2→R3 is strictly serial: evidence registered without an active experiment
 carries a null hypothesis revision and cannot be attributed to anything.
 
-## 9. Open questions
+## 9. Skill boundary
 
-**O1 — Operator identity.** Three capabilities record an approver. Is the
-Workbench user always the approver, configured once in settings? The proposal
-in §5 assumes yes. An alternative is per-approval entry, which is more honest
-for a shared machine and more tedious for the normal case.
+R2, R6 and R7 all need the Agent to draft prose a human then approves. That
+drafting is skill work, and the requirement is to make existing skills
+reachable from the Workbench rather than to grow a parallel authority inside
+the Agent on what a hypothesis, protocol or rationale should contain.
 
-**O2 — Flow and Diff.** Which milestone do they serve? If none, they should be
-removed from the mode rail rather than held as indefinite previews.
+The mapping today:
 
-**O3 — Hypothesis drafting.** R2 requires the Agent to draft eleven fields from
-conversation. Is that a `design-game` skill responsibility, or a dedicated Agent
-endpoint? The skills exist but are not yet reachable from the Workbench.
+| Need | Skill | Section |
+|---|---|---|
+| R2 hypothesis draft | `prototype-gameplay` | `Discovery` |
+| R6 playtest protocol and report reading | `prototype-gameplay` | `External Playtest` |
+| R7 decision rationale | `prototype-gameplay` | `Decision` |
+
+`prototype-gameplay` covers the whole prototype loop, which is why the
+Workbench work does not depend on the skill layer being reorganized first.
+
+`design-game` is a separate matter and is out of scope here. It carries four
+modes — `TRIAGE`, `DESIGN_CONTRACT`, `VERTICAL_SLICE`, `REVIEW` — spanning
+from pre-hypothesis direction-finding to post-decision production planning.
+Those belong to different lifecycle stages, which makes its trigger boundary
+inherently ambiguous and is a standing argument for splitting it. None of the
+requirements above depend on that split, so it should be planned on its own
+rather than bundled into this work.
+
+## 10. Resolved decisions
+
+Recorded because the requirements above assume them.
+
+**Approver model.** The Workbench user is the approver, configured once. No
+cross-user or role model: Loopforge is a local agent and the core already
+records `identity_source: "local-declaration"` rather than claiming
+verification. The subagent drafts and never approves; drafted rationale must be
+displayed and editable before it is submitted under the user's name. See §5.
+
+**Flow.** Repointed at the stage machine as the surface for R3, replacing the
+generic coding pipeline it draws today. See R3.
+
+**Diff.** Removed. It has no data source in the core, and adding one means
+building a git capability first. See §7.
+
+**Hypothesis drafting.** Owned by the `prototype-gameplay` skill's `Discovery`
+section, not a bespoke Agent endpoint. See §9.
