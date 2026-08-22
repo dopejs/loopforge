@@ -89,7 +89,8 @@ def atomic_write_json(
             temporary.unlink(missing_ok=True)
 
 
-def atomic_write_text(path: Path, value: str) -> None:
+def atomic_write_text(path: Path, value: str, *, file_mode: int | None = None) -> None:
+    """Write text atomically. See `atomic_write_json` for the mode semantics."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
     try:
@@ -105,10 +106,10 @@ def atomic_write_text(path: Path, value: str) -> None:
             handle.write(value)
             handle.flush()
             os.fsync(handle.fileno())
-        if mode is not None:
+        if file_mode is not None:
             # Applied to the temporary file so the final path never exists
             # with wider permissions, even briefly.
-            os.chmod(temporary, mode)
+            os.chmod(temporary, file_mode)
         os.replace(temporary, path)
         temporary = None
         _fsync_directory(path.parent)

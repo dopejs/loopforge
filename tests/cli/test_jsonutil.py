@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from loopforge.jsonutil import atomic_write_json
+from loopforge.jsonutil import atomic_write_json, atomic_write_text
 
 
 class AtomicWriteTests(unittest.TestCase):
@@ -45,6 +45,18 @@ class AtomicWriteTests(unittest.TestCase):
         atomic_write_json(path, {"token": "one"}, mode=0o600)
         atomic_write_json(path, {"token": "two"}, mode=0o600)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    def test_text_writes_share_the_same_guarantees(self) -> None:
+        """Both writers are used for project state; a difference between them
+        would be a trap rather than a design."""
+        path = self.root / "note.md"
+        atomic_write_text(path, "hello")
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(path.read_text(encoding="utf-8"), "hello")
+
+        widened = self.root / "shared.md"
+        atomic_write_text(widened, "hello", file_mode=0o644)
+        self.assertEqual(stat.S_IMODE(widened.stat().st_mode), 0o644)
 
     def test_no_temporary_file_survives(self) -> None:
         path = self.root / "value.json"
