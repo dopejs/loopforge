@@ -33,6 +33,11 @@ GATE_SCHEMA = "loopforge-gate-v1"
 EVIDENCE_SCHEMA = "loopforge-evidence-v1"
 PLAYTEST_SCHEMA = "loopforge-playtest-v1"
 DECISION_SCHEMA = "loopforge-decision-v1"
+HEALTH_SCHEMA = "loopforge-project-health-v1"
+HISTORY_SCHEMA = "loopforge-history-v1"
+#: The audit trail is read newest first and paged; a long-lived project's log
+#: is unbounded and the surface only ever shows a window of it.
+MAX_HISTORY_EVENTS = 200
 #: The three outcomes, in the core's own order. Presented as equals: making
 #: `keep` prominent would bias the decision this product exists to make
 #: honestly.
@@ -490,6 +495,159 @@ class LoopforgeAgent:
         finally:
             Path(handle.name).unlink(missing_ok=True)
         return self.hypothesis()
+
+    def project_health(self) -> dict[str, Any]:
+        """State integrity and tool availability in one answer.
+
+        Two different questions -- is the recorded state internally consistent,
+        and are the tools it needs present -- but a user asking "why is this
+        blocked" does not know which one they have. A stale snapshot in
+        particular blocks every gate, so it is reported as a first-class field
+        rather than buried among diagnostics.
+        """
+        try:
+            validation = self.project.validate()
+        except LoopforgeError as exc:
+            if exc.diagnostic_code == "PROJECT_NOT_INITIALIZED":
+                return {
+                    "schema_version": HEALTH_SCHEMA,
+                    "initialized": False,
+                    "valid": False,
+                    "snapshot_status": "",
+                    "needs_reconcile": False,
+                    "diagnostics": [],
+                    "checks": [],
+                }
+            raise
+        snapshot_status = str(validation.get("snapshot_status") or "")
+        diagnostics = [
+            self._diagnostic(item) for item in validation.get("diagnostics") or []
+        ]
+        checks: list[dict[str, Any]] = []
+        try:
+            doctor = self.project.doctor()
+            checks = [
+                {
+                    "code": str(item.get("code") or ""),
+                    "status": str(item.get("status") or ""),
+                    "message": str(item.get("message") or ""),
+                }
+                for item in doctor.get("checks") or []
+            ]
+            for item in doctor.get("diagnostics") or []:
+                diagnostics.append(self._diagnostic(item))
+            # validate and doctor both report a stale snapshot, and a surface
+            # keyed on the code would render two identical rows.
+            seen: set[str] = set()
+            deduped = []
+            for item in diagnostics:
+                if item["code"] in seen:
+                    continue
+                seen.add(item["code"])
+                deduped.append(item)
+            diagnostics = deduped
+        except LoopforgeError as exc:
+            # A missing engine is a normal condition to report, not a reason to
+            # withhold the state integrity answer the caller also asked for.
+            diagnostics.append(
+                {
+                    "code": exc.diagnostic_code,
+                    "severity": "warning",
+                    "message": exc.message,
+                }
+            )
+        return {
+            "schema_version": HEALTH_SCHEMA,
+            "initialized": True,
+            "valid": bool(validation.get("valid")),
+            "snapshot_status": snapshot_status,
+            # Surfaced on its own because it is the one condition that blocks
+            # every gate, and the one the user can fix from here.
+            "needs_reconcile": snapshot_status not in {"", "current"},
+            "event_count": validation.get("event_count"),
+            "observed_revision": validation.get("observed_revision"),
+            "diagnostics": diagnostics,
+            "checks": checks,
+        }
+
+    @staticmethod
+    def _diagnostic(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "code": str(item.get("code") or ""),
+            "severity": str(item.get("severity") or "error"),
+            "message": str(item.get("message") or ""),
+        }
+
+    def history(self) -> dict[str, Any]:
+        """The committed event log, newest first.
+
+        Summarised rather than passed through: an event payload carries whole
+        run records and hypothesis documents, and the audit view needs what
+        happened and when, not a second copy of the artifacts.
+        """
+        try:
+            events = self.project.history()["events"]
+        except LoopforgeError as exc:
+            if exc.diagnostic_code == "PROJECT_NOT_INITIALIZED":
+                return {"schema_version": HISTORY_SCHEMA, "events": [], "truncated": False}
+            raise
+        summaries = [self._event_summary(event) for event in reversed(events)]
+        return {
+            "schema_version": HISTORY_SCHEMA,
+            "events": summaries[:MAX_HISTORY_EVENTS],
+            # Stated rather than silently cut: a partial audit trail that reads
+            # as complete is worse than no audit trail.
+            "truncated": len(summaries) > MAX_HISTORY_EVENTS,
+        }
+
+    @staticmethod
+    def _event_summary(event: dict[str, Any]) -> dict[str, Any]:
+        payload = event.get("payload") or {}
+        event_type = str(event.get("event_type") or "")
+        detail = ""
+        if event_type == "stage.transitioned":
+            detail = f"{payload.get('from', '')} → {payload.get('to', '')}"
+        elif event_type == "decision.recorded":
+            detail = str((payload.get("decision") or {}).get("decision") or "")
+        elif event_type == "evidence.registered":
+            evidence = payload.get("evidence") or {}
+            detail = f"{evidence.get('type', '')} · {evidence.get('result', '')}"
+        elif event_type == "run.completed":
+            run = payload.get("run") or {}
+            detail = f"{run.get('operation', '')} · {run.get('status', '')}"
+        elif event_type == "hypothesis.created":
+            detail = f"revision {(payload.get('hypothesis') or {}).get('revision', '')}"
+        return {
+            "revision": event.get("revision"),
+            "event_type": event_type,
+            "occurred_at": str(event.get("occurred_at") or ""),
+            "detail": detail,
+        }
+
+    def reconcile(self, apply: bool) -> dict[str, Any]:
+        """Rebuild the derived state snapshot from the event log.
+
+        A rewrite of derived state, so it is never automatic and the caller is
+        expected to run it once with `apply=False` and show the result before
+        confirming. The event log is the canonical record (ADR 0003), which is
+        why rebuilding from it is safe -- but the user still gets to see what
+        would change first.
+        """
+        result = self.project.reconcile(bool(apply))
+        return {
+            "schema_version": HEALTH_SCHEMA,
+            "applied": bool(result.get("applied")),
+            "actions": [
+                {
+                    "action": str(item.get("action") or ""),
+                    "from_status": str(item.get("from_status") or ""),
+                    "target_revision": item.get("target_revision"),
+                }
+                for item in result.get("actions") or []
+            ],
+            "snapshot_status": str(result.get("snapshot_status") or ""),
+            "observed_revision": result.get("observed_revision"),
+        }
 
     def decision(self) -> dict[str, Any]:
         """What a decision needs here, and whether it can be made yet.

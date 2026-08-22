@@ -61,6 +61,12 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
+        if self.path == "/v1/project/health":
+            self._execute(self.server.agent.project_health)
+            return
+        if self.path == "/v1/project/history":
+            self._execute(self.server.agent.history)
+            return
         if self.path == "/v1/decision":
             self._execute(self.server.agent.decision)
             return
@@ -139,6 +145,10 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body["approver_name"]) if body.get("approver_name") else None,
                     str(body["rationale"]) if body.get("rationale") else None,
                 )
+            )
+        elif self.path == "/v1/project/reconcile":
+            self._execute(
+                lambda: self.server.agent.reconcile(body.get("apply") is True)
             )
         elif self.path == "/v1/decision":
             self._execute(

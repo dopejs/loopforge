@@ -7,6 +7,7 @@ import { HypothesisSection } from "../HypothesisEditor";
 import { EvidencePanel } from "../EvidencePanel";
 import { PlaytestPanel } from "../PlaytestPanel";
 import { DecisionPanel } from "../DecisionPanel";
+import { HealthPanel } from "../HealthPanel";
 import { type Claim, claimTone, initializeProject, useProjectStatus } from "../../project";
 import type { MessageKey } from "../../i18n/locales/en";
 
@@ -142,6 +143,9 @@ export function TasksWorkspace({ projectRoot }: { projectRoot: string }): React.
 
       {/* The terminal act: it changes both the stage and the fun claim. */}
       <DecisionPanel projectRoot={projectRoot} onDecided={reload} />
+
+      {/* Reconciling changes the revision every claim above is derived at. */}
+      <HealthPanel projectRoot={projectRoot} onReconciled={reload} />
     </div>
   );
 }

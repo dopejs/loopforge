@@ -503,6 +503,51 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
     );
 }
 
+/// State integrity and tool availability.
+#[tauri::command]
+fn agent_project_health(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/project/health",
+        None,
+        Duration::from_secs(30),
+    )
+}
+
+/// The committed event log, newest first.
+#[tauri::command]
+fn agent_project_history(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/project/history",
+        None,
+        Duration::from_secs(30),
+    )
+}
+
+/// Rebuilds the derived state snapshot. `apply` false previews the work.
+#[tauri::command]
+fn agent_project_reconcile(project_path: String, apply: bool) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/project/reconcile",
+        Some(json!({ "apply": apply })),
+        Duration::from_secs(60),
+    )
+}
+
 /// What a prototype decision needs, and whether it can be made yet.
 #[tauri::command]
 fn agent_decision(project_path: String) -> Result<Value, String> {
@@ -903,6 +948,9 @@ pub fn run() {
             agent_run,
             agent_run_engine,
             agent_project_init,
+            agent_project_health,
+            agent_project_history,
+            agent_project_reconcile,
             agent_decision,
             agent_decide,
             agent_playtest,
