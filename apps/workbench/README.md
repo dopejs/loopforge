@@ -5,42 +5,51 @@ Loopforge Agent. React invokes a narrow native API and never calls Kura, spawns
 shell commands or reads runtime internals. Tauri owns the Agent sidecar
 lifecycle; the Agent owns its generic Kura runtime.
 
-The first slice provides Agent health, redacted Loopforge project context and
-chat. Deckle and Doper integrations should be added behind adapters after their
-public facade contracts are pinned in this repository's `contracts/` directory.
-The project context remains in `.loopforge/agent/context.json`; Kura has no
-Loopforge-specific route, type, or persisted state.
+The shell reads Agent health, redacted project context, streamed chat with its
+history, engine run history and the provider inventory. Deckle and Doper
+integrations should be added behind adapters after their public facade contracts
+are pinned in this repository's `contracts/` directory. The project context
+remains in `.loopforge/agent/context.json`; Kura has no Loopforge-specific
+route, type, or persisted state.
 
 ## Workspaces
 
 The shell implements the Workbench design: a mode rail, a project sidebar, the
-active workspace and the Agent panel. The design describes nine workspaces, but
-only the ones the Agent can actually serve are wired:
+active workspace and the Agent panel. What each workspace shows depends on
+whether anything can actually serve it:
 
-| Workspace | State |
+| Workspace | Source |
 | --- | --- |
-| Chat | Wired to `agent_query`; keeps a thread per project |
-| Canvas, Flow, Test, Diff, Terminal, Tasks, Assets, Profiler | Full UI, driven by placeholder data |
+| Chat | Streams from Kura, with conversation history owned by the Agent |
+| Terminal | Engine run history written by the deterministic core |
+| Test | The same run history, narrowed to test runs, and can start one |
+| Tasks | Project stage and derived quality claims |
+| Provider settings | Kura's provider inventory and model-role routing |
+| Canvas, Flow, Diff, Assets, Profiler | Designed chrome over placeholder data |
 
-Every workspace in the design is built. The eight that the Agent cannot serve
-yet render from `src/fixtures.ts` and carry a **Preview data** banner, so
-scaffolding is always distinguishable from real project data. `WIRED_MODES` in
-`src/modes.ts` is the single record of which is which, and `Workspace.tsx`
-drives the banner from it — move a mode in there and swap its fixture import for
-the real source when the Agent grows the capability.
+The remaining five carry a visible preview marker, so nothing on screen can be
+mistaken for project data. `isWired()` in `src/modes.ts` is the single record of
+which workspaces are real; move a mode into it once its data exists.
 
-Settings follows the same rule. Appearance, Language, General → restore, and
-Shortcuts change real behaviour. Provider (list, detail, model routing, the
-three-step Add Provider wizard) and Permissions are complete UI over
-`src/fixtures.providers.ts`; the Workbench never stores credentials, and the
-wizard states on every step that nothing entered is saved. Individual preview
-rows are marked with a dot rather than a banner.
+Several of these departed from the design once the real data was known, and
+deliberately so:
 
-Fixture *content* is deliberately untranslated: file names, test names, log
-lines and code are replaced wholesale by real project data, which is not
-translated either. Only structural labels around them go through i18n.
+- **Test** was designed with per-suite pass/fail counts and a frame-rate curve.
+  The core runs the engine headless and captures process output, so that
+  structure does not exist; producing it would mean parsing engine logs into
+  numbers the runtime never reported.
+- **Tasks** was designed as a four-column task board, which is a generic
+  agent-product shape. Loopforge has no task model — it has a stage machine and
+  orthogonal quality claims, and those are what decides keep, kill or refactor.
+- **Add provider** was designed as a wizard over thirty sources. Kura exposes a
+  fixed set of providers and the user configures one, so a catalogue would have
+  offered choices that cannot be made.
 
-`chat` is the launch workspace, because it is the only one with data behind it.
+Settings follows the same rule: Appearance, Language, General, Shortcuts and
+Provider are real, while Permissions explains that the Agent owns that
+configuration rather than showing controls that do nothing.
+
+`chat` is the launch workspace.
 
 ## Interface language
 
