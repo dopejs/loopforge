@@ -58,6 +58,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/providers":
             self._execute(self.server.agent.providers)
             return
+        if self.path == "/v1/sessions":
+            self._execute(self.server.agent.sessions)
+            return
         self._json(HTTPStatus.NOT_FOUND, self._error("ROUTE_NOT_FOUND", "Not found."))
 
     def do_POST(self) -> None:
@@ -75,6 +78,13 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         elif self.path == "/v1/query":
             self._execute(
                 lambda: self.server.agent.query(
+                    str(body.get("query", "")),
+                    str(body["thread_id"]) if body.get("thread_id") else None,
+                )
+            )
+        elif self.path == "/v1/query/stream":
+            self._stream(
+                lambda: self.server.agent.query_stream(
                     str(body.get("query", "")),
                     str(body["thread_id"]) if body.get("thread_id") else None,
                 )
@@ -142,6 +152,58 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 self._error("INTERNAL_ERROR", "The agent request failed."),
             )
+
+    def _stream(self, operation: Any) -> None:
+        """Relay a generator of `(event, data)` pairs as Server-Sent Events.
+
+        Failures raised before the first event become a normal JSON error
+        response. Once the stream has started the status line is already sent,
+        so a later failure is reported as a terminal `error` event instead --
+        the client has to learn the run failed, and cannot learn it from a
+        status code any more.
+        """
+        try:
+            events = operation()
+        except LoopforgeAgentError as exc:
+            status = (
+                HTTPStatus.CONFLICT
+                if exc.code == "AGENT_NOT_READY"
+                else HTTPStatus.BAD_REQUEST
+            )
+            self._json(status, self._error(exc.code, str(exc)))
+            return
+        except LoopforgeError as exc:
+            self._json(
+                HTTPStatus.BAD_REQUEST,
+                self._error(exc.diagnostic_code, exc.message, exc.details),
+            )
+            return
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        try:
+            for event, data in events:
+                self._sse(event, data)
+        except (LoopforgeError, OSError) as exc:
+            LOGGER.warning("Loopforge Agent stream failed: %s", exc)
+            self._sse("error", json.dumps({"message": str(exc)}, ensure_ascii=True))
+        except Exception:
+            LOGGER.exception("Unhandled Loopforge Agent stream failure")
+            self._sse(
+                "error", json.dumps({"message": "the agent stream failed"}, ensure_ascii=True)
+            )
+
+    def _sse(self, event: str, data: str) -> None:
+        # Each data line is emitted separately: an embedded newline would
+        # otherwise terminate the event early and truncate the payload.
+        chunk = f"event: {event}\n"
+        for line in data.split("\n"):
+            chunk += f"data: {line}\n"
+        self.wfile.write((chunk + "\n").encode("utf-8"))
+        self.wfile.flush()
 
     @staticmethod
     def _error(code: str, message: str, details: Any = None) -> dict[str, Any]:

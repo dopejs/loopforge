@@ -1,5 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::io;
+use std::io::{BufRead, BufReader};
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -8,7 +9,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 use url::{Host, Url};
 use uuid::Uuid;
@@ -409,6 +410,99 @@ fn agent_providers(project_path: String) -> Result<Value, String> {
     )
 }
 
+/// Reads the Agent's projection of the runtime's chat sessions.
+#[tauri::command]
+fn agent_sessions(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/sessions",
+        None,
+        Duration::from_secs(15),
+    )
+}
+
+/// Streams a reply, emitting one Tauri event per chunk.
+///
+/// A Tauri command is request/response, so the stream cannot be its return
+/// value: the reply is delivered as `agent://stream` events carrying the
+/// caller's `stream_id`, and the command returns once the run ends. Each event
+/// names its kind so the UI can distinguish partial text from completion and
+/// failure rather than inferring it from the payload.
+#[tauri::command]
+async fn agent_query_stream(
+    app: AppHandle,
+    project_path: String,
+    query: String,
+    thread_id: Option<String>,
+    stream_id: String,
+) -> Result<(), String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    let url = agent_url(&metadata, "/v1/query/stream")?;
+    let authorization = format!("Bearer {}", metadata.token);
+    let mut body = json!({ "query": query });
+    if let Some(thread_id) = thread_id {
+        body["thread_id"] = json!(thread_id);
+    }
+
+    // Blocking IO on a worker thread: the response is consumed incrementally,
+    // so awaiting it on the async runtime would occupy a reactor thread for the
+    // whole run.
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = ureq::post(&url)
+            .set("Authorization", &authorization)
+            .set("Accept", "text/event-stream")
+            .timeout(Duration::from_secs(600))
+            .send_json(body);
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                emit_stream(&app, &stream_id, "error", &error.to_string());
+                return;
+            }
+        };
+        let reader = BufReader::new(response.into_reader());
+        let mut event = String::new();
+        let mut data: Vec<String> = Vec::new();
+        for line in reader.lines() {
+            let Ok(line) = line else {
+                emit_stream(&app, &stream_id, "error", "the agent stream was interrupted");
+                return;
+            };
+            if line.is_empty() {
+                if !data.is_empty() {
+                    emit_stream(&app, &stream_id, &event, &data.join("\n"));
+                }
+                event.clear();
+                data.clear();
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("event:") {
+                event = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("data:") {
+                data.push(rest.strip_prefix(' ').unwrap_or(rest).to_string());
+            }
+        }
+        if !data.is_empty() {
+            emit_stream(&app, &stream_id, &event, &data.join("\n"));
+        }
+    })
+    .await
+    .map_err(|error| format!("agent stream task failed: {error}"))
+}
+
+fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
+    let _ = app.emit(
+        "agent://stream",
+        json!({ "streamId": stream_id, "event": event, "data": data }),
+    );
+}
+
 #[tauri::command]
 fn agent_query(
     project_path: String,
@@ -437,7 +531,9 @@ pub fn run() {
             agent_start,
             agent_stop,
             agent_query,
-            agent_providers
+            agent_providers,
+            agent_sessions,
+            agent_query_stream
         ])
         .run(tauri::generate_context!())
         .expect("error while running Loopforge Workbench");

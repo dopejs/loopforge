@@ -67,6 +67,18 @@ export type ProviderInventory = {
   reason?: string;
 };
 
+export type Session = {
+  id: string;
+  title: string;
+  updated_at: string;
+};
+
+export type SessionInventory = {
+  schema_version: "loopforge-session-v1";
+  sessions: readonly Session[];
+  reason?: string;
+};
+
 export type ProviderState = {
   providers: readonly Provider[];
   roles?: readonly ModelRole[];
@@ -113,6 +125,47 @@ export function useProviders(projectRoot: string, enabled: boolean): ProviderSta
   }, [enabled, nonce, projectRoot]);
 
   return { providers: inventory?.providers ?? [], roles: inventory?.roles, reason, loading, reload };
+}
+
+export type SessionState = {
+  sessions: readonly Session[];
+  reason?: string;
+  loading: boolean;
+};
+
+/** Reads the Agent's projection of the runtime's chat sessions. */
+export function useSessions(projectRoot: string, enabled: boolean): SessionState {
+  const [inventory, setInventory] = useState<SessionInventory | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [reason, setReason] = useState<string>();
+
+  useEffect(() => {
+    if (!enabled || !projectRoot) return;
+    if (!isDesktopRuntime()) {
+      setReason(UNSUPPORTED_REASON);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setReason(undefined);
+    void invoke<SessionInventory>("agent_sessions", { projectPath: projectRoot })
+      .then((result) => {
+        if (cancelled) return;
+        setInventory(result);
+        setReason(result.reason);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setReason(errorMessage(error, "Sessions unavailable"));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, projectRoot]);
+
+  return { sessions: inventory?.sessions ?? [], reason, loading };
 }
 
 export { UNSUPPORTED_REASON };

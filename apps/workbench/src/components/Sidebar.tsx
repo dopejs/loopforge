@@ -5,6 +5,7 @@ import { type WorkspaceMode, sidebarTitleKey } from "../modes";
 import { projectName } from "../projects";
 import type { AgentPhase, AgentState } from "../agent";
 import { SESSION_USAGE, SIDEBAR_ITEMS } from "../fixtures";
+import { useSessions } from "../providers";
 
 function ProjectSwitcher({
   projectRoot,
@@ -163,7 +164,18 @@ export function Sidebar(props: {
 }): React.JSX.Element {
   const { t } = useI18n();
   const [selected, setSelected] = useState(0);
-  const items = SIDEBAR_ITEMS[props.mode] ?? [];
+  // Chat sessions come from the runtime; the other modes have no Agent
+  // capability behind them yet and stay on preview content.
+  const live = useSessions(props.projectRoot, props.mode === "chat");
+  const items =
+    props.mode === "chat"
+      ? live.sessions.map((session) => ({
+          label: session.title || session.id,
+          sub: session.updated_at,
+          meta: undefined,
+          tone: undefined
+        }))
+      : (SIDEBAR_ITEMS[props.mode] ?? []);
 
   useEffect(() => setSelected(0), [props.mode]);
 
@@ -186,8 +198,8 @@ export function Sidebar(props: {
       </div>
 
       {/*
-        Preview content: the Agent does not list boards, pipelines or suites
-        yet. Selection is local so the list is navigable while it is scaffolding.
+        Chat lists real sessions; the other modes are still scaffolding, so
+        their selection is local and their content comes from fixtures.
       */}
       <div className="sidebar-list">
         {items.map((item, index) => (

@@ -104,10 +104,13 @@ export function Transcript({
           <span className="message-author">
             {entry.author === "user" ? t("agent.you") : t("agent.title")}
           </span>
-          <p className="message-text">{entry.text}</p>
+          <p className="message-text">
+            {entry.text}
+            {entry.streaming && <span className="caret" aria-hidden="true" />}
+          </p>
         </article>
       ))}
-      {busy && (
+      {busy && !transcript.some((entry) => entry.streaming) && (
         <p className="message-pending">
           <span className="spinner" aria-hidden="true" />
           {t("agent.status.working")}

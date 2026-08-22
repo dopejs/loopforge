@@ -5,6 +5,7 @@ import json
 import urllib.parse
 from importlib import resources
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 from loopforge.agent import KuraRuntimeSupervisor
@@ -14,6 +15,8 @@ from loopforge.project import LoopforgeProject
 AGENT_STATUS_SCHEMA = "loopforge-agent-status-v1"
 AGENT_RESPONSE_SCHEMA = "loopforge-agent-response-v1"
 PROVIDER_SCHEMA = "loopforge-provider-v1"
+SESSION_SCHEMA = "loopforge-session-v1"
+MAX_SESSIONS = 200
 PROVIDER_TIMEOUT_SECONDS = 10.0
 # Providers are a short operator-managed list; this only bounds a runaway runtime.
 MAX_PROVIDERS = 64
@@ -108,6 +111,84 @@ class LoopforgeAgent:
             "dispatch_id": response.get("dispatchId"),
             "status": response.get("status"),
         }
+
+    def query_stream(
+        self, query: str, thread_id: str | None = None
+    ) -> Iterator[tuple[str, str]]:
+        """Stream a reply, yielding `(event, data)` pairs.
+
+        Identical to `query` in what it sends -- the same Loopforge context and
+        internal Skill -- and different only in how the reply arrives. The
+        caller sees partial output instead of waiting for the whole turn.
+
+        The prompt is built before the generator is first advanced so an
+        invalid query or an unready runtime raises at the call site rather than
+        halfway through a stream the caller has already started rendering.
+        """
+        normalized = query.strip()
+        if not normalized:
+            raise LoopforgeAgentError("Query must not be empty.", "QUERY_INVALID")
+        if len(normalized) > MAX_QUERY_CHARS:
+            raise LoopforgeAgentError("Query is too large.", "QUERY_TOO_LARGE")
+        status = self.runtime.status()
+        if not status.get("healthy") or not status.get("base_url"):
+            raise LoopforgeAgentError(
+                "The Loopforge Agent runtime is not ready.", "AGENT_NOT_READY"
+            )
+        context = self.runtime.sync_context()["context"]
+        request: dict[str, Any] = {"query": self._prompt(context, normalized)}
+        if thread_id:
+            request["threadId"] = thread_id
+            request["continuity"] = {"mode": "auto"}
+        client = KuraClient(
+            str(status["base_url"]), timeout=120.0, token=status.get("token")
+        )
+        return client.stream("/v1/chat/query/stream", request)
+
+    def sessions(self) -> dict[str, Any]:
+        """Project the runtime's chat sessions.
+
+        An unavailable runtime yields an empty list with a reason rather than
+        an error: the Workbench renders a sidebar, not a failure.
+        """
+        status = self.runtime.status()
+        if not status.get("healthy") or not status.get("base_url"):
+            return {
+                "schema_version": SESSION_SCHEMA,
+                "sessions": [],
+                "reason": str(status.get("reason") or "The Loopforge Agent runtime is not ready."),
+            }
+        client = KuraClient(
+            str(status["base_url"]),
+            timeout=PROVIDER_TIMEOUT_SECONDS,
+            token=status.get("token"),
+        )
+        try:
+            payload = client.get("/v1/sessions")
+        except KuraAgentError as exc:
+            return {"schema_version": SESSION_SCHEMA, "sessions": [], "reason": str(exc)}
+        raw = payload.get("items")
+        if not isinstance(raw, list):
+            return {
+                "schema_version": SESSION_SCHEMA,
+                "sessions": [],
+                "reason": "The runtime returned an unrecognized session list.",
+            }
+        sessions = []
+        for entry in raw[:MAX_SESSIONS]:
+            if not isinstance(entry, dict):
+                continue
+            session_id = entry.get("sessionId")
+            if not isinstance(session_id, str) or not session_id:
+                continue
+            sessions.append(
+                {
+                    "id": session_id,
+                    "title": str(entry.get("title") or entry.get("label") or ""),
+                    "updated_at": str(entry.get("updatedAt") or ""),
+                }
+            )
+        return {"schema_version": SESSION_SCHEMA, "sessions": sessions}
 
     def providers(self) -> dict[str, Any]:
         """Project the generic Kura provider inventory into a Loopforge contract.

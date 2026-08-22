@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { ensureAgentReady, errorMessage } from "./daemon";
 
 export type LoopforgeProjectContext = {
@@ -41,7 +42,32 @@ export type TranscriptEntry = {
   text: string;
   /** Set when the entry reports a failed request rather than an agent reply. */
   failed?: boolean;
+  /** True while tokens are still arriving for this entry. */
+  streaming?: boolean;
 };
+
+/** One `agent://stream` payload. */
+type StreamEvent = {
+  streamId: string;
+  event: string;
+  data: string;
+};
+
+/** Extract the incremental text from a Kura chat event payload. */
+export function streamDelta(event: string, data: string): string | null {
+  if (!event.endsWith("delta")) return null;
+  try {
+    const parsed: unknown = JSON.parse(data);
+    if (parsed && typeof parsed === "object" && "delta" in parsed) {
+      const delta = (parsed as { delta: unknown }).delta;
+      return typeof delta === "string" ? delta : null;
+    }
+  } catch {
+    // A non-JSON delta is still text worth showing rather than dropping.
+    return data;
+  }
+  return null;
+}
 
 export type AgentPhase = "unsupported" | "no-project" | "starting" | "ready" | "offline";
 
@@ -172,31 +198,60 @@ export function useAgent(projectRoot: string): UseAgent {
       const trimmed = query.trim();
       if (!trimmed || busy || !isDesktopRuntime()) return;
       setBusy(true);
+      const replyId = nextEntryId();
       setTranscript((entries) => [
         ...entries,
-        { id: nextEntryId(), author: "user", text: trimmed }
+        { id: nextEntryId(), author: "user", text: trimmed },
+        { id: replyId, author: "agent", text: "", streaming: true }
       ]);
+
+      const streamId = replyId;
+      let sawText = false;
+      // Subscribed before the command is issued: the first delta can arrive
+      // before the invoke promise has even been awaited.
+      const unlisten = await listen<StreamEvent>("agent://stream", ({ payload }) => {
+        if (payload.streamId !== streamId) return;
+        const delta = streamDelta(payload.event, payload.data);
+        if (delta === null) return;
+        sawText = true;
+        setTranscript((entries) =>
+          entries.map((entry) =>
+            entry.id === replyId ? { ...entry, text: entry.text + delta } : entry
+          )
+        );
+      });
+
       try {
-        const result = await agentInvoke<AgentQueryResponse>("agent_query", {
+        await agentInvoke<void>("agent_query_stream", {
           query: trimmed,
-          threadId: threadId.current
+          threadId: threadId.current,
+          streamId
         });
-        threadId.current = result.thread_id;
-        setTranscript((entries) => [
-          ...entries,
-          { id: nextEntryId(), author: "agent", text: result.reply }
-        ]);
+        setTranscript((entries) =>
+          entries.map((entry) =>
+            entry.id === replyId
+              ? {
+                  ...entry,
+                  streaming: false,
+                  // A run that ends without producing text is a failure the
+                  // user must see, not an empty bubble.
+                  text: sawText ? entry.text : "",
+                  failed: !sawText
+                }
+              : entry
+          )
+        );
       } catch (error) {
-        setTranscript((entries) => [
-          ...entries,
-          {
-            id: nextEntryId(),
-            author: "agent",
-            text: errorMessage(error, "Agent request failed"),
-            failed: true
-          }
-        ]);
+        const message = errorMessage(error, "Agent request failed");
+        setTranscript((entries) =>
+          entries.map((entry) =>
+            entry.id === replyId
+              ? { ...entry, streaming: false, failed: true, text: message }
+              : entry
+          )
+        );
       } finally {
+        unlisten();
         setBusy(false);
       }
     },
