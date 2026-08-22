@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 from loopforge.project import HYPOTHESIS_FIELDS, LoopforgeProject
+from loopforge.agent.kura_client import KuraClient
 from tests.support.kura_daemon import KuraDaemon, requires_kura, requires_live_provider
 
 #: A real model may drop a section. The draft is edited before submission, so a
@@ -152,6 +153,71 @@ class LiveDraftTests(unittest.TestCase):
         self.assertGreater(len(content), 200, content[:200])
         # The skill is supplied in the prompt; echoing it back is not an answer.
         self.assertNotIn("</loopforge_internal_skill>", content)
+
+
+@requires_kura
+@requires_live_provider
+class ConfiguredProviderReachesTheRuntimeTests(unittest.TestCase):
+    """The path a user actually takes.
+
+    Everything else here injects the endpoint straight into the daemon's
+    environment. This goes through the store the settings dialog writes to and
+    the supervisor that starts the daemon, which is the only way to know that
+    configuring a provider in the Workbench makes it answer.
+    """
+
+    def test_a_stored_provider_is_dispatchable_after_a_restart(self) -> None:
+        import os
+        import tempfile as tf
+
+        from loopforge.agent.supervisor import KuraRuntimeSupervisor
+        from loopforge.project import LoopforgeProject
+        from loopforge.userstore import UserStore
+        from tests.support.kura_daemon import kura_binary, live_provider
+
+        provider = live_provider()
+        assert provider is not None
+
+        root = Path(tf.mkdtemp(prefix="lf-cfg-"))
+        store = UserStore(root / "home")
+        # Exactly what the settings dialog does.
+        store.save_provider(
+            "openai_compatible",
+            provider["LOOPFORGE_TEST_LLM_BASE_URL"],
+            provider["LOOPFORGE_TEST_LLM_API_KEY"],
+            provider["LOOPFORGE_TEST_LLM_MODEL"],
+        )
+
+        project = LoopforgeProject(root / "project")
+        project.root.mkdir(parents=True, exist_ok=True)
+        # The binary is named rather than left to PATH: an obsolete `dope` from
+        # before the rename is exactly what the supervisor falls back to, and
+        # this test would then measure that instead.
+        supervisor = KuraRuntimeSupervisor(
+            project, dope_binary=kura_binary(), user_store=store
+        )
+        # The environment must not be what makes this work.
+        for name in (
+            "KURA_LLM_DEFAULT_PROVIDER",
+            "KURA_LLM_OPENAI_COMPATIBLE_BASE_URL",
+            "KURA_LLM_OPENAI_COMPATIBLE_API_KEY",
+            "KURA_LLM_OPENAI_COMPATIBLE_MODEL",
+        ):
+            os.environ.pop(name, None)
+
+        status = supervisor.start()
+        try:
+            self.assertTrue(status["healthy"])
+            client = KuraClient(status["base_url"], timeout=180, token=status["token"])
+            registered = {
+                str(item.get("providerId") or "")
+                for item in client.get("/v1/providers").get("items") or []
+            }
+            self.assertIn("openai_compatible", registered)
+            reply = client.post("/v1/chat/query", {"query": "Reply with exactly: OK"})
+            self.assertTrue(str(reply.get("reply", "")).strip())
+        finally:
+            supervisor.stop()
 
 
 if __name__ == "__main__":

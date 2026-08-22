@@ -13,18 +13,47 @@ from typing import Any
 
 from ..errors import InvalidStateError, LoopforgeError, ToolUnavailableError
 from ..jsonutil import atomic_write_json
+from ..userstore import UserStore
 from ..project import LoopforgeProject
 from .contracts import build_project_context
 from .kura_client import KuraAgentError, KuraClient
 
 RUNTIME_SCHEMA = "kura-runtime-v1"
 
+#: Starting the daemon is meant to return immediately -- it forks and exits.
+#: A binary that does not is either a different program under the same name or
+#: is wedged, and either way waiting forever turns a diagnosable failure into a
+#: hang. This bound was added after an obsolete `dope` on PATH, from before the
+#: rename, blocked a start for seven minutes with no output.
+DAEMON_COMMAND_TIMEOUT_SECONDS = 60.0
+
+#: Kura reads these as overrides. Passing the credential in the environment
+#: rather than writing Kura's config file keeps it in exactly one place on
+#: disk -- the user-level store -- instead of copying it into every project.
+PROVIDER_ENVIRONMENT = {
+    "base_url": "KURA_LLM_OPENAI_COMPATIBLE_BASE_URL",
+    "api_key": "KURA_LLM_OPENAI_COMPATIBLE_API_KEY",
+    "model": "KURA_LLM_OPENAI_COMPATIBLE_MODEL",
+}
+#: A drafted hypothesis is eleven sections; the default half minute is short.
+PROVIDER_TIMEOUTS = {
+    "KURA_LLM_OPENAI_COMPATIBLE_TIMEOUT_MS": "180000",
+    "KURA_LLM_OPENAI_COMPATIBLE_STREAM_FIRST_CHUNK_TIMEOUT_MS": "120000",
+    "KURA_LLM_OPENAI_COMPATIBLE_STREAM_IDLE_TIMEOUT_MS": "120000",
+    "KURA_LLM_OPENAI_COMPATIBLE_STREAM_MAX_DURATION_MS": "300000",
+}
+
 
 class KuraRuntimeSupervisor:
     def __init__(
-        self, project: LoopforgeProject, dope_binary: str | None = None
+        self,
+        project: LoopforgeProject,
+        dope_binary: str | None = None,
+        user_store: UserStore | None = None,
     ) -> None:
         self.project = project
+        # User-level, so one configuration serves every project on this machine.
+        self.user_store = user_store or UserStore()
         self.root = project.root / ".loopforge" / "agent"
         self.metadata_path = self.root / "runtime.json"
         self.context_path = self.root / "context.json"
@@ -184,14 +213,31 @@ class KuraRuntimeSupervisor:
                 "KURA_BIND_ADDR": bind_addr,
             }
         )
-        completed = subprocess.run(
-            [binary, "daemon", "start"],
-            env=environment,
-            cwd=self.project.root,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        environment.update(self._provider_environment())
+        try:
+            completed = subprocess.run(
+                [binary, "daemon", "start"],
+                env=environment,
+                cwd=self.project.root,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=DAEMON_COMMAND_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # Naming the binary is the point: the usual cause is the wrong one
+            # being found on PATH, and a message without it sends the reader
+            # looking at the daemon instead of at which daemon.
+            raise LoopforgeError(
+                "The Kura daemon did not finish starting.",
+                "KURA_START_TIMEOUT",
+                1,
+                {
+                    "binary": binary,
+                    "timeout_seconds": DAEMON_COMMAND_TIMEOUT_SECONDS,
+                    "bind_addr": bind_addr,
+                },
+            ) from exc
         if completed.returncode != 0:
             raise LoopforgeError(
                 "Kura daemon failed to start.",
@@ -219,19 +265,49 @@ class KuraRuntimeSupervisor:
         atomic_write_json(self.metadata_path, metadata, mode=0o600)
         result = self.status()
         if not result["healthy"]:
-            subprocess.run(
-                [binary, "daemon", "stop"],
-                env=environment,
-                cwd=self.project.root,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+            try:
+                subprocess.run(
+                    [binary, "daemon", "stop"],
+                    env=environment,
+                    cwd=self.project.root,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=DAEMON_COMMAND_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired:
+                # Best-effort cleanup: the unhealthy start below is the error
+                # worth reporting, and replacing it with a stop timeout would
+                # hide why the daemon was being stopped.
+                pass
             self.metadata_path.unlink(missing_ok=True)
             raise LoopforgeError(
                 "Kura started but did not become healthy.", "KURA_NOT_READY", 1, result
             )
         return result
+
+    def _provider_environment(self) -> dict[str, str]:
+        """Configuration for the OpenAI-compatible provider, if any.
+
+        Returns nothing when it is unconfigured, so Kura leaves the endpoint
+        unregistered rather than registering one that fails every dispatch --
+        an unconfigured daemon should read as unconfigured, not broken.
+        """
+        try:
+            record = self.user_store.provider("openai_compatible")
+        except Exception:
+            # A user store this build cannot read must not stop a daemon that
+            # would otherwise run on its built-in provider.
+            return {}
+        if not record or not record.get("base_url") or not record.get("model"):
+            return {}
+        values = {
+            variable: str(record.get(field) or "")
+            for field, variable in PROVIDER_ENVIRONMENT.items()
+        }
+        values["KURA_LLM_DEFAULT_PROVIDER"] = "openai_compatible"
+        values.update(PROVIDER_TIMEOUTS)
+        return values
 
     def stop(self) -> dict[str, Any]:
         metadata = self._metadata()
@@ -251,14 +327,23 @@ class KuraRuntimeSupervisor:
                 "KURA_BIND_ADDR": str(metadata["bind_addr"]),
             }
         )
-        completed = subprocess.run(
-            [binary, "daemon", "stop"],
-            env=environment,
-            cwd=self.project.root,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                [binary, "daemon", "stop"],
+                env=environment,
+                cwd=self.project.root,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=DAEMON_COMMAND_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise LoopforgeError(
+                "The Kura daemon did not finish stopping.",
+                "KURA_STOP_TIMEOUT",
+                1,
+                {"binary": binary, "timeout_seconds": DAEMON_COMMAND_TIMEOUT_SECONDS},
+            ) from exc
         if completed.returncode != 0:
             raise LoopforgeError(
                 "Kura daemon failed to stop.",

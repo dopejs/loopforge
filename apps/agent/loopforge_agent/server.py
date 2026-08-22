@@ -61,6 +61,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
+        if self.path == "/v1/settings/provider":
+            self._execute(self.server.agent.provider_settings)
+            return
         if self.path == "/v1/project/health":
             self._execute(self.server.agent.project_health)
             return
@@ -146,6 +149,16 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body["rationale"]) if body.get("rationale") else None,
                 )
             )
+        elif self.path == "/v1/settings/provider":
+            self._execute(
+                lambda: self.server.agent.save_provider_settings(
+                    str(body.get("base_url", "")),
+                    str(body.get("api_key", "")),
+                    str(body.get("model", "")),
+                )
+            )
+        elif self.path == "/v1/settings/provider/forget":
+            self._execute(self.server.agent.forget_provider_settings)
         elif self.path == "/v1/project/reconcile":
             self._execute(
                 lambda: self.server.agent.reconcile(body.get("apply") is True)

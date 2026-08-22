@@ -13,6 +13,7 @@ from typing import Any
 from loopforge.agent import KuraRuntimeSupervisor
 from loopforge.agent.kura_client import KuraAgentError, KuraClient
 from loopforge.errors import LoopforgeError
+from loopforge.userstore import UserStore, UserStoreError
 from loopforge.project import (
     HYPOTHESIS_FIELDS,
     HYPOTHESIS_HEADINGS,
@@ -34,6 +35,11 @@ EVIDENCE_SCHEMA = "loopforge-evidence-v1"
 PLAYTEST_SCHEMA = "loopforge-playtest-v1"
 DECISION_SCHEMA = "loopforge-decision-v1"
 HEALTH_SCHEMA = "loopforge-project-health-v1"
+SETTINGS_SCHEMA = "loopforge-settings-v1"
+#: The only provider whose endpoint the user supplies. The rest are built in or
+#: managed by Kura, and offering to configure them would be offering a choice
+#: that does not exist.
+CONFIGURABLE_PROVIDER = "openai_compatible"
 HISTORY_SCHEMA = "loopforge-history-v1"
 #: The audit trail is read newest first and paged; a long-lived project's log
 #: is unbounded and the surface only ever shows a window of it.
@@ -497,6 +503,80 @@ class LoopforgeAgent:
         finally:
             Path(handle.name).unlink(missing_ok=True)
         return self.hypothesis()
+
+    @property
+    def user_store(self) -> UserStore:
+        """User-level storage, created on first use."""
+        store = getattr(self, "_user_store", None)
+        if store is None:
+            store = UserStore()
+            self._user_store = store
+        return store
+
+    def provider_settings(self) -> dict[str, Any]:
+        """What the user has configured, without the credential.
+
+        The key is never returned. A surface only needs to know whether one is
+        set, and reading it back would put it in a response body, a log and a
+        renderer for no purpose the user has.
+        """
+        try:
+            record = self.user_store.provider(CONFIGURABLE_PROVIDER)
+        except UserStoreError as exc:
+            return {
+                "schema_version": SETTINGS_SCHEMA,
+                "provider_id": CONFIGURABLE_PROVIDER,
+                "configured": False,
+                "reason": str(exc),
+            }
+        return {
+            "schema_version": SETTINGS_SCHEMA,
+            "provider_id": CONFIGURABLE_PROVIDER,
+            "base_url": str((record or {}).get("base_url") or ""),
+            "model": str((record or {}).get("model") or ""),
+            # Whether a credential exists, never what it is.
+            "has_api_key": bool((record or {}).get("api_key")),
+            "configured": bool(
+                record and record.get("base_url") and record.get("model") and record.get("api_key")
+            ),
+            "updated_at": str((record or {}).get("updated_at") or ""),
+        }
+
+    def save_provider_settings(
+        self, base_url: str, api_key: str, model: str
+    ) -> dict[str, Any]:
+        """Record the endpoint the user supplied.
+
+        Takes effect when the runtime next starts: Kura reads its provider
+        configuration at boot, so the caller is told to restart rather than
+        left wondering why a saved endpoint is not answering.
+
+        An empty key means "keep the stored one", which is what lets a user
+        change a model without retyping a credential the surface never showed
+        them.
+        """
+        url = str(base_url or "").strip()
+        name = str(model or "").strip()
+        if not url or not name:
+            raise LoopforgeAgentError(
+                "A base URL and a model are required.", "PROVIDER_SETTINGS_INVALID"
+            )
+        if not (url.startswith("https://") or url.startswith("http://")):
+            raise LoopforgeAgentError(
+                "The base URL must be an HTTP or HTTPS address.",
+                "PROVIDER_SETTINGS_INVALID",
+            )
+        self.user_store.save_provider(CONFIGURABLE_PROVIDER, url, str(api_key or ""), name)
+        result = self.provider_settings()
+        # Stated rather than implied: nothing the user just typed is live yet.
+        result["restart_required"] = True
+        return result
+
+    def forget_provider_settings(self) -> dict[str, Any]:
+        self.user_store.forget_provider(CONFIGURABLE_PROVIDER)
+        result = self.provider_settings()
+        result["restart_required"] = True
+        return result
 
     def project_health(self) -> dict[str, Any]:
         """State integrity and tool availability in one answer.

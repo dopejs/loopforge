@@ -170,3 +170,67 @@ export function useSessions(projectRoot: string, enabled: boolean): SessionState
 }
 
 export { UNSUPPORTED_REASON };
+
+/**
+ * Mirrors `loopforge-settings-v1`.
+ *
+ * The credential is never carried: `has_api_key` says whether one is stored,
+ * which is all a surface needs. Reading it back would put it in a response, a
+ * log and a renderer for no purpose the user has.
+ */
+export type ProviderSettings = {
+  schema_version: "loopforge-settings-v1";
+  provider_id: string;
+  base_url?: string;
+  model?: string;
+  has_api_key?: boolean;
+  configured?: boolean;
+  updated_at?: string;
+  /** Kura reads provider configuration at boot, so a save is not yet live. */
+  restart_required?: boolean;
+  reason?: string;
+};
+
+export function useProviderSettings(projectRoot: string, enabled: boolean) {
+  const [settings, setSettings] = useState<ProviderSettings | null>(null);
+  const [reason, setReason] = useState<string>();
+  const [nonce, setNonce] = useState(0);
+
+  const reload = useCallback(() => setNonce((value) => value + 1), []);
+
+  useEffect(() => {
+    if (!enabled || !projectRoot || !isDesktopRuntime()) return;
+    let cancelled = false;
+    void invoke<ProviderSettings>("agent_provider_settings", { projectPath: projectRoot })
+      .then((result) => {
+        if (!cancelled) setSettings(result);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setReason(errorMessage(error, "Provider settings unavailable"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, projectRoot, nonce]);
+
+  return { settings, reason, reload };
+}
+
+/** Saves the endpoint. An empty key keeps the stored one. */
+export function saveProviderSettings(
+  projectRoot: string,
+  input: { base_url: string; api_key: string; model: string }
+): Promise<ProviderSettings> {
+  return invoke<ProviderSettings>("agent_save_provider_settings", {
+    projectPath: projectRoot,
+    baseUrl: input.base_url,
+    apiKey: input.api_key,
+    model: input.model
+  });
+}
+
+export function forgetProviderSettings(projectRoot: string): Promise<ProviderSettings> {
+  return invoke<ProviderSettings>("agent_forget_provider_settings", {
+    projectPath: projectRoot
+  });
+}

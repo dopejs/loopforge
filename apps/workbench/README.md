@@ -49,6 +49,16 @@ Settings follows the same rule: Appearance, Language, General, Shortcuts and
 Provider are real, while Permissions explains that the Agent owns that
 configuration rather than showing controls that do nothing.
 
+Provider settings configure the OpenAI-compatible endpoint — base URL, model
+and key. The Workbench does not keep the credential: it passes it to the Agent,
+which stores it once per machine under `~/.loopforge` rather than once per
+project, and hands it to Kura when the runtime starts. The key is never read
+back, so the form shows whether one is set rather than what it is. Saving one
+requires restarting the runtime, which the dialog says, because Kura reads its
+provider configuration at boot. See [ADR 0007](../../docs/decisions/0007-user-level-state.md)
+for why this is user-level rather than project state, and for what the storage
+does and does not protect.
+
 `chat` is the launch workspace.
 
 ## Interface language

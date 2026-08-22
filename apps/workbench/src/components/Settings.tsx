@@ -456,7 +456,11 @@ export function Settings({
       </div>
 
       {wizardOpen && (
-        <AddProvider providers={wizardProviders} onClose={() => setWizardOpen(false)} />
+        <AddProvider
+          providers={wizardProviders}
+          projectRoot={projectRoot}
+          onClose={() => setWizardOpen(false)}
+        />
       )}
     </section>
   );

@@ -190,6 +190,62 @@ class AgentContractTests(unittest.TestCase):
         self.assertEqual(result["context"]["stage"], "DISCOVERY")
 
 
+class DaemonTimeoutTests(unittest.TestCase):
+    """Starting the daemon is bounded.
+
+    `kura daemon start` forks and exits, so a call that does not return is
+    either a different program under the same name or a wedged one. An
+    obsolete `dope` left on PATH from before the rename blocked a start for
+    seven minutes with no output, which is how this bound came to exist.
+    """
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.project = LoopforgeProject(Path(self.temporary.name))
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def test_a_start_that_never_returns_fails_and_names_the_binary(self) -> None:
+        import subprocess
+
+        supervisor = AgentSupervisor(self.project, dope_binary="/tmp/wedged-daemon")
+        with patch(
+            "loopforge.agent.supervisor.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="daemon start", timeout=60),
+        ):
+            with self.assertRaises(LoopforgeError) as caught:
+                supervisor.start(19999)
+
+        self.assertEqual(caught.exception.diagnostic_code, "KURA_START_TIMEOUT")
+        # The usual cause is the wrong binary on PATH, so the message has to
+        # say which one it waited on.
+        self.assertEqual(caught.exception.details["binary"], "/tmp/wedged-daemon")
+
+    def test_a_stop_that_never_returns_fails_rather_than_hanging(self) -> None:
+        import subprocess
+
+        supervisor = AgentSupervisor(self.project, dope_binary="/tmp/wedged-daemon")
+        supervisor.root.mkdir(parents=True, exist_ok=True)
+        supervisor.metadata_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "kura-runtime-v1",
+                    "bind_addr": "127.0.0.1:19999",
+                    "data_dir": str(supervisor.root / "data"),
+                }
+            )
+        )
+        with patch(
+            "loopforge.agent.supervisor.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="daemon stop", timeout=60),
+        ):
+            with self.assertRaises(LoopforgeError) as caught:
+                supervisor.stop()
+
+        self.assertEqual(caught.exception.diagnostic_code, "KURA_STOP_TIMEOUT")
+
+
 class KuraClientErrorReportingTests(unittest.TestCase):
     """A failure has to say why, not just that.
 

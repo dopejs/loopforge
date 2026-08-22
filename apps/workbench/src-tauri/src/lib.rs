@@ -503,6 +503,60 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
     );
 }
 
+/// The user-supplied endpoint, without its credential.
+#[tauri::command]
+fn agent_provider_settings(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/settings/provider",
+        None,
+        Duration::from_secs(15),
+    )
+}
+
+/// Records the endpoint. An empty key keeps the stored one.
+///
+/// The credential passes through this process to the Agent and is not held
+/// here: the Workbench has never been the place that keeps it, and the user
+/// store is now the one place on disk that does.
+#[tauri::command]
+fn agent_save_provider_settings(
+    project_path: String,
+    base_url: String,
+    api_key: String,
+    model: String,
+) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/settings/provider",
+        Some(json!({ "base_url": base_url, "api_key": api_key, "model": model })),
+        Duration::from_secs(30),
+    )
+}
+
+/// Clears the stored endpoint and credential.
+#[tauri::command]
+fn agent_forget_provider_settings(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/settings/provider/forget",
+        Some(json!({})),
+        Duration::from_secs(30),
+    )
+}
+
 /// State integrity and tool availability.
 #[tauri::command]
 fn agent_project_health(project_path: String) -> Result<Value, String> {
@@ -979,6 +1033,9 @@ pub fn run() {
             agent_run,
             agent_run_engine,
             agent_project_init,
+            agent_provider_settings,
+            agent_save_provider_settings,
+            agent_forget_provider_settings,
             agent_project_health,
             agent_project_history,
             agent_project_reconcile,
