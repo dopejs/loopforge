@@ -11,6 +11,7 @@ import {
 } from "../appearance";
 import { SHORTCUTS, displayShortcut, isApplePlatform } from "../shortcuts";
 import { ProviderSettings } from "./ProviderSettings";
+import type { Provider } from "../providers";
 import { AddProvider } from "./AddProvider";
 import { TOOL_CHIPS } from "../fixtures.providers";
 import { PreviewBanner } from "./primitives";
@@ -148,6 +149,7 @@ export function Settings({
 }): React.JSX.Element {
   const { t } = useI18n();
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardProviders, setWizardProviders] = useState<readonly Provider[]>([]);
   const apple = isApplePlatform(
     typeof navigator === "undefined" ? "" : navigator.platform || navigator.userAgent
   );
@@ -321,7 +323,13 @@ export function Settings({
           {group === "provider" && (
             <>
               <p className="settings-note">{t("settings.provider.empty")}</p>
-              <ProviderSettings projectRoot={projectRoot} onAdd={() => setWizardOpen(true)} />
+              <ProviderSettings
+                projectRoot={projectRoot}
+                onAdd={(available) => {
+                  setWizardProviders(available);
+                  setWizardOpen(true);
+                }}
+              />
             </>
           )}
 
@@ -419,7 +427,9 @@ export function Settings({
         </div>
       </div>
 
-      {wizardOpen && <AddProvider onClose={() => setWizardOpen(false)} />}
+      {wizardOpen && (
+        <AddProvider providers={wizardProviders} onClose={() => setWizardOpen(false)} />
+      )}
     </section>
   );
 }

@@ -420,5 +420,13 @@ export const ko: Messages = {
   "project.claims": "품질 주장",
   "project.revision": "리비전 {value}",
   "project.evidenceCount": "근거 {count}개",
-  "project.claimsNote": "각 주장은 개별적으로 판단됩니다. 충족은 해당 항목을 뒷받침하는 근거가 있다는 뜻일 뿐, 게임이 재미있다는 뜻이 아닙니다."
+  "project.claimsNote": "각 주장은 개별적으로 판단됩니다. 충족은 해당 항목을 뒷받침하는 근거가 있다는 뜻일 뿐, 게임이 재미있다는 뜻이 아닙니다.",
+
+  "wizard.intro": "Kura는 고정된 프로바이더 집합을 제공합니다. 추가가 아니라 그중 하나를 설정합니다.",
+  "wizard.providerReady": "사용할 수 있습니다.",
+  "wizard.credentialsNote": "워크벤치는 자격 증명을 보관하지 않습니다. 에이전트 설정이 보관합니다.",
+  "wizard.howTo.api_key": "에이전트 설정에 기본 URL, API 키, 기본 모델이 필요합니다.",
+  "wizard.howTo.local_cli_bridge": "이 기기에 해당 명령줄 도구를 설치하고 로그인해야 합니다.",
+  "wizard.howTo.none": "내장되어 있어 테스트에 항상 사용할 수 있습니다.",
+  "wizard.howTo.unknown": "이 프로바이더의 설정은 에이전트가 정의합니다."
 };

@@ -2181,3 +2181,15 @@ button:disabled {
   background: var(--badSoft);
   color: var(--bad);
 }
+
+/* The runtime's own issue text, listed verbatim. */
+.issue-list {
+  margin: 0;
+  padding-inline-start: 18px;
+  color: var(--bad);
+  font-size: var(--font-xs);
+  line-height: 1.7;
+}
+
+.issue-card { padding: 12px 14px; border-color: var(--bad); }
+.issue-line { margin: 0; color: var(--bad); font-size: var(--font-xs); line-height: 1.6; }

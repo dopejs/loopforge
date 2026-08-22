@@ -212,7 +212,11 @@ class KuraRuntimeSupervisor:
         token = self._pair(f"http://{bind_addr}")
         if token:
             metadata["token"] = token
-        atomic_write_json(self.metadata_path, metadata)
+        # The metadata carries a bearer token for the daemon. Atomic writes
+        # already land at 0600 because the temporary file is created with
+        # mkstemp semantics; stating it here keeps that guarantee from
+        # depending on an implementation detail elsewhere.
+        atomic_write_json(self.metadata_path, metadata, mode=0o600)
         result = self.status()
         if not result["healthy"]:
             subprocess.run(

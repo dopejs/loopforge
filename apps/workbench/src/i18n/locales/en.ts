@@ -423,7 +423,15 @@ export const en = {
   "project.claims": "Quality claims",
   "project.revision": "Revision {value}",
   "project.evidenceCount": "{count} evidence",
-  "project.claimsNote": "Each claim is judged separately. A met claim means evidence supports that claim only — not that the game is good."
+  "project.claimsNote": "Each claim is judged separately. A met claim means evidence supports that claim only — not that the game is good.",
+
+  "wizard.intro": "Kura exposes a fixed set of providers. Configure one rather than adding an endpoint.",
+  "wizard.providerReady": "Ready to use.",
+  "wizard.credentialsNote": "The Workbench stores no credentials; the agent's configuration does.",
+  "wizard.howTo.api_key": "Needs a base URL, an API key and a default model in the agent's configuration.",
+  "wizard.howTo.local_cli_bridge": "Needs its command-line tool installed and signed in on this machine.",
+  "wizard.howTo.none": "Built in; always available for testing.",
+  "wizard.howTo.unknown": "Configuration for this provider is defined by the agent."
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -420,5 +420,13 @@ export const zhHans: Messages = {
   "project.claims": "质量声明",
   "project.revision": "修订 {value}",
   "project.evidenceCount": "{count} 条证据",
-  "project.claimsNote": "每条声明独立判定。某条满足只代表有证据支持该条，并不代表游戏好玩。"
+  "project.claimsNote": "每条声明独立判定。某条满足只代表有证据支持该条，并不代表游戏好玩。",
+
+  "wizard.intro": "Kura 提供固定的一组 Provider。你配置其中之一，而不是添加新端点。",
+  "wizard.providerReady": "可以使用。",
+  "wizard.credentialsNote": "工作台不保存任何凭证，凭证由 agent 的配置管理。",
+  "wizard.howTo.api_key": "需要在 agent 配置中填写 Base URL、API 密钥和默认模型。",
+  "wizard.howTo.local_cli_bridge": "需要在本机安装并登录对应的命令行工具。",
+  "wizard.howTo.none": "内置，始终可用于测试。",
+  "wizard.howTo.unknown": "该 Provider 的配置由 agent 定义。"
 };

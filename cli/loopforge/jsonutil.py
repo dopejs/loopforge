@@ -51,7 +51,16 @@ def load_json_file(path: Path) -> dict[str, Any]:
     return value
 
 
-def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+def atomic_write_json(
+    path: Path, value: dict[str, Any], *, mode: int | None = None
+) -> None:
+    """Write JSON atomically.
+
+    Files land at 0600 by default: the temporary file is created with mkstemp
+    semantics and `os.replace` preserves its mode, so the umask does not apply.
+    `mode` states that intent explicitly for files holding a credential, and
+    lets a genuinely shared file opt into wider permissions.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(value, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
     temporary: Path | None = None
@@ -68,6 +77,10 @@ def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
+        if mode is not None:
+            # Applied to the temporary file so the final path never exists
+            # with wider permissions, even briefly.
+            os.chmod(temporary, mode)
         os.replace(temporary, path)
         temporary = None
         _fsync_directory(path.parent)
@@ -92,6 +105,10 @@ def atomic_write_text(path: Path, value: str) -> None:
             handle.write(value)
             handle.flush()
             os.fsync(handle.fileno())
+        if mode is not None:
+            # Applied to the temporary file so the final path never exists
+            # with wider permissions, even briefly.
+            os.chmod(temporary, mode)
         os.replace(temporary, path)
         temporary = None
         _fsync_directory(path.parent)

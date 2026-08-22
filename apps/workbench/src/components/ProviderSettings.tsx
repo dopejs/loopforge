@@ -140,7 +140,7 @@ export function ProviderSettings({
   onAdd
 }: {
   projectRoot: string;
-  onAdd: () => void;
+  onAdd: (providers: readonly Provider[]) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   const key = useKey();
@@ -158,7 +158,7 @@ export function ProviderSettings({
         <span className="section-title">
           {t("provider.count", { count: providers.length })}
         </span>
-        <button type="button" className="primary-button small" onClick={onAdd}>
+        <button type="button" className="primary-button small" onClick={() => onAdd(providers)}>
           {t("provider.add")}
         </button>
       </div>

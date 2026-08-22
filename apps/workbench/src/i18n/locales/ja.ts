@@ -420,5 +420,13 @@ export const ja: Messages = {
   "project.claims": "品質クレーム",
   "project.revision": "リビジョン {value}",
   "project.evidenceCount": "証拠 {count} 件",
-  "project.claimsNote": "各クレームは個別に判定されます。達成は、その項目を裏づける証拠があることのみを意味し、ゲームが面白いことを意味しません。"
+  "project.claimsNote": "各クレームは個別に判定されます。達成は、その項目を裏づける証拠があることのみを意味し、ゲームが面白いことを意味しません。",
+
+  "wizard.intro": "Kura のプロバイダは固定です。追加ではなく、いずれかを設定します。",
+  "wizard.providerReady": "利用可能です。",
+  "wizard.credentialsNote": "ワークベンチは認証情報を保持しません。エージェントの設定が保持します。",
+  "wizard.howTo.api_key": "エージェントの設定にベース URL、API キー、既定モデルが必要です。",
+  "wizard.howTo.local_cli_bridge": "この端末にコマンドラインツールをインストールしてサインインする必要があります。",
+  "wizard.howTo.none": "組み込みで、テストに常時利用できます。",
+  "wizard.howTo.unknown": "このプロバイダの設定はエージェントが定義します。"
 };

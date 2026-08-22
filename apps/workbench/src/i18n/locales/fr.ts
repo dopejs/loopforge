@@ -420,5 +420,13 @@ export const fr: Messages = {
   "project.claims": "Affirmations de qualité",
   "project.revision": "Révision {value}",
   "project.evidenceCount": "{count} preuves",
-  "project.claimsNote": "Chaque affirmation est jugée séparément. Remplie signifie qu'il existe des preuves pour celle-ci, pas que le jeu est bon."
+  "project.claimsNote": "Chaque affirmation est jugée séparément. Remplie signifie qu'il existe des preuves pour celle-ci, pas que le jeu est bon.",
+
+  "wizard.intro": "Kura expose un ensemble fixe de fournisseurs. Configurez-en un plutôt que d'ajouter un point d'accès.",
+  "wizard.providerReady": "Prêt à l'emploi.",
+  "wizard.credentialsNote": "L'établi ne conserve aucun identifiant ; la configuration de l'agent s'en charge.",
+  "wizard.howTo.api_key": "Nécessite une URL de base, une clé d'API et un modèle par défaut dans la configuration de l'agent.",
+  "wizard.howTo.local_cli_bridge": "Nécessite son outil en ligne de commande installé et connecté sur cette machine.",
+  "wizard.howTo.none": "Intégré ; toujours disponible pour les tests.",
+  "wizard.howTo.unknown": "La configuration de ce fournisseur est définie par l'agent."
 };

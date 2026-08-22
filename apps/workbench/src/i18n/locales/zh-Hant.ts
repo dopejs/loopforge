@@ -420,5 +420,13 @@ export const zhHant: Messages = {
   "project.claims": "品質聲明",
   "project.revision": "修訂 {value}",
   "project.evidenceCount": "{count} 條證據",
-  "project.claimsNote": "每條聲明獨立判定。某條滿足只代表有證據支持該條，並不代表遊戲好玩。"
+  "project.claimsNote": "每條聲明獨立判定。某條滿足只代表有證據支持該條，並不代表遊戲好玩。",
+
+  "wizard.intro": "Kura 提供固定的一組 Provider。你設定其中之一，而不是新增端點。",
+  "wizard.providerReady": "可以使用。",
+  "wizard.credentialsNote": "工作臺不保存任何憑證，憑證由 agent 的設定管理。",
+  "wizard.howTo.api_key": "需要在 agent 設定中填寫 Base URL、API 金鑰與預設模型。",
+  "wizard.howTo.local_cli_bridge": "需要在本機安裝並登入對應的命令列工具。",
+  "wizard.howTo.none": "內建，始終可用於測試。",
+  "wizard.howTo.unknown": "該 Provider 的設定由 agent 定義。"
 };
