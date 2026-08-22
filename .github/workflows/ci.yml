@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# No step pipes a check into another command: a pipeline takes its exit code
+# from the last stage, which is how a lint failure can pass silently.
+jobs:
+  python:
+    name: Agent + CLI (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The submodule is only needed to build the Kura sidecar, which this
+      # workflow does not do; the tests stub the runtime.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test
+        run: PYTHONPATH=cli:apps/agent python -m unittest discover -s tests -t .
+
+  workbench:
+    name: Workbench (TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/workbench
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/workbench/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck and build
+        run: pnpm build
+      - name: Test
+        run: pnpm test
+
+  desktop:
+    name: Desktop shell (Rust)
+    # macOS matches the shipped target and needs no GUI system packages for a
+    # check build.
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: apps/workbench/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/workbench/src-tauri
+      - name: Check
+        run: cargo check --all-targets
+      - name: Test
+        run: cargo test
