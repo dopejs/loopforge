@@ -12,11 +12,11 @@ from loopforge.agent import KuraRuntimeSupervisor
 from loopforge.agent.kura_client import KuraAgentError, KuraClient
 from loopforge.project import LoopforgeProject
 
+from .sessions import SESSION_SCHEMA, SessionStore, new_session_id
+
 AGENT_STATUS_SCHEMA = "loopforge-agent-status-v1"
 AGENT_RESPONSE_SCHEMA = "loopforge-agent-response-v1"
 PROVIDER_SCHEMA = "loopforge-provider-v1"
-SESSION_SCHEMA = "loopforge-session-v1"
-MAX_SESSIONS = 200
 PROVIDER_TIMEOUT_SECONDS = 10.0
 # Providers are a short operator-managed list; this only bounds a runaway runtime.
 MAX_PROVIDERS = 64
@@ -41,6 +41,7 @@ class LoopforgeAgent:
             )
         self.project = LoopforgeProject(root)
         self.runtime = KuraRuntimeSupervisor(self.project, kura_binary)
+        self.sessions_store = SessionStore(root)
 
     def status(self) -> dict[str, Any]:
         runtime = self.runtime.status()
@@ -104,10 +105,16 @@ class LoopforgeAgent:
         ).post(
             "/v1/chat/query", request
         )
+        reply = str(response.get("reply", ""))
+        # The session id is the Agent's own, not Kura's: the runtime is
+        # stateless and returns no thread to continue.
+        session_id = thread_id or new_session_id()
+        self.sessions_store.append(session_id, "user", normalized)
+        self.sessions_store.append(session_id, "agent", reply)
         return {
             "schema_version": AGENT_RESPONSE_SCHEMA,
-            "reply": str(response.get("reply", "")),
-            "thread_id": response.get("threadId"),
+            "reply": reply,
+            "thread_id": session_id,
             "dispatch_id": response.get("dispatchId"),
             "status": response.get("status"),
         }
@@ -143,52 +150,56 @@ class LoopforgeAgent:
         client = KuraClient(
             str(status["base_url"]), timeout=120.0, token=status.get("token")
         )
-        return client.stream("/v1/chat/query/stream", request)
+        session_id = thread_id or new_session_id()
+        # Recorded before streaming starts so an interrupted run still leaves
+        # the question in history rather than losing it.
+        self.sessions_store.append(session_id, "user", normalized)
+        return self._record_stream(
+            session_id, client.stream("/v1/chat/query/stream", request)
+        )
+
+    def _record_stream(
+        self, session_id: str, events: Iterator[tuple[str, str]]
+    ) -> Iterator[tuple[str, str]]:
+        """Pass events through, accumulating the reply into the session.
+
+        The reply is written once the stream ends, including when it ends
+        early: a partial answer is still history, and losing it would be worse
+        than storing it incomplete.
+        """
+        reply: list[str] = []
+        yield "loopforge.session", json.dumps({"sessionId": session_id})
+        try:
+            for event, data in events:
+                if event.endswith("delta"):
+                    try:
+                        parsed = json.loads(data)
+                        delta = parsed.get("delta") if isinstance(parsed, dict) else None
+                    except json.JSONDecodeError:
+                        delta = data
+                    if isinstance(delta, str):
+                        reply.append(delta)
+                yield event, data
+        finally:
+            if reply:
+                self.sessions_store.append(session_id, "agent", "".join(reply))
 
     def sessions(self) -> dict[str, Any]:
-        """Project the runtime's chat sessions.
+        """List conversations for this project.
 
-        An unavailable runtime yields an empty list with a reason rather than
-        an error: the Workbench renders a sidebar, not a failure.
+        Owned by the Agent rather than projected from Kura: `/v1/chat/query` is
+        stateless and returns no thread, so the runtime remembers nothing.
         """
-        status = self.runtime.status()
-        if not status.get("healthy") or not status.get("base_url"):
-            return {
-                "schema_version": SESSION_SCHEMA,
-                "sessions": [],
-                "reason": str(status.get("reason") or "The Loopforge Agent runtime is not ready."),
-            }
-        client = KuraClient(
-            str(status["base_url"]),
-            timeout=PROVIDER_TIMEOUT_SECONDS,
-            token=status.get("token"),
-        )
-        try:
-            payload = client.get("/v1/sessions")
-        except KuraAgentError as exc:
-            return {"schema_version": SESSION_SCHEMA, "sessions": [], "reason": str(exc)}
-        raw = payload.get("items")
-        if not isinstance(raw, list):
-            return {
-                "schema_version": SESSION_SCHEMA,
-                "sessions": [],
-                "reason": "The runtime returned an unrecognized session list.",
-            }
-        sessions = []
-        for entry in raw[:MAX_SESSIONS]:
-            if not isinstance(entry, dict):
-                continue
-            session_id = entry.get("sessionId")
-            if not isinstance(session_id, str) or not session_id:
-                continue
-            sessions.append(
-                {
-                    "id": session_id,
-                    "title": str(entry.get("title") or entry.get("label") or ""),
-                    "updated_at": str(entry.get("updatedAt") or ""),
-                }
-            )
-        return {"schema_version": SESSION_SCHEMA, "sessions": sessions}
+        return {
+            "schema_version": SESSION_SCHEMA,
+            "sessions": self.sessions_store.list(),
+        }
+
+    def session(self, session_id: str) -> dict[str, Any]:
+        record = self.sessions_store.read(session_id)
+        if record is None:
+            raise LoopforgeAgentError("Session not found.", "SESSION_NOT_FOUND")
+        return record
 
     def providers(self) -> dict[str, Any]:
         """Project the generic Kura provider inventory into a Loopforge contract.

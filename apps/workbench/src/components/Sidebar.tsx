@@ -172,7 +172,7 @@ export function Sidebar(props: {
       ? live.sessions.map((session) => ({
           label: session.title || session.id,
           sub: session.updated_at,
-          meta: undefined,
+          meta: String(session.message_count),
           tone: undefined
         }))
       : (SIDEBAR_ITEMS[props.mode] ?? []);

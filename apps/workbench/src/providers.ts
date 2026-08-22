@@ -71,6 +71,7 @@ export type Session = {
   id: string;
   title: string;
   updated_at: string;
+  message_count: number;
 };
 
 export type SessionInventory = {

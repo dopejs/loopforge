@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from loopforge.agent.kura_client import KuraAgentError
 from loopforge_agent.application import LoopforgeAgent, LoopforgeAgentError
+from loopforge_agent.sessions import SessionStore
 
 
 class LoopforgeAgentApplicationTests(unittest.TestCase):
@@ -25,6 +27,9 @@ class LoopforgeAgentApplicationTests(unittest.TestCase):
         }
         self.agent = object.__new__(LoopforgeAgent)
         self.agent.runtime = self.runtime
+        self.agent.sessions_store = SessionStore(
+            Path(tempfile.mkdtemp(prefix="loopforge-test-"))
+        )
 
     def test_status_exposes_agent_boundary_with_nested_generic_runtime(self) -> None:
         self.runtime.status.return_value = {
@@ -109,6 +114,9 @@ class LoopforgeAgentProviderTests(unittest.TestCase):
         self.runtime = Mock()
         self.agent = object.__new__(LoopforgeAgent)
         self.agent.runtime = self.runtime
+        self.agent.sessions_store = SessionStore(
+            Path(tempfile.mkdtemp(prefix="loopforge-test-"))
+        )
 
     def _client_returning(self, responses: dict[str, dict]) -> Mock:
         client = Mock()
@@ -286,6 +294,9 @@ class ModelRoleProjectionTests(unittest.TestCase):
         }
         self.agent = object.__new__(LoopforgeAgent)
         self.agent.runtime = self.runtime
+        self.agent.sessions_store = SessionStore(
+            Path(tempfile.mkdtemp(prefix="loopforge-test-"))
+        )
 
     @staticmethod
     def _client(responses: dict) -> Mock:
@@ -417,6 +428,9 @@ class ProviderContractTests(unittest.TestCase):
         }
         agent = object.__new__(LoopforgeAgent)
         agent.runtime = runtime
+        agent.sessions_store = SessionStore(
+            Path(tempfile.mkdtemp(prefix="loopforge-test-"))
+        )
         client = Mock()
         client.get.side_effect = lambda path, query=None: (
             {"items": [_kura_provider(accountLabel="kai@studio.dev", plan="Max")]}

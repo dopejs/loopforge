@@ -12,10 +12,12 @@ sidecar) stays green.
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
 from loopforge.agent.kura_client import KuraAgentError
+from loopforge_agent.sessions import SessionStore
 from tests.support.kura_daemon import KuraDaemon, requires_kura
 
 
@@ -126,6 +128,7 @@ class AgentProjectionIntegrationTests(unittest.TestCase):
                 }
 
         agent.runtime = _Runtime()
+        agent.sessions_store = SessionStore(Path(tempfile.mkdtemp(prefix="lf-int-")))
         return agent
 
     def test_projects_a_live_inventory(self) -> None:
@@ -201,6 +204,7 @@ class AgentStreamingIntegrationTests(unittest.TestCase):
                 return {"context": {"schema_version": "game-project-context-v1"}}
 
         agent.runtime = _Runtime()
+        agent.sessions_store = SessionStore(Path(tempfile.mkdtemp(prefix="lf-int-")))
         server = AgentHTTPServer(("127.0.0.1", 0), agent, "t" * 40)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -237,6 +241,78 @@ class AgentStreamingIntegrationTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
         self.assertIn("400", str(caught.exception))
+
+
+@requires_kura
+class SessionPersistenceIntegrationTests(unittest.TestCase):
+    """Conversations survive because the Agent stores them, not the runtime."""
+
+    daemon: KuraDaemon
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.daemon = KuraDaemon().start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.daemon.stop()
+
+    def _agent(self, root: Path):
+        from loopforge_agent.application import LoopforgeAgent
+
+        daemon = self.daemon
+        agent = object.__new__(LoopforgeAgent)
+
+        class _Runtime:
+            def status(self) -> dict:
+                return {"healthy": True, "base_url": daemon.base_url, "token": daemon.token}
+
+            def sync_context(self) -> dict:
+                return {"context": {"schema_version": "game-project-context-v1"}}
+
+        agent.runtime = _Runtime()
+        agent.sessions_store = SessionStore(root)
+        return agent
+
+    def test_a_query_is_recorded_and_can_be_continued(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="lf-session-"))
+        agent = self._agent(root)
+
+        first = agent.query("first question")
+        session_id = first["thread_id"]
+        # Kura returns no thread, so the Agent must mint and return its own or
+        # the conversation cannot be continued.
+        self.assertTrue(session_id)
+
+        agent.query("second question", session_id)
+
+        listed = agent.sessions()["sessions"]
+        self.assertEqual(len(listed), 1, "continuing reuses the session")
+        self.assertEqual(listed[0]["message_count"], 4)
+        self.assertEqual(listed[0]["title"], "first question")
+
+        # A fresh Agent over the same project sees the history: it is on disk,
+        # not in memory.
+        reopened = self._agent(root).session(session_id)
+        self.assertEqual(
+            [m["author"] for m in reopened["messages"]],
+            ["user", "agent", "user", "agent"],
+        )
+
+    def test_a_streamed_reply_is_recorded_once_complete(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="lf-session-"))
+        agent = self._agent(root)
+
+        events = list(agent.query_stream("stream this"))
+        kinds = [name for name, _ in events]
+        self.assertEqual(kinds[0], "loopforge.session", "the session id leads the stream")
+
+        listed = agent.sessions()["sessions"]
+        self.assertEqual(len(listed), 1)
+        record = agent.session(listed[0]["id"])
+        authors = [m["author"] for m in record["messages"]]
+        self.assertEqual(authors, ["user", "agent"])
+        self.assertTrue(record["messages"][1]["text"], "the streamed reply was accumulated")
 
 
 if __name__ == "__main__":

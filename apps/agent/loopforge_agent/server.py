@@ -61,6 +61,10 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
+        if self.path.startswith("/v1/sessions/"):
+            session_id = self.path[len("/v1/sessions/") :]
+            self._execute(lambda: self.server.agent.session(session_id))
+            return
         self._json(HTTPStatus.NOT_FOUND, self._error("ROUTE_NOT_FOUND", "Not found."))
 
     def do_POST(self) -> None:
