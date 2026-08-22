@@ -114,7 +114,20 @@ else
   printf 'Reusing Kura sidecar: %s\n' "$kura_binary"
 fi
 
-if ((rebuild_agent == 1)) || ! sidecar_ready "$agent_binary"; then
+# The Agent sidecar has no commit stamp to compare against -- it is built from
+# the working tree, not a pinned submodule -- so freshness is judged by whether
+# any source file is newer than the binary. Without this the launcher happily
+# reused a sidecar two days older than the code, and every endpoint added in
+# between was simply absent with no indication why.
+agent_sidecar_current() {
+  sidecar_ready "$agent_binary" || return 1
+  local newer
+  newer="$(find "$repository_root/apps/agent" "$repository_root/cli" \
+    -name '*.py' -newer "$agent_binary" -print -quit 2>/dev/null)"
+  [[ -z "$newer" ]]
+}
+
+if ((rebuild_agent == 1)) || ! agent_sidecar_current; then
   require_command uv
   printf 'Building the Loopforge Agent sidecar...\n'
   pnpm build:agent
