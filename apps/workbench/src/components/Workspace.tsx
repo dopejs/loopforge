@@ -71,9 +71,11 @@ export function WorkspaceHeader({
 }
 
 /** Preview workspaces, keyed by mode. `chat` is handled separately below. */
+type WorkspaceProps = { projectRoot: string };
+
 const PREVIEW_WORKSPACES: Record<
   Exclude<WorkspaceMode, "chat">,
-  () => React.JSX.Element
+  (props: WorkspaceProps) => React.JSX.Element
 > = {
   canvas: CanvasWorkspace,
   flow: FlowWorkspace,
@@ -162,7 +164,7 @@ export function Workspace({
   return (
     <>
       {!isWired(mode) && <PreviewBanner />}
-      <Preview />
+      <Preview projectRoot={projectRoot} />
     </>
   );
 }

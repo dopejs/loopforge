@@ -381,5 +381,20 @@ export const zhHans: Messages = {
   "provider.routingUnsupported": "该运行时未提供模型角色路由。",
   "provider.roleSource.store": "在此设置",
   "provider.roleSource.config": "来自配置",
-  "provider.roleSource.unrouted": "未路由"
+  "provider.roleSource.unrouted": "未路由",
+
+  "runs.loading": "正在加载运行记录…",
+  "runs.unavailable": "无法获取运行记录。",
+  "runs.none": "还没有引擎运行记录。构建或测试工程后会生成。",
+  "runs.timedOut": "已超时",
+  "runs.exitCode": "退出码 {code}",
+  "runs.noOutput": "本次运行没有输出。",
+  "runs.status.completed": "已完成",
+  "runs.status.failed": "失败",
+  "runs.status.interrupted": "已中断",
+  "runs.status.unknown": "未知",
+  "test.runNow": "运行测试",
+  "test.running": "运行中…",
+  "test.lastRun": "最近一次运行",
+  "test.noRuns": "还没有测试运行记录。"
 };

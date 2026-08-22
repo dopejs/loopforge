@@ -503,6 +503,62 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
     );
 }
 
+/// Engine run history. `operation` narrows to `build` or `test`.
+#[tauri::command]
+fn agent_runs(project_path: String, operation: Option<String>) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    // The path is built from a closed set rather than interpolated, so a
+    // caller cannot reach an arbitrary Agent route through this parameter.
+    let path = match operation.as_deref() {
+        None => "/v1/runs",
+        Some("build") => "/v1/runs?operation=build",
+        Some("test") => "/v1/runs?operation=test",
+        Some(other) => return Err(format!("unsupported run operation: {other}")),
+    };
+    agent_request(&metadata, "GET", path, None, Duration::from_secs(15))
+}
+
+/// One run, including its captured output.
+#[tauri::command]
+fn agent_run(project_path: String, run_id: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    if !run_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        || run_id.is_empty()
+    {
+        return Err("invalid run id".to_string());
+    }
+    agent_request(
+        &metadata,
+        "GET",
+        &format!("/v1/runs/{run_id}"),
+        None,
+        Duration::from_secs(15),
+    )
+}
+
+/// Runs a build or test through the deterministic core.
+#[tauri::command]
+fn agent_run_engine(project_path: String, operation: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    // Engine runs compile a project; the Agent's own timeout is the real
+    // bound, this one only has to outlast it.
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/engine/run",
+        Some(json!({ "operation": operation })),
+        Duration::from_secs(300),
+    )
+}
+
 #[tauri::command]
 fn agent_query(
     project_path: String,
@@ -533,7 +589,10 @@ pub fn run() {
             agent_query,
             agent_providers,
             agent_sessions,
-            agent_query_stream
+            agent_query_stream,
+            agent_runs,
+            agent_run,
+            agent_run_engine
         ])
         .run(tauri::generate_context!())
         .expect("error while running Loopforge Workbench");

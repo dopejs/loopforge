@@ -381,5 +381,20 @@ export const fr: Messages = {
   "provider.routingUnsupported": "Cet environnement n'expose pas de routage par rôle de modèle.",
   "provider.roleSource.store": "défini ici",
   "provider.roleSource.config": "depuis la configuration",
-  "provider.roleSource.unrouted": "non routé"
+  "provider.roleSource.unrouted": "non routé",
+
+  "runs.loading": "Chargement de l'historique des exécutions…",
+  "runs.unavailable": "L'historique des exécutions est indisponible.",
+  "runs.none": "Aucune exécution du moteur pour l'instant. Compilez ou testez le projet pour en créer une.",
+  "runs.timedOut": "Délai dépassé",
+  "runs.exitCode": "sortie {code}",
+  "runs.noOutput": "Cette exécution n'a produit aucune sortie.",
+  "runs.status.completed": "Terminée",
+  "runs.status.failed": "Échouée",
+  "runs.status.interrupted": "Interrompue",
+  "runs.status.unknown": "Inconnue",
+  "test.runNow": "Lancer les tests",
+  "test.running": "En cours…",
+  "test.lastRun": "Dernière exécution",
+  "test.noRuns": "Aucune exécution de tests pour l'instant."
 };

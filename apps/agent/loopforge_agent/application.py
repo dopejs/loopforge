@@ -12,6 +12,7 @@ from loopforge.agent import KuraRuntimeSupervisor
 from loopforge.agent.kura_client import KuraAgentError, KuraClient
 from loopforge.project import LoopforgeProject
 
+from .runs import RUN_SCHEMA, RunStore
 from .sessions import SESSION_SCHEMA, SessionStore, new_session_id
 
 AGENT_STATUS_SCHEMA = "loopforge-agent-status-v1"
@@ -42,6 +43,7 @@ class LoopforgeAgent:
         self.project = LoopforgeProject(root)
         self.runtime = KuraRuntimeSupervisor(self.project, kura_binary)
         self.sessions_store = SessionStore(root)
+        self.runs_store = RunStore(root)
 
     def status(self) -> dict[str, Any]:
         runtime = self.runtime.status()
@@ -200,6 +202,45 @@ class LoopforgeAgent:
         if record is None:
             raise LoopforgeAgentError("Session not found.", "SESSION_NOT_FOUND")
         return record
+
+    def runs(self, operation: str | None = None) -> dict[str, Any]:
+        """Engine run history for this project.
+
+        `operation` narrows to `build` or `test`; the Test workspace wants only
+        test runs while the Terminal wants everything.
+        """
+        if operation is not None and operation not in {"build", "test"}:
+            raise LoopforgeAgentError(
+                f"Unsupported run operation: {operation}", "RUN_OPERATION_INVALID"
+            )
+        return {
+            "schema_version": RUN_SCHEMA,
+            "runs": self.runs_store.list(operation),
+        }
+
+    def run(self, run_id: str) -> dict[str, Any]:
+        record = self.runs_store.read(run_id)
+        if record is None:
+            raise LoopforgeAgentError("Run not found.", "RUN_NOT_FOUND")
+        return {"schema_version": RUN_SCHEMA, "run": record}
+
+    def run_engine(self, operation: str) -> dict[str, Any]:
+        """Execute a build or test through the deterministic core.
+
+        The core owns engine adapters, revision checks and evidence; the Agent
+        only forwards the request so the Workbench never spawns processes.
+        """
+        if operation not in {"build", "test"}:
+            raise LoopforgeAgentError(
+                f"Unsupported engine operation: {operation}", "ENGINE_OPERATION_INVALID"
+            )
+        result = self.project.run_engine(operation, expected_revision=None)
+        run_id = str(result.get("run", {}).get("run_id") or result.get("run_id") or "")
+        detail = self.runs_store.read(run_id) if run_id else None
+        return {
+            "schema_version": RUN_SCHEMA,
+            "run": detail if detail is not None else result,
+        }
 
     def providers(self) -> dict[str, Any]:
         """Project the generic Kura provider inventory into a Loopforge contract.

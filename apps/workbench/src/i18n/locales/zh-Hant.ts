@@ -381,5 +381,20 @@ export const zhHant: Messages = {
   "provider.routingUnsupported": "該執行階段未提供模型角色路由。",
   "provider.roleSource.store": "在此設定",
   "provider.roleSource.config": "來自設定",
-  "provider.roleSource.unrouted": "未路由"
+  "provider.roleSource.unrouted": "未路由",
+
+  "runs.loading": "正在載入執行紀錄…",
+  "runs.unavailable": "無法取得執行紀錄。",
+  "runs.none": "還沒有引擎執行紀錄。建置或測試專案後會產生。",
+  "runs.timedOut": "已逾時",
+  "runs.exitCode": "結束碼 {code}",
+  "runs.noOutput": "本次執行沒有輸出。",
+  "runs.status.completed": "已完成",
+  "runs.status.failed": "失敗",
+  "runs.status.interrupted": "已中斷",
+  "runs.status.unknown": "未知",
+  "test.runNow": "執行測試",
+  "test.running": "執行中…",
+  "test.lastRun": "最近一次執行",
+  "test.noRuns": "還沒有測試執行紀錄。"
 };

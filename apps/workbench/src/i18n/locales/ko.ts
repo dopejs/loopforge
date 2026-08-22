@@ -381,5 +381,20 @@ export const ko: Messages = {
   "provider.routingUnsupported": "이 런타임은 모델 역할 라우팅을 제공하지 않습니다.",
   "provider.roleSource.store": "여기서 설정",
   "provider.roleSource.config": "설정에서",
-  "provider.roleSource.unrouted": "라우팅 안 됨"
+  "provider.roleSource.unrouted": "라우팅 안 됨",
+
+  "runs.loading": "실행 기록을 불러오는 중…",
+  "runs.unavailable": "실행 기록을 가져올 수 없습니다.",
+  "runs.none": "아직 엔진 실행 기록이 없습니다. 빌드하거나 테스트하면 생성됩니다.",
+  "runs.timedOut": "시간 초과",
+  "runs.exitCode": "종료 코드 {code}",
+  "runs.noOutput": "이번 실행에는 출력이 없습니다.",
+  "runs.status.completed": "완료",
+  "runs.status.failed": "실패",
+  "runs.status.interrupted": "중단됨",
+  "runs.status.unknown": "알 수 없음",
+  "test.runNow": "테스트 실행",
+  "test.running": "실행 중…",
+  "test.lastRun": "최근 실행",
+  "test.noRuns": "아직 테스트 실행 기록이 없습니다."
 };

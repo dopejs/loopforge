@@ -26,8 +26,13 @@ describe("stepMode", () => {
 
 describe("mode classification", () => {
   it("marks only agent-backed workspaces as wired", () => {
-    expect(isWired("chat")).toBe(true);
-    for (const mode of WORKSPACE_MODES.filter((candidate) => candidate !== "chat")) {
+    // Chat streams from the runtime; Terminal and Test read engine run history
+    // written by the deterministic core.
+    const wired = ["chat", "terminal", "test"];
+    for (const mode of wired) {
+      expect(isWired(mode as (typeof WORKSPACE_MODES)[number]), mode).toBe(true);
+    }
+    for (const mode of WORKSPACE_MODES.filter((m) => !wired.includes(m))) {
       expect(isWired(mode), mode).toBe(false);
     }
   });

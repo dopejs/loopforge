@@ -381,5 +381,20 @@ export const ja: Messages = {
   "provider.routingUnsupported": "このランタイムはモデルロールのルーティングを提供していません。",
   "provider.roleSource.store": "ここで設定",
   "provider.roleSource.config": "設定由来",
-  "provider.roleSource.unrouted": "未割り当て"
+  "provider.roleSource.unrouted": "未割り当て",
+
+  "runs.loading": "実行履歴を読み込み中…",
+  "runs.unavailable": "実行履歴を取得できません。",
+  "runs.none": "エンジンの実行履歴がまだありません。ビルドまたはテストすると作成されます。",
+  "runs.timedOut": "タイムアウト",
+  "runs.exitCode": "終了コード {code}",
+  "runs.noOutput": "この実行に出力はありません。",
+  "runs.status.completed": "完了",
+  "runs.status.failed": "失敗",
+  "runs.status.interrupted": "中断",
+  "runs.status.unknown": "不明",
+  "test.runNow": "テストを実行",
+  "test.running": "実行中…",
+  "test.lastRun": "最新の実行",
+  "test.noRuns": "テストの実行履歴がまだありません。"
 };

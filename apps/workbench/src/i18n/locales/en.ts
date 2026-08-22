@@ -384,7 +384,22 @@ export const en = {
   "provider.routingUnsupported": "This runtime does not expose model role routing.",
   "provider.roleSource.store": "set here",
   "provider.roleSource.config": "from config",
-  "provider.roleSource.unrouted": "unrouted"
+  "provider.roleSource.unrouted": "unrouted",
+
+  "runs.loading": "Loading run history…",
+  "runs.unavailable": "Run history is unavailable.",
+  "runs.none": "No engine runs yet. Build or test the project to create one.",
+  "runs.timedOut": "Timed out",
+  "runs.exitCode": "exit {code}",
+  "runs.noOutput": "This run produced no output.",
+  "runs.status.completed": "Completed",
+  "runs.status.failed": "Failed",
+  "runs.status.interrupted": "Interrupted",
+  "runs.status.unknown": "Unknown",
+  "test.runNow": "Run tests",
+  "test.running": "Running…",
+  "test.lastRun": "Last run",
+  "test.noRuns": "No test runs yet."
 } as const;
 
 export type MessageKey = keyof typeof en;

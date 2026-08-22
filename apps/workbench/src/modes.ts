@@ -42,7 +42,11 @@ export function sidebarTitleKey(mode: WorkspaceMode): MessageKey {
  * preview banner. Move a mode in here once the Agent serves its data, and swap
  * that workspace's fixture import for the real source.
  */
-const WIRED_MODES: ReadonlySet<WorkspaceMode> = new Set<WorkspaceMode>(["chat"]);
+const WIRED_MODES: ReadonlySet<WorkspaceMode> = new Set<WorkspaceMode>([
+  "chat",
+  "terminal",
+  "test"
+]);
 
 export function isWired(mode: WorkspaceMode): boolean {
   return WIRED_MODES.has(mode);

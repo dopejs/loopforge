@@ -381,5 +381,20 @@ export const es: Messages = {
   "provider.routingUnsupported": "Este entorno no expone enrutado por rol de modelo.",
   "provider.roleSource.store": "definido aquí",
   "provider.roleSource.config": "desde la configuración",
-  "provider.roleSource.unrouted": "sin enrutar"
+  "provider.roleSource.unrouted": "sin enrutar",
+
+  "runs.loading": "Cargando el historial de ejecuciones…",
+  "runs.unavailable": "El historial de ejecuciones no está disponible.",
+  "runs.none": "Aún no hay ejecuciones del motor. Compila o prueba el proyecto para crear una.",
+  "runs.timedOut": "Tiempo agotado",
+  "runs.exitCode": "salida {code}",
+  "runs.noOutput": "Esta ejecución no produjo salida.",
+  "runs.status.completed": "Completada",
+  "runs.status.failed": "Fallida",
+  "runs.status.interrupted": "Interrumpida",
+  "runs.status.unknown": "Desconocida",
+  "test.runNow": "Ejecutar pruebas",
+  "test.running": "Ejecutando…",
+  "test.lastRun": "Última ejecución",
+  "test.noRuns": "Aún no hay ejecuciones de pruebas."
 };

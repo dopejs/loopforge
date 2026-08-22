@@ -382,5 +382,20 @@ export const ar: Messages = {
   "provider.routingUnsupported": "لا توفّر بيئة التشغيل هذه توجيه أدوار النماذج.",
   "provider.roleSource.store": "مضبوط هنا",
   "provider.roleSource.config": "من الإعدادات",
-  "provider.roleSource.unrouted": "غير موجَّه"
+  "provider.roleSource.unrouted": "غير موجَّه",
+
+  "runs.loading": "جارٍ تحميل سجل التشغيل…",
+  "runs.unavailable": "سجل التشغيل غير متاح.",
+  "runs.none": "لا توجد عمليات تشغيل للمحرك بعد. ابنِ المشروع أو اختبره لإنشاء واحدة.",
+  "runs.timedOut": "انتهت المهلة",
+  "runs.exitCode": "رمز الخروج {code}",
+  "runs.noOutput": "لم تُنتج هذه العملية أي مخرجات.",
+  "runs.status.completed": "مكتملة",
+  "runs.status.failed": "فاشلة",
+  "runs.status.interrupted": "متوقفة",
+  "runs.status.unknown": "غير معروفة",
+  "test.runNow": "تشغيل الاختبارات",
+  "test.running": "قيد التشغيل…",
+  "test.lastRun": "آخر تشغيل",
+  "test.noRuns": "لا توجد عمليات تشغيل للاختبارات بعد."
 };

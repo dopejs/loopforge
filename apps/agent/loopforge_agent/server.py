@@ -61,6 +61,17 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
+        if self.path == "/v1/runs":
+            self._execute(self.server.agent.runs)
+            return
+        if self.path in ("/v1/runs?operation=test", "/v1/runs?operation=build"):
+            operation = self.path.split("=", 1)[1]
+            self._execute(lambda: self.server.agent.runs(operation))
+            return
+        if self.path.startswith("/v1/runs/"):
+            run_id = self.path[len("/v1/runs/") :]
+            self._execute(lambda: self.server.agent.run(run_id))
+            return
         if self.path.startswith("/v1/sessions/"):
             session_id = self.path[len("/v1/sessions/") :]
             self._execute(lambda: self.server.agent.session(session_id))
@@ -92,6 +103,10 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body.get("query", "")),
                     str(body["thread_id"]) if body.get("thread_id") else None,
                 )
+            )
+        elif self.path == "/v1/engine/run":
+            self._execute(
+                lambda: self.server.agent.run_engine(str(body.get("operation", "")))
             )
         elif self.path == "/v1/shutdown":
             self._execute(self.server.agent.stop)
