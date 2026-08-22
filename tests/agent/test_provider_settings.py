@@ -91,6 +91,117 @@ class ProviderSettingsTests(unittest.TestCase):
         self.assertIsNone(self.agent.user_store.provider("openai_compatible"))
 
 
+class OperatorSettingsTests(unittest.TestCase):
+    """Who the Agent records as the approver.
+
+    This used to live only in the Workbench's local storage, so the Agent could
+    not read it and every approval had to carry one in from the front end.
+    """
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.agent = object.__new__(LoopforgeAgent)
+        self.agent._user_store = UserStore(Path(self.temporary.name) / "home")
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def test_an_unset_operator_is_reported_as_unconfigured(self) -> None:
+        result = self.agent.operator_settings()
+        self.assertFalse(result["configured"])
+        self.assertEqual(result["name"], "")
+
+    def test_saving_mints_an_id_and_keeps_it_across_a_rename(self) -> None:
+        """The id is what makes a history of approvals one person."""
+        first = self.agent.save_operator_settings("Ada")
+        self.assertTrue(first["configured"])
+        self.assertTrue(first["id"].startswith("op_"))
+
+        renamed = self.agent.save_operator_settings("Ada L")
+
+        self.assertEqual(renamed["id"], first["id"])
+        self.assertEqual(renamed["name"], "Ada L")
+
+    def test_a_blank_name_is_refused(self) -> None:
+        """A name is what makes an approval readable months later."""
+        for value in ("", "   "):
+            with self.subTest(value=value), self.assertRaises(LoopforgeAgentError) as caught:
+                self.agent.save_operator_settings(value)
+            self.assertEqual(caught.exception.code, "OPERATOR_NAME_INVALID")
+
+    def test_the_stored_operator_fills_in_a_missing_approver(self) -> None:
+        """The point of moving it: a caller that supplies nothing still gets a
+        named approval instead of a refusal."""
+        self.agent.save_operator_settings("Ada")
+
+        resolved = self.agent._resolve_approver(None, None)
+
+        self.assertEqual(resolved[1], "Ada")
+        self.assertTrue(resolved[0].startswith("op_"))
+
+    def test_a_supplied_approver_is_not_overridden(self) -> None:
+        """The Workbench passes what the user just confirmed; the store must
+        not quietly replace it."""
+        self.agent.save_operator_settings("Ada")
+
+        self.assertEqual(
+            self.agent._resolve_approver("op_other", "Grace"), ("op_other", "Grace")
+        )
+
+    def test_without_a_stored_operator_nothing_is_invented(self) -> None:
+        """An approver nobody chose would attribute a decision to a
+        placeholder; the core's refusal is the correct outcome."""
+        self.assertEqual(self.agent._resolve_approver(None, None), (None, None))
+
+    def test_an_unreadable_store_does_not_invent_an_approver(self) -> None:
+        import sqlite3
+
+        from loopforge.userstore import SCHEMA_VERSION
+
+        self.agent.save_operator_settings("Ada")
+        with sqlite3.connect(self.agent.user_store.path) as connection:
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+
+        self.assertEqual(self.agent._resolve_approver(None, None), (None, None))
+
+
+class ApproverFallbackTests(unittest.TestCase):
+    """The fallback where it matters: recording something the core checks."""
+
+    def setUp(self) -> None:
+        from loopforge.project import HYPOTHESIS_FIELDS, LoopforgeProject
+
+        self.temporary = tempfile.TemporaryDirectory()
+        root = Path(self.temporary.name)
+        self.fields = {key: f"value {key}" for key in HYPOTHESIS_FIELDS}
+        self.agent = object.__new__(LoopforgeAgent)
+        self.agent._user_store = UserStore(root / "home")
+        self.agent.project = LoopforgeProject(root / "project")
+        self.agent.project.init()
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def _human_approval(self) -> str:
+        return {
+            item["code"]: item["status"]
+            for item in self.agent.gate("PROTOTYPING")["requirements"]
+        }["HUMAN_APPROVAL"]
+
+    def test_a_hypothesis_recorded_without_an_approver_still_opens_the_gate(self) -> None:
+        self.agent.save_operator_settings("Ada")
+
+        self.agent.create_hypothesis(self.fields, rationale="Reviewed it.")
+
+        self.assertEqual(self._human_approval(), "satisfied")
+
+    def test_without_a_stored_operator_the_gate_stays_shut(self) -> None:
+        """Unchanged behaviour when nobody has been named: the approval is
+        refused rather than attributed to no one."""
+        self.agent.create_hypothesis(self.fields)
+        self.assertEqual(self._human_approval(), "missing")
+
+
 class SupervisorInjectionTests(unittest.TestCase):
     """What the configuration actually does: reach Kura at startup."""
 

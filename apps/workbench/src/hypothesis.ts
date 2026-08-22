@@ -89,30 +89,22 @@ export function draftHypothesis(projectRoot: string, brief: string): Promise<Hyp
   return invoke<Hypothesis>("agent_hypothesis_draft", { projectPath: projectRoot, brief });
 }
 
-/** Approver identity and reasoning, recorded alongside a hypothesis. */
-export type Approval = {
-  approver_id: string;
-  approver_name: string;
-  rationale: string;
-};
-
 /**
  * Records reviewed fields. The Agent refuses an incomplete set.
  *
- * The approval is sent whole or not at all: the core requires id, name and
- * rationale together, and half an approval would attribute a decision to
- * nobody. Leaving discovery needs one, so this is not optional in practice.
+ * Only the rationale travels. The approver is resolved by the Agent from the
+ * operator it has stored, so a surface no longer has to know who is at the
+ * machine -- and a caller that is not the Workbench gets a named approval too.
  */
 export function createHypothesis(
   projectRoot: string,
   fields: HypothesisFields,
-  approval?: Approval
+  rationale?: string
 ): Promise<Hypothesis> {
-  const complete =
-    approval && approval.approver_id && approval.approver_name.trim() && approval.rationale.trim();
+  const reason = (rationale ?? "").trim();
   return invoke<Hypothesis>("agent_hypothesis_create", {
     projectPath: projectRoot,
     fields,
-    ...(complete ? approval : {})
+    ...(reason ? { rationale: reason } : {})
   });
 }

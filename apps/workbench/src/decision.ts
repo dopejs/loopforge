@@ -79,17 +79,15 @@ export function useDecision(projectRoot: string, enabled: boolean) {
 /**
  * Records the decision.
  *
- * Evidence, approver and rationale are all mandatory in the core and are not
- * filled in here: a decision recorded without them would be a claim with no
- * author and nothing behind it.
+ * Evidence and rationale are mandatory in the core and are not filled in here:
+ * a decision recorded without them would be a claim with nothing behind it.
+ * The approver comes from the operator the Agent stores.
  */
 export function recordDecision(
   projectRoot: string,
   input: {
     decision: string;
     evidenceIds: readonly string[];
-    approverId: string;
-    approverName: string;
     rationale: string;
     revisedFields?: HypothesisFields;
   }
@@ -98,8 +96,6 @@ export function recordDecision(
     projectPath: projectRoot,
     decision: input.decision,
     evidenceIds: input.evidenceIds,
-    approverId: input.approverId,
-    approverName: input.approverName,
     rationale: input.rationale,
     revisedFields: input.revisedFields ?? null
   });

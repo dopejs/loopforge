@@ -9,7 +9,7 @@ import {
   type ThemePreference,
   accentColor
 } from "../appearance";
-import { type Operator, isConfigured, loadOperator, saveOperator } from "../operator";
+import { isConfigured, saveOperator, useOperator } from "../operator";
 import { SHORTCUTS, displayShortcut, isApplePlatform } from "../shortcuts";
 import { ProviderSettings } from "./ProviderSettings";
 import type { Provider } from "../providers";
@@ -149,9 +149,13 @@ export function Settings({
   onClose: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
-  // Read on mount rather than lifted into App: this is Workbench-local, and
-  // the editor that consumes it mounts fresh each time it opens.
-  const [operator, setOperator] = React.useState<Operator>(() => loadOperator());
+  // Held by the Agent, which is also what records approvals with it. The
+  // local value is just the field being typed into.
+  const { operator, reload: reloadOperator } = useOperator(projectRoot, true);
+  const [operatorName, setOperatorName] = React.useState("");
+  React.useEffect(() => {
+    if (operator) setOperatorName(operator.name);
+  }, [operator]);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardProviders, setWizardProviders] = useState<readonly Provider[]>([]);
   const apple = isApplePlatform(
@@ -208,12 +212,14 @@ export function Settings({
               >
                 <input
                   className="operator-input"
-                  value={operator.name}
+                  value={operatorName}
                   placeholder={t("settings.operatorPlaceholder")}
-                  onChange={(event) => {
-                    const next: Operator = { ...operator, name: event.target.value };
-                    setOperator(next);
-                    saveOperator(next);
+                  onChange={(event) => setOperatorName(event.target.value)}
+                  onBlur={() => {
+                    // On blur rather than per keystroke: this is a round trip
+                    // to the Agent, and a name is finished being typed once.
+                    if (!operatorName.trim() || operatorName === operator?.name) return;
+                    void saveOperator(projectRoot, operatorName).then(reloadOperator);
                   }}
                 />
               </Row>

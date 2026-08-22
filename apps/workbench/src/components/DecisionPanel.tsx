@@ -4,7 +4,7 @@ import { Card } from "./primitives";
 import { errorMessage } from "../daemon";
 import { isDesktopRuntime } from "../agent";
 import { HYPOTHESIS_FIELDS, type HypothesisFields, useHypothesis } from "../hypothesis";
-import { isConfigured, loadOperator } from "../operator";
+import { isConfigured, useOperator } from "../operator";
 import { type Evidence, useEvidence } from "../evidence";
 import {
   DECISION_TARGET,
@@ -47,7 +47,7 @@ function DecisionDialog({
   const [revised, setRevised] = useState<HypothesisFields | null>(null);
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string>();
-  const [operator] = useState(() => loadOperator());
+  const { operator } = useOperator(projectRoot, true);
 
   const toggle = (id: string): void =>
     setCited((current) =>
@@ -71,8 +71,6 @@ function DecisionDialog({
       await recordDecision(projectRoot, {
         decision: outcome,
         evidenceIds: cited,
-        approverId: operator.id,
-        approverName: operator.name,
         rationale,
         revisedFields: outcome === "refactor" ? (revised ?? undefined) : undefined
       });
@@ -190,7 +188,7 @@ function DecisionDialog({
           </div>
           <p className="settings-note">
             {isConfigured(operator)
-              ? t("decision.rationaleHint", { name: operator.name })
+              ? t("decision.rationaleHint", { name: operator?.name ?? "" })
               : t("decision.operatorMissing")}
           </p>
           <textarea

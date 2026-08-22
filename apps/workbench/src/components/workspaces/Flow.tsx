@@ -4,7 +4,7 @@ import { Card } from "../primitives";
 import { errorMessage } from "../../daemon";
 import { isDesktopRuntime } from "../../agent";
 import { useProjectStatus } from "../../project";
-import { isConfigured, loadOperator } from "../../operator";
+import { isConfigured, useOperator } from "../../operator";
 import {
   STAGES,
   TRANSITION_REASONS,
@@ -38,7 +38,7 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
   const [transitionReason, setTransitionReason] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState(false);
   const [failure, setFailure] = useState<string>();
-  const [operator] = useState(() => loadOperator());
+  const { operator } = useOperator(projectRoot, true);
 
   /**
    * Cutting an experiment short is the one transition whose gate tests what it
@@ -49,15 +49,11 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
   const early = current === "PROTOTYPING" && target === "PROTOTYPE_DECISION";
   const args: GateArgs | undefined = React.useMemo(() => {
     if (!early) return undefined;
-    const approval = isConfigured(operator)
-      ? {
-          approver_id: operator.id,
-          approver_name: operator.name,
-          rationale: t("stage.advanceRationale", { stage: target ?? "" })
-        }
-      : {};
-    return { ...(transitionReason ? { reason: transitionReason } : {}), ...approval };
-  }, [early, transitionReason, operator, target, t]);
+    return {
+      ...(transitionReason ? { reason: transitionReason } : {}),
+      rationale: t("stage.advanceRationale", { stage: target ?? "" })
+    };
+  }, [early, transitionReason, target, t]);
 
   const { gate, reason, loading, reload } = useGate(projectRoot, target, args);
 
@@ -76,14 +72,7 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
       await advanceStage(
         projectRoot,
         target,
-        args ??
-          (isConfigured(operator)
-            ? {
-                approver_id: operator.id,
-                approver_name: operator.name,
-                rationale: t("stage.advanceRationale", { stage: target })
-              }
-            : undefined)
+        args ?? { rationale: t("stage.advanceRationale", { stage: target }) }
       );
       setTarget(null);
       setTransitionReason(null);

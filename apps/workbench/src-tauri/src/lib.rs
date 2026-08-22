@@ -503,6 +503,36 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
     );
 }
 
+/// Who this machine records as the approver.
+#[tauri::command]
+fn agent_operator_settings(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/settings/operator",
+        None,
+        Duration::from_secs(15),
+    )
+}
+
+/// Records the approver's name. The Agent mints and keeps the id.
+#[tauri::command]
+fn agent_save_operator_settings(project_path: String, name: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/settings/operator",
+        Some(json!({ "name": name })),
+        Duration::from_secs(30),
+    )
+}
+
 /// The user-supplied endpoint, without its credential.
 #[tauri::command]
 fn agent_provider_settings(project_path: String) -> Result<Value, String> {
@@ -624,8 +654,6 @@ fn agent_decide(
     project_path: String,
     decision: String,
     evidence_ids: Vec<String>,
-    approver_id: String,
-    approver_name: String,
     rationale: String,
     revised_fields: Option<Value>,
 ) -> Result<Value, String> {
@@ -635,8 +663,6 @@ fn agent_decide(
     let mut body = json!({
         "decision": decision,
         "evidence_ids": evidence_ids,
-        "approver_id": approver_id,
-        "approver_name": approver_name,
         "rationale": rationale,
     });
     if let Some(fields) = revised_fields {
@@ -779,15 +805,12 @@ fn agent_gate(
     project_path: String,
     stage: String,
     reason: Option<String>,
-    approver_id: Option<String>,
-    approver_name: Option<String>,
     rationale: Option<String>,
 ) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
-    let parameterless =
-        reason.is_none() && approver_id.is_none() && approver_name.is_none() && rationale.is_none();
+    let parameterless = reason.is_none() && rationale.is_none();
     if parameterless {
         // The stage is a path segment here, so it is constrained rather than
         // trusted: only the core's own uppercase stage names can be formed.
@@ -806,9 +829,7 @@ fn agent_gate(
     if let Some(value) = reason {
         body["reason"] = json!(value);
     }
-    if let (Some(id), Some(name), Some(why)) = (approver_id, approver_name, rationale) {
-        body["approver_id"] = json!(id);
-        body["approver_name"] = json!(name);
+    if let Some(why) = rationale {
         body["rationale"] = json!(why);
     }
     agent_request(
@@ -825,17 +846,17 @@ fn agent_gate(
 fn agent_advance(
     project_path: String,
     stage: String,
-    approver_id: Option<String>,
-    approver_name: Option<String>,
+    reason: Option<String>,
     rationale: Option<String>,
 ) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
     let mut body = json!({ "stage": stage });
-    if let (Some(id), Some(name), Some(why)) = (approver_id, approver_name, rationale) {
-        body["approver_id"] = json!(id);
-        body["approver_name"] = json!(name);
+    if let Some(value) = reason {
+        body["reason"] = json!(value);
+    }
+    if let Some(why) = rationale {
         body["rationale"] = json!(why);
     }
     agent_request(
@@ -880,24 +901,19 @@ fn agent_hypothesis_draft(project_path: String, brief: String) -> Result<Value, 
 
 /// Records a hypothesis from reviewed fields.
 ///
-/// The approval travels whole or not at all: the core requires approver id,
-/// name and rationale together and refuses a partial set, which is the
-/// behaviour we want rather than one to work around here.
+/// Only the rationale is carried. The approver is resolved by the Agent from
+/// the operator it stores, so no surface has to know who is at the machine.
 #[tauri::command]
 fn agent_hypothesis_create(
     project_path: String,
     fields: Value,
-    approver_id: Option<String>,
-    approver_name: Option<String>,
     rationale: Option<String>,
 ) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
     let mut body = json!({ "fields": fields });
-    if let (Some(id), Some(name), Some(why)) = (approver_id, approver_name, rationale) {
-        body["approver_id"] = json!(id);
-        body["approver_name"] = json!(name);
+    if let Some(why) = rationale {
         body["rationale"] = json!(why);
     }
     agent_request(
@@ -1033,6 +1049,8 @@ pub fn run() {
             agent_run,
             agent_run_engine,
             agent_project_init,
+            agent_operator_settings,
+            agent_save_operator_settings,
             agent_provider_settings,
             agent_save_provider_settings,
             agent_forget_provider_settings,

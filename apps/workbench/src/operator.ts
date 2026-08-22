@@ -1,74 +1,66 @@
+import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { errorMessage } from "./daemon";
+import { isDesktopRuntime } from "./agent";
+
 /**
  * Who is approving.
  *
  * Loopforge is a local agent with no cross-user collaboration, so there is no
  * role model here: the approver is whoever is using the Workbench. The core
- * already reflects that by stamping every approval `identity_source:
- * "local-declaration"` -- it does not claim the identity was verified, because
- * it was not.
+ * reflects that by stamping every approval `identity_source:
+ * "local-declaration"` -- it does not claim the identity was verified.
  *
- * Stored Workbench-local rather than per project, like appearance: the person
- * does not change when the folder does.
+ * Held by the Agent rather than in this window's local storage. It used to be
+ * the latter, which meant the Agent could not read it and every approval had
+ * to carry one in from the front end; anything that was not the Workbench had
+ * no identity at all. Surfaces now record approvals without naming anyone, and
+ * the Agent fills in the operator it has stored.
  */
-
-export const OPERATOR_STORAGE_KEY = "loopforge.operator";
-
 export type Operator = {
+  schema_version: "loopforge-settings-v1";
   /** Stable across renames, so a history of approvals stays one person. */
   id: string;
   name: string;
+  /** A name is what makes an approval readable later; without one, false. */
+  configured: boolean;
+  reason?: string;
 };
 
-function newOperatorId(): string {
-  const random = globalThis.crypto?.randomUUID?.();
-  return `op_${(random ?? `${Date.now()}`).replace(/-/g, "").slice(0, 24)}`;
-}
+export function useOperator(projectRoot: string, enabled: boolean) {
+  const [operator, setOperator] = useState<Operator | null>(null);
+  const [reason, setReason] = useState<string>();
+  const [nonce, setNonce] = useState(0);
 
-export function loadOperator(storage: Storage | undefined = safeStorage()): Operator {
-  const fallback: Operator = { id: newOperatorId(), name: "" };
-  if (!storage) return fallback;
-  try {
-    const raw = storage.getItem(OPERATOR_STORAGE_KEY);
-    if (!raw) return fallback;
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return fallback;
-    const value = parsed as Partial<Operator>;
-    return {
-      // A stored blank id would silently record approvals against nobody.
-      id: typeof value.id === "string" && value.id ? value.id : fallback.id,
-      name: typeof value.name === "string" ? value.name : ""
+  const reload = useCallback(() => setNonce((value) => value + 1), []);
+
+  useEffect(() => {
+    if (!enabled || !projectRoot || !isDesktopRuntime()) return;
+    let cancelled = false;
+    void invoke<Operator>("agent_operator_settings", { projectPath: projectRoot })
+      .then((result) => {
+        if (!cancelled) setOperator(result);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setReason(errorMessage(error, "Operator unavailable"));
+      });
+    return () => {
+      cancelled = true;
     };
-  } catch {
-    return fallback;
-  }
+  }, [enabled, projectRoot, nonce]);
+
+  return { operator, reason, reload };
 }
 
-export function saveOperator(
-  operator: Operator,
-  storage: Storage | undefined = safeStorage()
-): void {
-  if (!storage) return;
-  try {
-    storage.setItem(OPERATOR_STORAGE_KEY, JSON.stringify(operator));
-  } catch {
-    // A full or blocked store must not prevent the rest of the session.
-  }
+/** Records the name. The Agent mints the id on first use and keeps it. */
+export function saveOperator(projectRoot: string, name: string): Promise<Operator> {
+  return invoke<Operator>("agent_save_operator_settings", {
+    projectPath: projectRoot,
+    name
+  });
 }
 
-/**
- * An approval needs a name a reader can recognise months later.
- *
- * Nothing is defaulted: an approver the user never chose would attribute a
- * decision to a placeholder.
- */
-export function isConfigured(operator: Operator): boolean {
-  return operator.name.trim().length > 0;
-}
-
-function safeStorage(): Storage | undefined {
-  try {
-    return globalThis.localStorage;
-  } catch {
-    return undefined;
-  }
+/** An approval is only recorded for someone who has been named. */
+export function isConfigured(operator: Operator | null): boolean {
+  return operator?.configured === true;
 }

@@ -61,6 +61,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
+        if self.path == "/v1/settings/operator":
+            self._execute(self.server.agent.operator_settings)
+            return
         if self.path == "/v1/settings/provider":
             self._execute(self.server.agent.provider_settings)
             return
@@ -148,6 +151,10 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body["approver_name"]) if body.get("approver_name") else None,
                     str(body["rationale"]) if body.get("rationale") else None,
                 )
+            )
+        elif self.path == "/v1/settings/operator":
+            self._execute(
+                lambda: self.server.agent.save_operator_settings(str(body.get("name", "")))
             )
         elif self.path == "/v1/settings/provider":
             self._execute(

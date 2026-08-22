@@ -17,10 +17,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("../../agent", () => ({ isDesktopRuntime: () => true }));
-vi.mock("../../operator", async () => {
-  const actual = await vi.importActual<typeof import("../../operator")>("../../operator");
-  return { ...actual, loadOperator: () => ({ id: "op_1", name: "Ada" }) };
-});
+// The operator now comes from the Agent, so it is answered through invoke
+// like everything else rather than stubbed at the module boundary.
+const OPERATOR = {
+  schema_version: "loopforge-settings-v1",
+  id: "op_1",
+  name: "Ada",
+  configured: true
+};
 
 vi.mock("../../i18n", async () => {
   const { en } = await import("../../i18n/locales/en");
@@ -41,6 +45,7 @@ const { FlowWorkspace } = await import("./Flow");
 
 function mockAgent(stage: string, nextStages: string[]) {
   invoke.mockImplementation((command: string, args: Record<string, unknown>) => {
+    if (command === "agent_operator_settings") return Promise.resolve(OPERATOR);
     if (command === "agent_project_status") {
       return Promise.resolve({
         schema_version: "loopforge-project-status-v1",

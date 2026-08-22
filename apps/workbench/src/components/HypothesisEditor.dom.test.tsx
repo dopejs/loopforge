@@ -18,10 +18,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("../agent", () => ({ isDesktopRuntime: () => true }));
-vi.mock("../operator", async () => {
-  const actual = await vi.importActual<typeof import("../operator")>("../operator");
-  return { ...actual, loadOperator: () => ({ id: "op_1", name: "Ada" }) };
-});
+// The operator now comes from the Agent, so it is answered through invoke
+// like everything else rather than stubbed at the module boundary.
+const OPERATOR = {
+  schema_version: "loopforge-settings-v1",
+  id: "op_1",
+  name: "Ada",
+  configured: true
+};
 
 vi.mock("../i18n", async () => {
   const { en } = await import("../i18n/locales/en");
@@ -124,7 +128,7 @@ describe("HypothesisEditor", () => {
     expect(fieldFor("platform").value).toBe("Desktop");
   });
 
-  it("submits the fields with the operator and their rationale", async () => {
+  it("submits the fields and rationale, leaving the approver to the Agent", async () => {
     invoke.mockResolvedValue({});
     const onSaved = vi.fn();
     render(
@@ -141,10 +145,11 @@ describe("HypothesisEditor", () => {
       expect(call).toBeTruthy();
       const payload = (call as [string, Record<string, unknown>])[1];
       expect((payload.fields as Record<string, string>).hypothesis).toBe("Charging reads.");
-      // The approval travels whole: the core records id, name and rationale
-      // together or refuses.
-      expect(payload.approver_name).toBe("Ada");
       expect(payload.rationale).toBe("Reviewed the draft.");
+      // The approver comes from the operator the Agent stores, so this surface
+      // does not name one -- and neither does any other caller.
+      expect(payload.approver_id).toBeUndefined();
+      expect(payload.approver_name).toBeUndefined();
     });
   });
 

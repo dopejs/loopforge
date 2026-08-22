@@ -17,10 +17,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("../agent", () => ({ isDesktopRuntime: () => true }));
-vi.mock("../operator", async () => {
-  const actual = await vi.importActual<typeof import("../operator")>("../operator");
-  return { ...actual, loadOperator: () => ({ id: "op_1", name: "Ada" }) };
-});
+// The operator now comes from the Agent, so it is answered through invoke
+// like everything else rather than stubbed at the module boundary.
+const OPERATOR = {
+  schema_version: "loopforge-settings-v1",
+  id: "op_1",
+  name: "Ada",
+  configured: true
+};
 
 vi.mock("../i18n", async () => {
   const { en } = await import("../i18n/locales/en");
@@ -75,6 +79,7 @@ function mockAgent(overrides: Record<string, unknown> = {}) {
         ...overrides
       });
     }
+    if (command === "agent_operator_settings") return Promise.resolve(OPERATOR);
     if (command === "agent_evidence") return Promise.resolve({ evidence: EVIDENCE });
     if (command === "agent_hypothesis") {
       return Promise.resolve({
@@ -169,7 +174,7 @@ describe("DecisionPanel", () => {
     expect(seeded.length).toBeGreaterThan(0);
   });
 
-  it("sends the citation, approver and rationale together", async () => {
+  it("sends the citation and rationale, and leaves the approver to the Agent", async () => {
     mockAgent();
     await openDialog();
 
@@ -185,8 +190,12 @@ describe("DecisionPanel", () => {
       const payload = (call as [string, Record<string, unknown>])[1];
       expect(payload.decision).toBe("kill");
       expect(payload.evidenceIds).toEqual(["evd_build"]);
-      expect(payload.approverName).toBe("Ada");
       expect(payload.rationale).toBe("Out of scope for this budget.");
+      // The approver is resolved by the Agent from the operator it stores. A
+      // surface that sent one would be deciding who approved this, and a
+      // caller that was not this surface would have no identity at all.
+      expect(payload.approverId).toBeUndefined();
+      expect(payload.approverName).toBeUndefined();
     });
   });
 

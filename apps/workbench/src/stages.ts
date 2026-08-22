@@ -67,11 +67,14 @@ export const TRANSITION_REASONS = ["technical", "scope", "abandon"] as const;
 
 export type TransitionReason = (typeof TRANSITION_REASONS)[number];
 
-/** Arguments some gates test directly rather than reading from the record. */
+/**
+ * Arguments some gates test directly rather than reading from the record.
+ *
+ * No approver: the Agent resolves that from the operator it stores, so a
+ * surface does not have to know who is at the machine.
+ */
 export type GateArgs = {
   reason?: string;
-  approver_id?: string;
-  approver_name?: string;
   rationale?: string;
 };
 
@@ -100,8 +103,6 @@ export function useGate(projectRoot: string, stage: string | null, args?: GateAr
       projectPath: projectRoot,
       stage,
       reason: args?.reason ?? null,
-      approverId: args?.approver_id ?? null,
-      approverName: args?.approver_name ?? null,
       rationale: args?.rationale ?? null
     })
       .then((result) => {
@@ -117,7 +118,7 @@ export function useGate(projectRoot: string, stage: string | null, args?: GateAr
       cancelled = true;
     };
     // The arguments are part of the question, so a change to them re-asks it.
-  }, [projectRoot, stage, nonce, args?.reason, args?.approver_id, args?.approver_name, args?.rationale]);
+  }, [projectRoot, stage, nonce, args?.reason, args?.rationale]);
 
   return { gate, reason, loading, reload };
 }

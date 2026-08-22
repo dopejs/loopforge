@@ -12,7 +12,7 @@ import {
   emptyFields,
   useHypothesis
 } from "../hypothesis";
-import { isConfigured, loadOperator } from "../operator";
+import { isConfigured, useOperator } from "../operator";
 import type { MessageKey } from "../i18n/locales/en";
 
 /**
@@ -43,8 +43,9 @@ export function HypothesisEditor({
   const [fields, setFields] = useState<HypothesisFields>(initial?.fields ?? emptyFields());
   const [brief, setBrief] = useState("");
   const [rationale, setRationale] = useState("");
-  // Read once per open: Settings writes it, and this dialog mounts fresh.
-  const [operator] = useState(() => loadOperator());
+  // Read from the Agent, which is also what records it: the dialog only needs
+  // to know whether a name exists so it can say so.
+  const { operator } = useOperator(projectRoot, true);
   const [drafting, setDrafting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -86,11 +87,7 @@ export function HypothesisEditor({
     setSaving(true);
     setFailure(undefined);
     try {
-      await createHypothesis(projectRoot, fields, {
-        approver_id: operator.id,
-        approver_name: operator.name,
-        rationale
-      });
+      await createHypothesis(projectRoot, fields, rationale);
       onSaved();
       onClose();
     } catch (error: unknown) {
@@ -169,7 +166,7 @@ export function HypothesisEditor({
               <span>{t("hypothesis.rationale")}</span>
               <small>
                 {isConfigured(operator)
-                  ? t("hypothesis.rationaleHint", { name: operator.name })
+                  ? t("hypothesis.rationaleHint", { name: operator?.name ?? "" })
                   : t("hypothesis.operatorMissing")}
               </small>
             </div>

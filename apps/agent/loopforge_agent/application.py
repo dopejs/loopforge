@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import tempfile
+import uuid
 import urllib.parse
 from importlib import resources
 from pathlib import Path
@@ -481,6 +482,7 @@ class LoopforgeAgent:
         purely because that is the core's input shape.
         """
         cleaned = self._clean_hypothesis_fields(fields)
+        approver_id, approver_name = self._resolve_approver(approver_id, approver_name)
         missing = [key for key in HYPOTHESIS_FIELDS if not cleaned[key]]
         if missing:
             raise LoopforgeAgentError(
@@ -512,6 +514,71 @@ class LoopforgeAgent:
             store = UserStore()
             self._user_store = store
         return store
+
+    def operator_settings(self) -> dict[str, Any]:
+        """Who this machine records as the approver.
+
+        Read by the Agent rather than passed in on every call. It used to live
+        only in the Workbench's local storage, so any caller that was not the
+        Workbench had no identity at all and the front end had to resend one
+        with every approval.
+        """
+        try:
+            record = self.user_store.operator()
+        except UserStoreError as exc:
+            return {
+                "schema_version": SETTINGS_SCHEMA,
+                "configured": False,
+                "reason": str(exc),
+            }
+        return {
+            "schema_version": SETTINGS_SCHEMA,
+            "id": str((record or {}).get("id") or ""),
+            "name": str((record or {}).get("name") or ""),
+            # A name is what makes an approval readable months later, so an
+            # identity without one is not configured.
+            "configured": bool(record and record.get("name")),
+        }
+
+    def save_operator_settings(self, name: str) -> dict[str, Any]:
+        """Record the approver's name, minting a stable id on first use.
+
+        The id survives a rename so a history of approvals stays one person,
+        and it is generated here rather than by a caller: an id chosen by
+        whichever surface happened to ask first would differ per surface.
+        """
+        display = str(name or "").strip()
+        if not display:
+            raise LoopforgeAgentError(
+                "An approver name is required.", "OPERATOR_NAME_INVALID"
+            )
+        if len(display) > 200:
+            raise LoopforgeAgentError(
+                "The approver name is too long.", "OPERATOR_NAME_INVALID"
+            )
+        existing = self.user_store.operator()
+        identifier = str((existing or {}).get("id") or "") or f"op_{uuid.uuid4().hex[:24]}"
+        self.user_store.save_operator(identifier, display)
+        return self.operator_settings()
+
+    def _resolve_approver(
+        self, approver_id: str | None, approver_name: str | None
+    ) -> tuple[str | None, str | None]:
+        """Fill in the approver from the stored operator when none was given.
+
+        A caller that supplies one is believed -- the Workbench passes what the
+        user just confirmed. This only covers the case of no answer at all,
+        which before this existed meant the core refused the approval.
+        """
+        if approver_id and approver_name:
+            return approver_id, approver_name
+        try:
+            record = self.user_store.operator()
+        except UserStoreError:
+            return approver_id, approver_name
+        if record and record.get("name"):
+            return str(record["id"]), str(record["name"])
+        return approver_id, approver_name
 
     def provider_settings(self) -> dict[str, Any]:
         """What the user has configured, without the credential.
@@ -822,6 +889,7 @@ class LoopforgeAgent:
             raise LoopforgeAgentError(
                 "The rationale is too long.", "DECISION_RATIONALE_INVALID"
             )
+        approver_id, approver_name = self._resolve_approver(approver_id, approver_name)
         if not (approver_id or "").strip() or not (approver_name or "").strip():
             raise LoopforgeAgentError(
                 "An approver is required. Set an approver name in Settings.",
@@ -1133,6 +1201,7 @@ class LoopforgeAgent:
         drift silently, since a UI-side copy stays plausible while being wrong.
         """
         target = str(stage or "").upper()
+        approver_id, approver_name = self._resolve_approver(approver_id, approver_name)
         result = self.project.gate_check(
             target, reason, approver_id, approver_name, rationale
         )
@@ -1173,6 +1242,7 @@ class LoopforgeAgent:
             raise LoopforgeAgentError(
                 f"Unsupported transition reason: {reason}", "TRANSITION_REASON_INVALID"
             )
+        approver_id, approver_name = self._resolve_approver(approver_id, approver_name)
         result = self.project.advance(
             str(stage or "").upper(),
             expected_revision=None,
