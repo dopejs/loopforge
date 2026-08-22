@@ -10,6 +10,7 @@ from typing import Any
 
 from loopforge.agent import KuraRuntimeSupervisor
 from loopforge.agent.kura_client import KuraAgentError, KuraClient
+from loopforge.errors import LoopforgeError
 from loopforge.project import LoopforgeProject
 
 from .runs import RUN_SCHEMA, RunStore
@@ -18,6 +19,9 @@ from .sessions import SESSION_SCHEMA, SessionStore, new_session_id
 AGENT_STATUS_SCHEMA = "loopforge-agent-status-v1"
 AGENT_RESPONSE_SCHEMA = "loopforge-agent-response-v1"
 PROVIDER_SCHEMA = "loopforge-provider-v1"
+PROJECT_STATUS_SCHEMA = "loopforge-project-status-v1"
+#: Declared by the core; anything else comes from a newer version.
+KNOWN_CLAIM_STATUSES = frozenset({"satisfied", "failed", "stale", "unknown"})
 PROVIDER_TIMEOUT_SECONDS = 10.0
 # Providers are a short operator-managed list; this only bounds a runaway runtime.
 MAX_PROVIDERS = 64
@@ -241,6 +245,66 @@ class LoopforgeAgent:
             "schema_version": RUN_SCHEMA,
             "run": detail if detail is not None else result,
         }
+
+    def project_status(self) -> dict[str, Any]:
+        """The project's lifecycle position and derived quality claims.
+
+        Claims are deliberately orthogonal rather than a single completion
+        flag: a passing build must never be presented as a validated game
+        (ADR 0002). `stale` is preserved as its own status for the same reason
+        -- evidence that no longer matches the current source is not evidence.
+
+        An uninitialized project is a normal state, not an error: the Workbench
+        shows it and offers to initialize.
+        """
+        try:
+            raw = self.project.status()
+        except LoopforgeError as exc:
+            return {
+                "schema_version": PROJECT_STATUS_SCHEMA,
+                "initialized": False,
+                "reason": exc.message,
+            }
+        if not raw.get("initialized"):
+            return {"schema_version": PROJECT_STATUS_SCHEMA, "initialized": False}
+
+        claims = []
+        for name, value in (raw.get("claims") or {}).items():
+            if not isinstance(value, dict):
+                continue
+            status = value.get("status")
+            claims.append(
+                {
+                    "claim": str(name),
+                    "status": status if status in KNOWN_CLAIM_STATUSES else "unknown",
+                    "evidence_count": len(value.get("evidence_ids") or []),
+                }
+            )
+        experiment = raw.get("active_experiment") or {}
+        projected: dict[str, Any] = {
+            "schema_version": PROJECT_STATUS_SCHEMA,
+            "initialized": True,
+            "stage": str(raw.get("stage") or ""),
+            "claims": claims,
+        }
+        for key in ("observed_revision", "evidence_count"):
+            value = raw.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                projected[key] = value
+        if isinstance(raw.get("snapshot_status"), str):
+            projected["snapshot_status"] = raw["snapshot_status"]
+        if isinstance(experiment, dict):
+            projected["experiment"] = {
+                key: experiment.get(key)
+                for key in (
+                    "experiment_id",
+                    "hypothesis_id",
+                    "hypothesis_revision",
+                    "hypothesis_approval",
+                )
+                if key in experiment
+            }
+        return projected
 
     def providers(self) -> dict[str, Any]:
         """Project the generic Kura provider inventory into a Loopforge contract.

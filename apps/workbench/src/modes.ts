@@ -45,7 +45,8 @@ export function sidebarTitleKey(mode: WorkspaceMode): MessageKey {
 const WIRED_MODES: ReadonlySet<WorkspaceMode> = new Set<WorkspaceMode>([
   "chat",
   "terminal",
-  "test"
+  "test",
+  "tasks"
 ]);
 
 export function isWired(mode: WorkspaceMode): boolean {

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopforge.dev/contracts/loopforge-project-status-v1.schema.json",
+  "title": "Loopforge Project Status v1",
+  "description": "The project's lifecycle position and derived quality claims. Claims are orthogonal results rather than a single completion flag, so a passing build is never presented as a validated game.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "initialized"],
+  "properties": {
+    "schema_version": { "const": "loopforge-project-status-v1" },
+    "initialized": { "type": "boolean" },
+    "stage": { "type": "string" },
+    "observed_revision": { "type": "integer", "minimum": 0 },
+    "evidence_count": { "type": "integer", "minimum": 0 },
+    "snapshot_status": { "type": "string" },
+    "experiment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "experiment_id": { "type": "string" },
+        "hypothesis_id": { "type": ["string", "null"] },
+        "hypothesis_revision": { "type": ["integer", "null"] },
+        "hypothesis_approval": { "type": ["string", "null"] }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim", "status", "evidence_count"],
+        "properties": {
+          "claim": {
+            "enum": [
+              "TECHNICALLY_VALIDATED",
+              "VISUALLY_REVIEWED",
+              "HUMAN_PLAYTESTED",
+              "FUN_HYPOTHESIS_SUPPORTED",
+              "RELEASE_APPROVED"
+            ]
+          },
+          "status": {
+            "enum": ["satisfied", "failed", "stale", "unknown"],
+            "description": "`stale` means evidence exists but no longer matches the current source identity; it must not be shown as satisfied."
+          },
+          "evidence_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "reason": { "type": "string" }
+  }
+}

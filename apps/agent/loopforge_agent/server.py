@@ -61,6 +61,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
+        if self.path == "/v1/project/status":
+            self._execute(self.server.agent.project_status)
+            return
         if self.path == "/v1/runs":
             self._execute(self.server.agent.runs)
             return

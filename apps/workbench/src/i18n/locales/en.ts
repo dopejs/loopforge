@@ -399,7 +399,31 @@ export const en = {
   "test.runNow": "Run tests",
   "test.running": "Running…",
   "test.lastRun": "Last run",
-  "test.noRuns": "No test runs yet."
+  "test.noRuns": "No test runs yet.",
+
+  "claim.TECHNICALLY_VALIDATED": "Technically validated",
+  "claim.VISUALLY_REVIEWED": "Visually reviewed",
+  "claim.HUMAN_PLAYTESTED": "Human playtested",
+  "claim.FUN_HYPOTHESIS_SUPPORTED": "Fun hypothesis supported",
+  "claim.RELEASE_APPROVED": "Release approved",
+  "claim.TECHNICALLY_VALIDATED.hint": "A build and a test both passed",
+  "claim.VISUALLY_REVIEWED.hint": "A capture was reviewed",
+  "claim.HUMAN_PLAYTESTED.hint": "External playtest evidence exists",
+  "claim.FUN_HYPOTHESIS_SUPPORTED.hint": "Playtest evidence supports the hypothesis",
+  "claim.RELEASE_APPROVED.hint": "A human approved the release",
+  "claim.status.satisfied": "Met",
+  "claim.status.failed": "Failed",
+  "claim.status.stale": "Stale",
+  "claim.status.unknown": "Unknown",
+  "project.loading": "Loading project status…",
+  "project.unavailable": "Project status is unavailable.",
+  "project.uninitialized": "This folder is not a Loopforge project yet.",
+  "project.stage": "Stage",
+  "project.evidence": "Evidence",
+  "project.claims": "Quality claims",
+  "project.revision": "Revision {value}",
+  "project.evidenceCount": "{count} evidence",
+  "project.claimsNote": "Each claim is judged separately. A met claim means evidence supports that claim only — not that the game is good."
 } as const;
 
 export type MessageKey = keyof typeof en;

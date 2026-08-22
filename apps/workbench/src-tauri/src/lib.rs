@@ -503,6 +503,21 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
     );
 }
 
+/// The project's lifecycle stage and derived quality claims.
+#[tauri::command]
+fn agent_project_status(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/project/status",
+        None,
+        Duration::from_secs(15),
+    )
+}
+
 /// Engine run history. `operation` narrows to `build` or `test`.
 #[tauri::command]
 fn agent_runs(project_path: String, operation: Option<String>) -> Result<Value, String> {
@@ -592,7 +607,8 @@ pub fn run() {
             agent_query_stream,
             agent_runs,
             agent_run,
-            agent_run_engine
+            agent_run_engine,
+            agent_project_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running Loopforge Workbench");
