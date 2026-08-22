@@ -35,7 +35,7 @@ export function sidebarTitleKey(mode: WorkspaceMode): MessageKey {
 }
 
 /**
- * `chat` is the only workspace backed by a Loopforge Agent endpoint today.
+ * The workspaces backed by a Loopforge Agent endpoint.
  *
  * The rest render the full designed UI driven by placeholder data from
  * ../fixtures.ts, and Workspace.tsx uses this set to decide whether to show the
