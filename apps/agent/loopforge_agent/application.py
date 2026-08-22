@@ -41,6 +41,11 @@ SETTINGS_SCHEMA = "loopforge-settings-v1"
 #: managed by Kura, and offering to configure them would be offering a choice
 #: that does not exist.
 CONFIGURABLE_PROVIDER = "openai_compatible"
+AUTH_SCHEMA = "loopforge-provider-auth-v1"
+#: What the runtime accepts. `start` marks a login as pending and returns the
+#: command to run; `complete` re-detects afterwards. Neither runs anything --
+#: the login happens in the user's own terminal, under their own account.
+AUTH_ACTIONS = ("start", "complete", "refresh", "revoke")
 HISTORY_SCHEMA = "loopforge-history-v1"
 #: The audit trail is read newest first and paged; a long-lived project's log
 #: is unbounded and the surface only ever shows a window of it.
@@ -659,6 +664,122 @@ class LoopforgeAgent:
         self.user_store.forget_provider(CONFIGURABLE_PROVIDER)
         result = self.provider_settings()
         result["restart_required"] = True
+        return result
+
+    def _runtime_client(self) -> KuraClient:
+        status = self.runtime.status()
+        if not status.get("healthy") or not status.get("base_url"):
+            raise LoopforgeAgentError(
+                "The Loopforge Agent runtime is not ready.", "AGENT_NOT_READY"
+            )
+        return KuraClient(
+            str(status["base_url"]),
+            timeout=PROVIDER_TIMEOUT_SECONDS,
+            token=status.get("token"),
+        )
+
+    @staticmethod
+    def _project_auth(payload: dict[str, Any]) -> dict[str, Any]:
+        """The parts of a runtime auth state a surface can act on.
+
+        `login_command` is carried because the login is not something this
+        process performs: a managed provider borrows a CLI the user has already
+        signed into, so the honest instruction is the command to run, not a
+        button that pretends to do it.
+        """
+        state = payload.get("auth") if isinstance(payload.get("auth"), dict) else payload
+        state = state if isinstance(state, dict) else {}
+        return {
+            "provider_id": str(state.get("providerId") or ""),
+            "status": str(state.get("status") or "unknown"),
+            "auth_mode": str(state.get("authMode") or ""),
+            # Whether the tool this provider borrows is even installed. Without
+            # it no login is possible and saying "sign in" would be a dead end.
+            "cli_available": state.get("cliAvailable") is True,
+            "cli_path": str(state.get("cliPath") or ""),
+            "account_label": str(state.get("accountLabel") or ""),
+            "plan": str(state.get("plan") or ""),
+            "login_command": [str(part) for part in state.get("loginCommand") or []],
+            "logout_command": [str(part) for part in state.get("logoutCommand") or []],
+            "last_error": str(state.get("lastError") or ""),
+        }
+
+    def provider_auth(self, provider_id: str) -> dict[str, Any]:
+        """The sign-in state of a managed provider."""
+        identifier = str(provider_id or "").strip()
+        if not identifier:
+            raise LoopforgeAgentError("A provider id is required.", "PROVIDER_ID_INVALID")
+        client = self._runtime_client()
+        try:
+            payload = client.get(f"/v1/providers/{urllib.parse.quote(identifier, safe='')}/auth")
+        except KuraAgentError as exc:
+            # The runtime answers 404 for two different things: a provider
+            # that does not exist, and one whose auth state nothing has
+            # checked yet. Only the second is a state to render, so the
+            # inventory decides which this is -- otherwise a typo in a
+            # provider id would show up as a tidy "not signed in".
+            if "404" in str(exc) and self._provider_exists(client, identifier):
+                return {
+                    "schema_version": AUTH_SCHEMA,
+                    "provider_id": identifier,
+                    "status": "unknown",
+                    "checked": False,
+                    "auth_mode": "",
+                    "cli_available": False,
+                    "cli_path": "",
+                    "account_label": "",
+                    "plan": "",
+                    "login_command": [],
+                    "logout_command": [],
+                    "last_error": "",
+                    "models": [],
+                }
+            raise LoopforgeAgentError(str(exc), "PROVIDER_AUTH_UNAVAILABLE") from exc
+        result = self._project_auth(payload)
+        result["schema_version"] = AUTH_SCHEMA
+        result["checked"] = True
+        result["models"] = self._project_models(payload.get("models") or [])
+        return result
+
+    @staticmethod
+    def _provider_exists(client: KuraClient, provider_id: str) -> bool:
+        try:
+            listing = client.get("/v1/providers")
+        except KuraAgentError:
+            return False
+        return any(
+            str(item.get("providerId") or "") == provider_id
+            for item in listing.get("items") or []
+            if isinstance(item, dict)
+        )
+
+    def provider_auth_action(self, provider_id: str, action: str) -> dict[str, Any]:
+        """Move a managed provider's sign-in along.
+
+        `start` records that a login is pending and hands back the command; the
+        user runs it themselves. `complete` re-checks afterwards. Nothing here
+        spawns a process on their behalf -- a credential belongs to the account
+        they sign in with, not to this application.
+        """
+        identifier = str(provider_id or "").strip()
+        step = str(action or "").strip()
+        if not identifier:
+            raise LoopforgeAgentError("A provider id is required.", "PROVIDER_ID_INVALID")
+        if step not in AUTH_ACTIONS:
+            raise LoopforgeAgentError(
+                f"Unsupported auth action: {action}", "PROVIDER_AUTH_ACTION_INVALID"
+            )
+        client = self._runtime_client()
+        try:
+            payload = client.post(
+                f"/v1/providers/{urllib.parse.quote(identifier, safe='')}/auth/{step}", {}
+            )
+        except KuraAgentError as exc:
+            raise LoopforgeAgentError(str(exc), "PROVIDER_AUTH_FAILED") from exc
+        result = self._project_auth(payload)
+        result["schema_version"] = AUTH_SCHEMA
+        result["checked"] = True
+        result["models"] = self._project_models(payload.get("models") or [])
         return result
 
     def route_model_role(self, role: str, provider_id: str, model: str = "") -> dict[str, Any]:

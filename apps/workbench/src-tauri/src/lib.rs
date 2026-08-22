@@ -608,6 +608,49 @@ fn agent_save_provider_settings(
     )
 }
 
+/// The sign-in state of a managed provider.
+#[tauri::command]
+fn agent_provider_auth(project_path: String, provider_id: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    // A path segment, so it is constrained rather than trusted.
+    if provider_id.is_empty()
+        || !provider_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        return Err("Provider id must be alphanumeric".to_string());
+    }
+    agent_request(
+        &metadata,
+        "GET",
+        &format!("/v1/settings/provider/auth/{provider_id}"),
+        None,
+        Duration::from_secs(30),
+    )
+}
+
+/// Moves a managed provider's sign-in along. Nothing is spawned here: the
+/// login runs in the user's own terminal, under their own account.
+#[tauri::command]
+fn agent_provider_auth_action(
+    project_path: String,
+    provider_id: String,
+    action: String,
+) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/settings/provider/auth",
+        Some(json!({ "provider_id": provider_id, "action": action })),
+        Duration::from_secs(60),
+    )
+}
+
 /// Points one modality at a provider. Routing lives in Kura.
 #[tauri::command]
 fn agent_route_role(
@@ -1126,6 +1169,8 @@ pub fn run() {
             agent_operator_settings,
             agent_save_operator_settings,
             agent_provider_settings,
+            agent_provider_auth,
+            agent_provider_auth_action,
             agent_route_role,
             agent_clear_role,
             agent_save_provider_settings,

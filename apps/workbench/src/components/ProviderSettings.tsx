@@ -3,6 +3,7 @@ import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { useKey } from "./primitives";
 import { type ModelRole, type Provider, useProviders } from "../providers";
+import type { MessageKey } from "../i18n/locales/en";
 
 function ProviderDetail({
   provider,
@@ -135,6 +136,29 @@ function describeRoute(route: ModelRole): string {
   return route.model ? `${route.provider_id} · ${route.model}` : route.provider_id;
 }
 
+/**
+ * Role labels, spelled out.
+ *
+ * These went through a casting helper before, and three of the five roles had
+ * no label at all -- they rendered as empty rows and nothing reported it. A
+ * literal key makes a missing one a build error.
+ */
+const ROLE_LABEL: Record<string, MessageKey> = {
+  primary: "route.primary",
+  vision: "route.vision",
+  image: "route.image",
+  video: "route.video",
+  embed: "route.embed"
+};
+
+const ROLE_HINT: Record<string, MessageKey> = {
+  primary: "route.primaryHint",
+  vision: "route.visionHint",
+  image: "route.imageHint",
+  video: "route.videoHint",
+  embed: "route.embedHint"
+};
+
 export function ProviderSettings({
   projectRoot,
   onAdd
@@ -214,8 +238,8 @@ export function ProviderSettings({
           {roles.map((route) => (
             <div key={route.role} className="settings-row">
               <div className="row-label route-scene">
-                <span>{key("route", route.role)}</span>
-                <small>{key("route", `${route.role}Hint`)}</small>
+                <span>{ROLE_LABEL[route.role] ? t(ROLE_LABEL[route.role]) : route.role}</span>
+                <small>{ROLE_HINT[route.role] ? t(ROLE_HINT[route.role]) : ""}</small>
               </div>
               <div className="route-model">
                 {route.routed ? (

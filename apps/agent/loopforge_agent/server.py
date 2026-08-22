@@ -61,6 +61,10 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
+        if self.path.startswith("/v1/settings/provider/auth/"):
+            provider_id = self.path[len("/v1/settings/provider/auth/") :]
+            self._execute(lambda: self.server.agent.provider_auth(provider_id))
+            return
         if self.path == "/v1/settings/operator":
             self._execute(self.server.agent.operator_settings)
             return
@@ -164,6 +168,12 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body.get("model", "")),
                     str(body.get("display_name", "")),
                     str(body.get("protocol", "")),
+                )
+            )
+        elif self.path == "/v1/settings/provider/auth":
+            self._execute(
+                lambda: self.server.agent.provider_auth_action(
+                    str(body.get("provider_id", "")), str(body.get("action", ""))
                 )
             )
         elif self.path == "/v1/settings/role":

@@ -271,3 +271,50 @@ export function forgetProviderSettings(projectRoot: string): Promise<ProviderSet
     projectPath: projectRoot
   });
 }
+
+/**
+ * Mirrors `loopforge-provider-auth-v1`.
+ *
+ * `checked` is false when nothing has looked at this provider yet -- the
+ * runtime keeps auth state only once something has. That is a state to render,
+ * not an error, and it is why the first thing the surface offers is a check.
+ */
+export type ProviderAuth = {
+  schema_version: "loopforge-provider-auth-v1";
+  provider_id: string;
+  status: "unknown" | "login_required" | "pending_login" | "authenticated" | "revoked" | "error";
+  checked: boolean;
+  auth_mode: string;
+  /** Without the borrowed tool installed, no sign-in is possible at all. */
+  cli_available: boolean;
+  cli_path: string;
+  account_label: string;
+  plan: string;
+  /** What the user runs themselves. Nothing here spawns it for them. */
+  login_command: readonly string[];
+  logout_command: readonly string[];
+  last_error: string;
+  models?: readonly ProviderModel[];
+};
+
+export function providerAuth(
+  projectRoot: string,
+  providerId: string
+): Promise<ProviderAuth> {
+  return invoke<ProviderAuth>("agent_provider_auth", {
+    projectPath: projectRoot,
+    providerId
+  });
+}
+
+export function providerAuthAction(
+  projectRoot: string,
+  providerId: string,
+  action: "start" | "complete" | "refresh" | "revoke"
+): Promise<ProviderAuth> {
+  return invoke<ProviderAuth>("agent_provider_auth_action", {
+    projectPath: projectRoot,
+    providerId,
+    action
+  });
+}

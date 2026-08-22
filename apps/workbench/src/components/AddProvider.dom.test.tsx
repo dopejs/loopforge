@@ -53,6 +53,23 @@ function mockAgent(overrides: Record<string, unknown> = {}) {
   invoke.mockImplementation((command: string) => {
     if (command === "agent_provider_settings") return Promise.resolve(settings(overrides));
     if (command === "agent_providers") return Promise.resolve({ providers: [], roles: [] });
+    if (command === "agent_provider_auth" || command === "agent_provider_auth_action") {
+      return Promise.resolve({
+        schema_version: "loopforge-provider-auth-v1",
+        provider_id: "claude_managed",
+        status: "login_required",
+        checked: true,
+        auth_mode: "local_cli_bridge",
+        cli_available: true,
+        cli_path: "/usr/local/bin/claude",
+        account_label: "",
+        plan: "",
+        login_command: ["claude", "login"],
+        logout_command: [],
+        last_error: "",
+        models: []
+      });
+    }
     if (command === "agent_save_provider_settings") {
       return Promise.resolve(settings({ ...overrides, configured: true, has_api_key: true }));
     }
@@ -174,6 +191,41 @@ describe("AddProvider", () => {
     const baseUrl = await screen.findByPlaceholderText("https://api.example.com/v1");
     expect((baseUrl as HTMLInputElement).value).toBe("https://api.deepseek.com/v1");
     expect(screen.getByPlaceholderText(/Leave blank to keep/)).toBeTruthy();
+  });
+
+  it("offers subscription accounts as sources", async () => {
+    mockAgent();
+    open();
+
+    // The design's account tier, which Kura reaches by borrowing a CLI the
+    // user has already signed into.
+    expect(await screen.findByRole("button", { name: /Claude \(subscription\)/ })).toBeTruthy();
+  });
+
+  it("signs an account in rather than asking it for an endpoint", async () => {
+    mockAgent();
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Claude \(subscription\)/ }));
+
+    // No endpoint or key: the session was established elsewhere.
+    await waitFor(() =>
+      expect(screen.queryByPlaceholderText("https://api.example.com/v1")).toBeNull()
+    );
+    expect(screen.queryByText("API key")).toBeNull();
+    expect(await screen.findByRole("button", { name: "Check sign-in" })).toBeTruthy();
+  });
+
+  it("shows the command to run rather than pretending to run it", async () => {
+    mockAgent();
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Claude \(subscription\)/ }));
+
+    // The login belongs to the user's own account, so the honest instruction
+    // is the command, not a button that opens nothing.
+    expect(await screen.findByText("claude login")).toBeTruthy();
+    expect(screen.getByText(/does not run it for you/)).toBeTruthy();
   });
 
   it("advances to the models step after saving", async () => {

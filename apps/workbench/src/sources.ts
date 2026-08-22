@@ -12,20 +12,48 @@
  * being guessed at.
  */
 
-export type SourceKind = "cloud" | "local" | "custom";
+export type SourceKind = "account" | "cloud" | "local" | "custom";
 
 export type Source = {
   id: string;
   name: string;
   kind: SourceKind;
-  /** Empty for `custom`, where the user supplies it. */
+  /** Empty for `custom`, where the user supplies it, and for `account`. */
   baseUrl: string;
-  protocol: "openai_compatible";
+  protocol: "openai_compatible" | "local_cli_bridge";
   /** Shown as a hint, not a list to choose from: a key can reach any of them. */
   exampleModel: string;
+  /**
+   * The runtime's own id for an account source.
+   *
+   * Present only for `account`: those are not endpoints this app configures
+   * but providers Kura already knows, reached by borrowing a CLI the user has
+   * signed into. Everything else is a preset over the one HTTP provider.
+   */
+  providerId?: string;
 };
 
 export const SOURCES: readonly Source[] = [
+  {
+    // Signed in through the tool's own login, so usage counts against an
+    // existing subscription and no key is entered here.
+    id: "claude_managed",
+    name: "Claude (subscription)",
+    kind: "account",
+    baseUrl: "",
+    protocol: "local_cli_bridge",
+    exampleModel: "",
+    providerId: "claude_managed"
+  },
+  {
+    id: "codex_managed",
+    name: "Codex (subscription)",
+    kind: "account",
+    baseUrl: "",
+    protocol: "local_cli_bridge",
+    exampleModel: "",
+    providerId: "codex_managed"
+  },
   {
     id: "openai",
     name: "OpenAI",
@@ -138,7 +166,17 @@ export function sourceForBaseUrl(baseUrl: string): Source | undefined {
   );
 }
 
-/** Local endpoints run on this machine and need no credential. */
+/**
+ * Whether this source is configured with a key at all.
+ *
+ * Local endpoints run on this machine, and account sources borrow a session
+ * the user established elsewhere -- neither takes a credential here.
+ */
 export function needsApiKey(source: Source): boolean {
-  return source.kind !== "local";
+  return source.kind !== "local" && source.kind !== "account";
+}
+
+/** Account sources are signed into rather than configured. */
+export function isAccountSource(source: Source): boolean {
+  return source.kind === "account";
 }

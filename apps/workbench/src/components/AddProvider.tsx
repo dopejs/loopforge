@@ -4,7 +4,10 @@ import { errorMessage } from "../daemon";
 import { isDesktopRuntime } from "../agent";
 import {
   type Provider,
+  type ProviderAuth,
   clearModelRole,
+  providerAuth,
+  providerAuthAction,
   forgetProviderSettings,
   routeModelRole,
   saveProviderSettings,
@@ -13,6 +16,7 @@ import {
 } from "../providers";
 import {
   type Source,
+  isAccountSource,
   matchSources,
   needsApiKey,
   sourceForBaseUrl,
@@ -31,9 +35,41 @@ const STEP_LABEL: Record<Step, MessageKey> = {
 };
 
 const KIND_HINT: Record<Source["kind"], MessageKey> = {
+  account: "wizard.hint.account",
   cloud: "wizard.hint.cloud",
   local: "wizard.hint.local",
   custom: "wizard.hint.custom"
+};
+
+/**
+ * Spelled out rather than interpolated, for the third time in this codebase.
+ * `t(\`wizard.kind.${kind}\` as MessageKey)` compiles and then fails at render
+ * with a missing key -- the cast removes exactly the check that would have
+ * caught adding a kind without its label.
+ */
+const KIND_BADGE: Record<Source["kind"], MessageKey> = {
+  account: "wizard.kind.account",
+  cloud: "wizard.kind.cloud",
+  local: "wizard.kind.local",
+  custom: "wizard.kind.custom"
+};
+
+/** The core's five modalities, each with its own label for the same reason. */
+const ROLE_LABEL: Record<string, MessageKey> = {
+  primary: "route.primary",
+  vision: "route.vision",
+  image: "route.image",
+  video: "route.video",
+  embed: "route.embed"
+};
+
+const AUTH_BADGE: Record<string, MessageKey> = {
+  authenticated: "wizard.badge.done",
+  pending_login: "wizard.badge.waiting",
+  login_required: "wizard.badge.idle",
+  revoked: "wizard.badge.idle",
+  unknown: "wizard.badge.idle",
+  error: "wizard.badge.idle"
 };
 
 /**
@@ -175,7 +211,11 @@ export function AddProvider({
             />
           )}
 
-          {step === "connection" && source && (
+          {step === "connection" && source && isAccountSource(source) && (
+            <AccountStep source={source} projectRoot={projectRoot} />
+          )}
+
+          {step === "connection" && source && !isAccountSource(source) && (
             <ConnectionStep
               source={source}
               displayName={displayName}
@@ -234,7 +274,16 @@ export function AddProvider({
             <button type="button" className="secondary-button" onClick={onClose}>
               {t("action.close")}
             </button>
-            {step === "connection" && (
+            {step === "connection" && source && isAccountSource(source) && (
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => setStep("models")}
+              >
+                {t("wizard.next")}
+              </button>
+            )}
+            {step === "connection" && source && !isAccountSource(source) && (
               <button
                 type="button"
                 className="primary-button"
@@ -299,7 +348,7 @@ function SourceStep({
                   {source.baseUrl || t("wizard.hint.custom")}
                 </span>
               </span>
-              <span className="badge">{t(`wizard.kind.${source.kind}` as MessageKey)}</span>
+              <span className="badge">{t(KIND_BADGE[source.kind])}</span>
             </div>
           </button>
         ))}
@@ -453,7 +502,7 @@ function ModelsStep({
         {(roles ?? []).map((role) => (
           <div key={role.role} className="settings-row">
             <div className="row-label">
-              <span>{t(`role.${role.role}` as MessageKey)}</span>
+              <span>{ROLE_LABEL[role.role] ? t(ROLE_LABEL[role.role]) : role.role}</span>
               <small>{role.provider_id || t("wizard.roleUnrouted")}</small>
             </div>
             <div className="card-actions">
@@ -480,6 +529,146 @@ function ModelsStep({
           </div>
         ))}
       </div>
+      {failure && <p className="wizard-note tone-bad">{failure}</p>}
+    </>
+  );
+}
+
+/**
+ * Connecting a subscription account.
+ *
+ * Nothing here signs the user in. A managed provider borrows a command-line
+ * tool they have already authenticated -- the runtime can see whether that
+ * tool exists and whether it is signed in, and it hands back the command to
+ * run, but running it belongs to the user and their own account. So this shows
+ * the state, shows the command, and offers to re-check.
+ */
+function AccountStep({
+  source,
+  projectRoot
+}: {
+  source: Source;
+  projectRoot: string;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const [auth, setAuth] = useState<ProviderAuth | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
+  const providerId = source.providerId ?? source.id;
+
+  const load = React.useCallback(async () => {
+    try {
+      setAuth(await providerAuth(projectRoot, providerId));
+    } catch (error: unknown) {
+      setFailure(errorMessage(error, t("wizard.authFailed")));
+    }
+  }, [projectRoot, providerId, t]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const act = async (action: "start" | "complete" | "refresh" | "revoke"): Promise<void> => {
+    if (busy || !isDesktopRuntime()) return;
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      setAuth(await providerAuthAction(projectRoot, providerId, action));
+    } catch (error: unknown) {
+      setFailure(errorMessage(error, t("wizard.authFailed")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const status = auth?.status ?? "unknown";
+  const signedIn = status === "authenticated";
+  const command = (auth?.login_command ?? []).join(" ");
+
+  return (
+    <>
+      <p className="wizard-note">{t("wizard.hint.account")}</p>
+
+      <div className="settings-row">
+        <div className="row-label">
+          <span>{source.name}</span>
+          <small>
+            {signedIn && auth?.account_label
+              ? [auth.account_label, auth.plan].filter(Boolean).join(" · ")
+              : auth?.checked === false
+                ? t("wizard.authUnchecked")
+                : t("wizard.authCliMissing")}
+          </small>
+        </div>
+        <span className={`badge ${signedIn ? "ok" : ""}`}>
+          {t(AUTH_BADGE[status] ?? "wizard.badge.idle")}
+        </span>
+      </div>
+
+      {/*
+        Stated before anything else is offered: without the tool installed
+        there is no sign-in to attempt, and a button that opened nothing would
+        be the worst possible answer.
+      */}
+      {auth?.checked && !auth.cli_available && (
+        <p className="wizard-note tone-bad">{t("wizard.authCliMissing")}</p>
+      )}
+
+      {auth?.cli_available && !signedIn && command && (
+        <>
+          <p className="wizard-note">{t("wizard.authRunCommand")}</p>
+          <pre className="run-stream">{command}</pre>
+        </>
+      )}
+
+      {signedIn && auth?.models && auth.models.length > 0 && (
+        <p className="wizard-note">
+          {t("wizard.acctModels")}: {auth.models.length}
+        </p>
+      )}
+
+      <div className="card-actions dialog-section">
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => void act("refresh")}
+          disabled={busy}
+        >
+          {busy ? t("wizard.authChecking") : t("wizard.authCheck")}
+        </button>
+        {auth?.cli_available && !signedIn && (
+          <>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void act("start")}
+              disabled={busy}
+            >
+              {t("wizard.signIn")}
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void act("complete")}
+              disabled={busy}
+            >
+              {t("wizard.confirmed")}
+            </button>
+          </>
+        )}
+        {signedIn && (
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void act("revoke")}
+            disabled={busy}
+          >
+            {t("wizard.signOut")}
+          </button>
+        )}
+      </div>
+
+      {auth?.last_error && <p className="wizard-note tone-bad">{auth.last_error}</p>}
       {failure && <p className="wizard-note tone-bad">{failure}</p>}
     </>
   );
