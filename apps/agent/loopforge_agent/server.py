@@ -153,16 +153,25 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             )
         return value
 
+    @staticmethod
+    def _status_for(exc: LoopforgeAgentError) -> HTTPStatus:
+        """Map an agent failure to a status the caller can act on.
+
+        A missing session or run is not a malformed request: answering 400
+        sends whoever is debugging it to look at their own payload, when the
+        record simply is not there.
+        """
+        if exc.code == "AGENT_NOT_READY":
+            return HTTPStatus.CONFLICT
+        if exc.code.endswith("_NOT_FOUND"):
+            return HTTPStatus.NOT_FOUND
+        return HTTPStatus.BAD_REQUEST
+
     def _execute(self, operation: Any) -> None:
         try:
             self._json(HTTPStatus.OK, operation())
         except LoopforgeAgentError as exc:
-            status = (
-                HTTPStatus.CONFLICT
-                if exc.code == "AGENT_NOT_READY"
-                else HTTPStatus.BAD_REQUEST
-            )
-            self._json(status, self._error(exc.code, str(exc)))
+            self._json(self._status_for(exc), self._error(exc.code, str(exc)))
         except LoopforgeError as exc:
             self._json(
                 HTTPStatus.BAD_REQUEST,
@@ -187,12 +196,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         try:
             events = operation()
         except LoopforgeAgentError as exc:
-            status = (
-                HTTPStatus.CONFLICT
-                if exc.code == "AGENT_NOT_READY"
-                else HTTPStatus.BAD_REQUEST
-            )
-            self._json(status, self._error(exc.code, str(exc)))
+            self._json(self._status_for(exc), self._error(exc.code, str(exc)))
             return
         except LoopforgeError as exc:
             self._json(

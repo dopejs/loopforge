@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from loopforge_agent.application import LoopforgeAgentError
 from loopforge_agent.server import AgentHTTPServer
 
 
@@ -32,6 +33,15 @@ class FakeAgent:
             "reply": query,
             "thread_id": thread_id,
         }
+
+    def session(self, session_id: str) -> dict[str, Any]:
+        raise LoopforgeAgentError("Session not found.", "SESSION_NOT_FOUND")
+
+    def run(self, run_id: str) -> dict[str, Any]:
+        raise LoopforgeAgentError("Run not found.", "RUN_NOT_FOUND")
+
+    def runs(self, operation: str | None = None) -> dict[str, Any]:
+        raise LoopforgeAgentError("Unsupported.", "RUN_OPERATION_INVALID")
 
 
 class AgentServerTests(unittest.TestCase):
@@ -78,6 +88,27 @@ class AgentServerTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as raised:
             urllib.request.urlopen(f"{self.base_url}/v1/status", timeout=2)
         self.assertEqual(raised.exception.code, 401)
+
+    def test_a_missing_record_is_reported_as_not_found(self) -> None:
+        """400 would send whoever is debugging this to inspect their own
+        request, when the record simply does not exist."""
+        for path in ("/v1/sessions/ses_missing", "/v1/runs/run_missing"):
+            with self.subTest(path=path):
+                with self.assertRaises(urllib.error.HTTPError) as raised:
+                    self.request(path)
+                self.assertEqual(raised.exception.code, 404)
+                self.assertTrue(
+                    json.loads(raised.exception.read())["error"]["code"].endswith(
+                        "_NOT_FOUND"
+                    )
+                )
+
+    def test_a_rejected_argument_is_still_a_bad_request(self) -> None:
+        """The 404 mapping keys on the code suffix, so an ordinary rejection
+        must not be swept into it."""
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            self.request("/v1/runs?operation=test")
+        self.assertEqual(raised.exception.code, 400)
 
     def test_query_uses_agent_contract(self) -> None:
         status, payload = self.request(
