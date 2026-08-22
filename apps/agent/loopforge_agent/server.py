@@ -61,6 +61,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
+        if self.path == "/v1/decision":
+            self._execute(self.server.agent.decision)
+            return
         if self.path == "/v1/playtest":
             self._execute(self.server.agent.playtest)
             return
@@ -135,6 +138,17 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body["approver_id"]) if body.get("approver_id") else None,
                     str(body["approver_name"]) if body.get("approver_name") else None,
                     str(body["rationale"]) if body.get("rationale") else None,
+                )
+            )
+        elif self.path == "/v1/decision":
+            self._execute(
+                lambda: self.server.agent.decide(
+                    str(body.get("decision", "")),
+                    body.get("evidence_ids"),
+                    str(body["approver_id"]) if body.get("approver_id") else None,
+                    str(body["approver_name"]) if body.get("approver_name") else None,
+                    str(body["rationale"]) if body.get("rationale") else None,
+                    body.get("revised_fields"),
                 )
             )
         elif self.path == "/v1/playtest/protocol/draft":

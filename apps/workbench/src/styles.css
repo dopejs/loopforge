@@ -2213,3 +2213,26 @@ button.chip.selected {
 }
 .consent-field { margin: 0 0 14px; padding: 0; border: 0; }
 .consent-field legend { padding: 0; }
+
+/* Decision outcomes. One control, one shape, one weight: promoting `keep`
+   would bias the judgement the product exists to make honestly. */
+.decision-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.decision-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: start;
+}
+.decision-choice:hover { border-color: var(--dim); }
+.decision-choice.selected { border-color: var(--accent); }
+.decision-choice strong { font-size: var(--font-sm); }
+.decision-choice small { color: var(--faint); font-size: var(--font-xs); line-height: 1.5; }
+.evidence-choice { cursor: pointer; }
+.evidence-choice input { margin-inline-end: 4px; }

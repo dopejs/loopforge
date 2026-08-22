@@ -6,6 +6,7 @@ import { errorMessage } from "../../daemon";
 import { HypothesisSection } from "../HypothesisEditor";
 import { EvidencePanel } from "../EvidencePanel";
 import { PlaytestPanel } from "../PlaytestPanel";
+import { DecisionPanel } from "../DecisionPanel";
 import { type Claim, claimTone, initializeProject, useProjectStatus } from "../../project";
 import type { MessageKey } from "../../i18n/locales/en";
 
@@ -138,6 +139,9 @@ export function TasksWorkspace({ projectRoot }: { projectRoot: string }): React.
 
       {/* Importing a report changes HUMAN_PLAYTESTED above. */}
       <PlaytestPanel projectRoot={projectRoot} onImported={reload} />
+
+      {/* The terminal act: it changes both the stage and the fun claim. */}
+      <DecisionPanel projectRoot={projectRoot} onDecided={reload} />
     </div>
   );
 }

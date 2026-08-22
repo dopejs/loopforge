@@ -503,6 +503,55 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
     );
 }
 
+/// What a prototype decision needs, and whether it can be made yet.
+#[tauri::command]
+fn agent_decision(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/decision",
+        None,
+        Duration::from_secs(15),
+    )
+}
+
+/// Records the prototype decision. This is what moves the stage out of
+/// PROTOTYPE_DECISION; the core refuses a plain advance from there.
+#[tauri::command]
+fn agent_decide(
+    project_path: String,
+    decision: String,
+    evidence_ids: Vec<String>,
+    approver_id: String,
+    approver_name: String,
+    rationale: String,
+    revised_fields: Option<Value>,
+) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    let mut body = json!({
+        "decision": decision,
+        "evidence_ids": evidence_ids,
+        "approver_id": approver_id,
+        "approver_name": approver_name,
+        "rationale": rationale,
+    });
+    if let Some(fields) = revised_fields {
+        body["revised_fields"] = fields;
+    }
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/decision",
+        Some(body),
+        Duration::from_secs(30),
+    )
+}
+
 /// Whether the stage allows playtest work, and whether a protocol exists.
 #[tauri::command]
 fn agent_playtest(project_path: String) -> Result<Value, String> {
@@ -854,6 +903,8 @@ pub fn run() {
             agent_run,
             agent_run_engine,
             agent_project_init,
+            agent_decision,
+            agent_decide,
             agent_playtest,
             agent_playtest_draft,
             agent_playtest_protocol,

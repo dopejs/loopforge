@@ -32,6 +32,13 @@ HYPOTHESIS_SCHEMA = "loopforge-hypothesis-v1"
 GATE_SCHEMA = "loopforge-gate-v1"
 EVIDENCE_SCHEMA = "loopforge-evidence-v1"
 PLAYTEST_SCHEMA = "loopforge-playtest-v1"
+DECISION_SCHEMA = "loopforge-decision-v1"
+#: The three outcomes, in the core's own order. Presented as equals: making
+#: `keep` prominent would bias the decision this product exists to make
+#: honestly.
+DECISIONS = ("keep", "kill", "refactor")
+MAX_RATIONALE_CHARS = 8_000
+MAX_CITED_EVIDENCE = 64
 #: The core's own vocabulary. Consent is never inferred, so both values are an
 #: explicit human answer -- "not_required" is a claim someone makes, not a
 #: default for the unanswered case.
@@ -483,6 +490,143 @@ class LoopforgeAgent:
         finally:
             Path(handle.name).unlink(missing_ok=True)
         return self.hypothesis()
+
+    def decision(self) -> dict[str, Any]:
+        """What a decision needs here, and whether it can be made yet.
+
+        Returned as state rather than discovered by failing: a decision is the
+        product's terminal act and the requirements around it -- the stage, a
+        cited playtest for `keep`, a revised hypothesis for `refactor` -- are
+        worth showing before the user commits to an outcome.
+        """
+        try:
+            status = self.project.status()
+        except LoopforgeError:
+            return {
+                "schema_version": DECISION_SCHEMA,
+                "stage": "",
+                "allowed": False,
+                "decisions": list(DECISIONS),
+                "playtest_evidence_ids": [],
+                "recorded": None,
+            }
+        stage = str(status.get("stage") or "")
+        playtest_ids: list[str] = []
+        recorded = None
+        if status.get("initialized"):
+            playtest_ids = [
+                item["id"] for item in self.evidence()["evidence"] if item["type"] == "playtest"
+            ]
+            state, _ = self.project.store.current_state()
+            record = self.project._latest_decision(
+                state["active_experiment"]["experiment_id"],
+                state["active_experiment"]["hypothesis_revision"],
+            )
+            if record:
+                recorded = {
+                    "decision": str(record.get("decision") or ""),
+                    "created_at": str(record.get("created_at") or ""),
+                }
+        return {
+            "schema_version": DECISION_SCHEMA,
+            "stage": stage,
+            "allowed": stage == "PROTOTYPE_DECISION",
+            "decisions": list(DECISIONS),
+            # Surfaced so a surface can warn before `keep` is refused: the core
+            # requires the applicable playtest to be cited, not merely to exist.
+            "playtest_evidence_ids": playtest_ids,
+            "recorded": recorded,
+        }
+
+    def decide(
+        self,
+        decision: str,
+        evidence_ids: Any,
+        approver_id: str | None,
+        approver_name: str | None,
+        rationale: str | None,
+        revised_fields: Any = None,
+    ) -> dict[str, Any]:
+        """Record the prototype decision.
+
+        This is the only way out of PROTOTYPE_DECISION -- the core refuses a
+        plain advance from there -- so the outcome also moves the stage: keep
+        to a vertical slice, kill to the end, refactor back to prototyping with
+        a revised hypothesis.
+
+        Approver and rationale are mandatory in the core and not defaulted
+        here. A decision recorded without them would be a claim with no author.
+        """
+        if decision not in DECISIONS:
+            raise LoopforgeAgentError(
+                f"Unsupported decision: {decision}", "DECISION_INVALID"
+            )
+        if not isinstance(evidence_ids, list) or not evidence_ids:
+            raise LoopforgeAgentError(
+                "A decision must cite at least one piece of evidence.",
+                "DECISION_EVIDENCE_MISSING",
+            )
+        cited = [str(item).strip() for item in evidence_ids[:MAX_CITED_EVIDENCE]]
+        cited = [item for item in cited if item]
+        if not cited:
+            raise LoopforgeAgentError(
+                "A decision must cite at least one piece of evidence.",
+                "DECISION_EVIDENCE_MISSING",
+            )
+        reasoning = str(rationale or "").strip()
+        if not reasoning:
+            raise LoopforgeAgentError(
+                "A rationale is required.", "DECISION_RATIONALE_MISSING"
+            )
+        if len(reasoning) > MAX_RATIONALE_CHARS:
+            raise LoopforgeAgentError(
+                "The rationale is too long.", "DECISION_RATIONALE_INVALID"
+            )
+        if not (approver_id or "").strip() or not (approver_name or "").strip():
+            raise LoopforgeAgentError(
+                "An approver is required. Set an approver name in Settings.",
+                "DECISION_APPROVER_MISSING",
+            )
+
+        revised_path: Path | None = None
+        handle = None
+        if decision == "refactor":
+            # The core requires a complete revised hypothesis, since refactor
+            # returns to prototyping with something new to test.
+            cleaned = self._clean_hypothesis_fields(revised_fields or {})
+            missing = [key for key in HYPOTHESIS_FIELDS if not cleaned[key]]
+            if missing:
+                raise LoopforgeAgentError(
+                    f"A refactor needs a complete revised hypothesis; missing: "
+                    f"{', '.join(missing)}",
+                    "HYPOTHESIS_INCOMPLETE",
+                )
+            handle = tempfile.NamedTemporaryFile(
+                "w", suffix=".md", encoding="utf-8", delete=False
+            )
+            handle.write(self._hypothesis_markdown(cleaned))
+            handle.close()
+            revised_path = Path(handle.name)
+        try:
+            result = self.project.decide(
+                decision,
+                cited,
+                expected_revision=None,
+                approver_id=approver_id,
+                approver_name=approver_name,
+                rationale=reasoning,
+                revised_hypothesis=revised_path,
+            )
+        finally:
+            if revised_path is not None:
+                revised_path.unlink(missing_ok=True)
+        record = result.get("decision") or {}
+        return {
+            "schema_version": DECISION_SCHEMA,
+            "decision": str(record.get("decision") or ""),
+            "stage": str(result.get("state", {}).get("stage") or ""),
+            "committed_revision": result.get("committed_revision"),
+        }
 
     def playtest(self) -> dict[str, Any]:
         """Whether a protocol exists and whether the stage allows this work.
