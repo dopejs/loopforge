@@ -4,6 +4,7 @@ import { Card } from "../primitives";
 import { isDesktopRuntime } from "../../agent";
 import { errorMessage } from "../../daemon";
 import { HypothesisSection } from "../HypothesisEditor";
+import { EvidencePanel } from "../EvidencePanel";
 import { type Claim, claimTone, initializeProject, useProjectStatus } from "../../project";
 import type { MessageKey } from "../../i18n/locales/en";
 
@@ -129,6 +130,10 @@ export function TasksWorkspace({ projectRoot }: { projectRoot: string }): React.
         claim, not that the game is good.
       */}
       <p className="settings-note">{t("project.claimsNote")}</p>
+
+      {/* Registering a capture changes VISUALLY_REVIEWED above, so the claims
+          are reloaded rather than left stale. */}
+      <EvidencePanel projectRoot={projectRoot} onRegistered={reload} />
     </div>
   );
 }

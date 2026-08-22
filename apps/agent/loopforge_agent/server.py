@@ -61,6 +61,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
+        if self.path == "/v1/evidence":
+            self._execute(self.server.agent.evidence)
+            return
         if self.path == "/v1/hypothesis":
             self._execute(self.server.agent.hypothesis)
             return
@@ -130,6 +133,10 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body["approver_name"]) if body.get("approver_name") else None,
                     str(body["rationale"]) if body.get("rationale") else None,
                 )
+            )
+        elif self.path == "/v1/capture":
+            self._execute(
+                lambda: self.server.agent.register_capture(str(body.get("path", "")))
             )
         elif self.path == "/v1/advance":
             self._execute(

@@ -29,6 +29,9 @@ PROVIDER_SCHEMA = "loopforge-provider-v1"
 PROJECT_STATUS_SCHEMA = "loopforge-project-status-v1"
 HYPOTHESIS_SCHEMA = "loopforge-hypothesis-v1"
 GATE_SCHEMA = "loopforge-gate-v1"
+EVIDENCE_SCHEMA = "loopforge-evidence-v1"
+#: Bounds the listing. Evidence accrues slowly; this only caps a runaway log.
+MAX_EVIDENCE = 500
 #: Reasons the core accepts for an early decision transition.
 TRANSITION_REASONS = frozenset({"technical", "scope", "abandon"})
 #: Bounds one field. Discovery answers are prose, not documents; a runaway
@@ -464,6 +467,68 @@ class LoopforgeAgent:
         finally:
             Path(handle.name).unlink(missing_ok=True)
         return self.hypothesis()
+
+    def register_capture(self, path: str) -> dict[str, Any]:
+        """Register a screenshot the user produced.
+
+        Nothing is captured here. The core records the file's path and
+        checksum -- it does not drive the engine and does not copy the file --
+        so this is an import, and the surface has to say so. A file outside the
+        project is recorded as an absolute path, which means moving it later
+        breaks the reference even though the checksum survives.
+
+        The resulting evidence is `manually_imported` / `observation`, weaker
+        than the `tool_generated` evidence a run produces. That difference is
+        preserved rather than smoothed over: a later reader has to be able to
+        tell a screenshot someone chose from output a tool emitted.
+        """
+        candidate = str(path or "").strip()
+        if not candidate:
+            raise LoopforgeAgentError("A capture path is required.", "CAPTURE_PATH_INVALID")
+        result = self.project.capture_screenshot(
+            Path(candidate).expanduser(), expected_revision=None
+        )
+        return {
+            "schema_version": EVIDENCE_SCHEMA,
+            "evidence": self._evidence_summary(result.get("evidence") or {}),
+        }
+
+    @staticmethod
+    def _evidence_summary(record: dict[str, Any]) -> dict[str, Any]:
+        artifact = record.get("artifact") or {}
+        return {
+            "id": str(record.get("evidence_id") or ""),
+            "type": str(record.get("type") or ""),
+            "result": str(record.get("result") or ""),
+            # Kept because it is what distinguishes a tool's output from a
+            # person's assertion, and a decision cites both.
+            "trust_level": str(record.get("trust_level") or ""),
+            "producer": str(record.get("producer") or ""),
+            "created_at": str(record.get("created_at") or ""),
+            "path": str(artifact.get("path") or ""),
+            # `absolute` means the file lives outside the project and is only
+            # referenced; the surface warns about that.
+            "path_kind": str(artifact.get("kind") or ""),
+        }
+
+    def evidence(self) -> dict[str, Any]:
+        """Registered evidence, newest first.
+
+        Read-only. A decision has to cite evidence the user can actually see,
+        which is what this serves.
+        """
+        try:
+            records = self.project.list_evidence()["evidence"]
+        except LoopforgeError as exc:
+            if exc.diagnostic_code == "PROJECT_NOT_INITIALIZED":
+                return {"schema_version": EVIDENCE_SCHEMA, "evidence": []}
+            raise
+        summaries = [self._evidence_summary(record) for record in records]
+        summaries.reverse()
+        return {
+            "schema_version": EVIDENCE_SCHEMA,
+            "evidence": summaries[:MAX_EVIDENCE],
+        }
 
     def gate(
         self,

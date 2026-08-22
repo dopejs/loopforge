@@ -503,6 +503,63 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
     );
 }
 
+/// Picks a screenshot to register as visual evidence.
+///
+/// A native dialog rather than a typed path: the Workbench should not invent a
+/// filesystem entry point, and what the user picked is what gets checksummed.
+#[tauri::command]
+async fn select_capture_file(app: AppHandle) -> Result<Option<String>, String> {
+    let Some(selection) = app
+        .dialog()
+        .file()
+        .set_title("Register a screenshot")
+        .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let selected = selection
+        .into_path()
+        .map_err(|error| format!("selected capture is not a local file: {error}"))?;
+    if !selected.is_file() {
+        return Err("selected capture is not a file".to_string());
+    }
+    selected
+        .to_str()
+        .map(|path| Some(path.to_string()))
+        .ok_or_else(|| "selected capture path is not valid UTF-8".to_string())
+}
+
+/// Registers a screenshot as visual evidence. Captures nothing itself.
+#[tauri::command]
+fn agent_capture(project_path: String, path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/capture",
+        Some(json!({ "path": path })),
+        Duration::from_secs(30),
+    )
+}
+
+/// Registered evidence, newest first.
+#[tauri::command]
+fn agent_evidence(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/evidence",
+        None,
+        Duration::from_secs(15),
+    )
+}
+
 /// Whether a stage transition is allowed, and what is blocking it.
 #[tauri::command]
 fn agent_gate(project_path: String, stage: String) -> Result<Value, String> {
@@ -736,6 +793,9 @@ pub fn run() {
             agent_run,
             agent_run_engine,
             agent_project_init,
+            select_capture_file,
+            agent_capture,
+            agent_evidence,
             agent_gate,
             agent_advance,
             agent_hypothesis,
