@@ -177,6 +177,32 @@ class PlaytestReportValidationTests(unittest.TestCase):
             self._clean(report(mood="cheerful"))
         self.assertIn("mood", str(caught.exception))
 
+    def test_oversized_text_is_refused_rather_than_truncated(self) -> None:
+        """These land in an append-only log. Silently dropping a tail would
+        alter the record without saying so."""
+        long = "x" * 4_001
+        for field in (
+            "participant_context",
+            "comprehension_time",
+            "replay_behavior",
+            "interpretation",
+        ):
+            with self.subTest(field=field), self.assertRaises(LoopforgeAgentError) as caught:
+                self._clean(report(**{field: long}))
+            self.assertEqual(caught.exception.code, "PLAYTEST_REPORT_INVALID")
+
+    def test_an_oversized_list_entry_is_refused(self) -> None:
+        with self.assertRaises(LoopforgeAgentError) as caught:
+            self._clean(report(raw_observations=["fine", "y" * 4_001]))
+        self.assertEqual(caught.exception.code, "PLAYTEST_REPORT_INVALID")
+
+    def test_too_many_entries_are_refused_rather_than_dropped(self) -> None:
+        """Previously the list was sliced, so entries past the cap vanished
+        while the import reported success."""
+        with self.assertRaises(LoopforgeAgentError) as caught:
+            self._clean(report(raw_observations=[f"observation {n}" for n in range(201)]))
+        self.assertEqual(caught.exception.code, "PLAYTEST_REPORT_INVALID")
+
     def test_interpretation_stays_out_of_the_observations(self) -> None:
         """Separation is structural, not stylistic: the two travel as distinct
         fields so a later reader can tell what was seen from what was

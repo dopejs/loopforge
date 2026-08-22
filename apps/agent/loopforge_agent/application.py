@@ -56,8 +56,10 @@ PLAYTEST_LIST_FIELDS = (
     "abandonment_points",
     "strategies",
 )
+#: The protocol is a whole document; a report's fields are single answers.
 MAX_PLAYTEST_CHARS = 64 * 1024
 MAX_PLAYTEST_ITEMS = 200
+MAX_PLAYTEST_FIELD_CHARS = 4_000
 #: Bounds the listing. Evidence accrues slowly; this only caps a runaway log.
 MAX_EVIDENCE = 500
 #: Reasons the core accepts for an early decision transition.
@@ -931,15 +933,36 @@ class LoopforgeAgent:
                 raise LoopforgeAgentError(
                     f"Playtest {field} must be a list.", "PLAYTEST_REPORT_INVALID"
                 )
-            items = [str(item).strip() for item in value[:MAX_PLAYTEST_ITEMS]]
+            if len(value) > MAX_PLAYTEST_ITEMS:
+                raise LoopforgeAgentError(
+                    f"Playtest {field} has too many entries.", "PLAYTEST_REPORT_INVALID"
+                )
+            items = [str(item).strip() for item in value]
+            for item in items:
+                if len(item) > MAX_PLAYTEST_FIELD_CHARS:
+                    raise LoopforgeAgentError(
+                        f"An entry in {field} is too long.", "PLAYTEST_REPORT_INVALID"
+                    )
             cleaned[field] = [item for item in items if item]
         if not cleaned["raw_observations"]:
             raise LoopforgeAgentError(
                 "At least one raw observation is required.", "PLAYTEST_REPORT_INVALID"
             )
+        # Refused rather than truncated: silently dropping the tail of an
+        # observation would alter the record without saying so, and these go
+        # into an append-only log.
         for field in ("participant_context", "comprehension_time", "replay_behavior"):
-            cleaned[field] = str(report.get(field) or "").strip()
+            value = str(report.get(field) or "").strip()
+            if len(value) > MAX_PLAYTEST_FIELD_CHARS:
+                raise LoopforgeAgentError(
+                    f"Playtest {field} is too long.", "PLAYTEST_REPORT_INVALID"
+                )
+            cleaned[field] = value
         interpretation = str(report.get("interpretation") or "").strip()
+        if len(interpretation) > MAX_PLAYTEST_FIELD_CHARS:
+            raise LoopforgeAgentError(
+                "The interpretation is too long.", "PLAYTEST_REPORT_INVALID"
+            )
         if not interpretation:
             raise LoopforgeAgentError(
                 "An interpretation is required, and is recorded separately from "
