@@ -20,7 +20,9 @@ import {
   addProjectRoot,
   loadActiveProject,
   loadProjectRoots,
-  saveProjectSelection
+  rememberProject,
+  saveProjectSelection,
+  useRecentProjects
 } from "./projects";
 import { isApplePlatform, matchShortcut } from "./shortcuts";
 import { errorMessage } from "./daemon";
@@ -75,8 +77,30 @@ export function App(): React.JSX.Element {
   );
 
   useEffect(() => {
+    // The cache that makes the next launch's first render correct.
     saveProjectSelection(localStorage, [...projectRoots], projectRoot);
   }, [projectRoot, projectRoots]);
+
+  // The store is authoritative; the cached list above is what the window
+  // opened with. Merging rather than replacing keeps a project added in this
+  // session visible even if recording it has not landed yet.
+  const { projects: storedProjects, loaded: storeLoaded } = useRecentProjects();
+  useEffect(() => {
+    if (!storeLoaded || storedProjects.length === 0) return;
+    setProjectRoots((current) => {
+      const merged = [...storedProjects.map((item) => item.path), ...current];
+      const unique = [...new Set(merged.filter(Boolean))];
+      return unique.length === current.length && unique.every((v, i) => v === current[i])
+        ? current
+        : unique;
+    });
+  }, [storeLoaded, storedProjects]);
+
+  // Recorded when the active project changes, which is also when the mode a
+  // user left it in is worth keeping.
+  useEffect(() => {
+    if (projectRoot) rememberProject(projectRoot, mode);
+  }, [projectRoot]);
 
   useEffect(() => {
     saveAppearance(localStorage, appearance);

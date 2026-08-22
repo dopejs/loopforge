@@ -92,6 +92,26 @@ class MigrationTests(StoreFixture):
         self.assertEqual(caught.exception.code, "USER_STORE_TOO_NEW")
 
 
+class TimestampFormatTests(StoreFixture):
+    """The format is a contract between two writers.
+
+    The desktop shell writes this column too, in Rust, and both order it as
+    text. If the two formats disagree by a field width, sorting silently
+    breaks and the recent-project list comes back in the wrong order. The
+    matching assertion lives in `src-tauri/src/userstore.rs`.
+    """
+
+    def test_the_timestamp_is_fixed_width_utc_microseconds(self) -> None:
+        import re
+
+        self.store.remember_project("/a")
+        stamp = self.store.recent_projects()[0]["last_opened_at"]
+
+        self.assertRegex(stamp, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
+        # Fixed width is the property that makes text ordering correct.
+        self.assertEqual(len(stamp), 27)
+
+
 class ProviderTests(StoreFixture):
     def test_a_provider_round_trips(self) -> None:
         saved = self.store.save_provider(

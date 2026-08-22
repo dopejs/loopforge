@@ -1,3 +1,5 @@
+mod userstore;
+
 use std::fs::{self, OpenOptions};
 use std::io;
 use std::io::{BufRead, BufReader};
@@ -501,6 +503,32 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
         "agent://stream",
         json!({ "streamId": stream_id, "event": event, "data": data }),
     );
+}
+
+/// Recent projects, most recent first.
+///
+/// Read from the user store directly rather than through the Agent: this list
+/// is needed on the first render to decide which project to reopen, and an
+/// Agent is started per project, so asking one for the list of projects is
+/// circular.
+#[tauri::command]
+fn recent_projects() -> Vec<userstore::RecentProject> {
+    userstore::recent_projects(50)
+}
+
+/// Records that a project was opened.
+#[tauri::command]
+fn remember_project(project_path: String, mode: String) -> bool {
+    let Ok(root) = project_root(&project_path) else {
+        return false;
+    };
+    userstore::remember_project(&root.to_string_lossy(), &mode)
+}
+
+/// Removes a project from the recent list. The project itself is untouched.
+#[tauri::command]
+fn forget_project(project_path: String) -> bool {
+    userstore::forget_project(&project_path)
 }
 
 /// Who this machine records as the approver.
@@ -1049,6 +1077,9 @@ pub fn run() {
             agent_run,
             agent_run_engine,
             agent_project_init,
+            recent_projects,
+            remember_project,
+            forget_project,
             agent_operator_settings,
             agent_save_operator_settings,
             agent_provider_settings,
