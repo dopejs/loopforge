@@ -56,8 +56,27 @@ export function requirementTone(status: string): "ok" | "bad" | "faint" {
   return "faint";
 }
 
+/**
+ * Reasons the core accepts for cutting an experiment short.
+ *
+ * Only the PROTOTYPING → PROTOTYPE_DECISION transition takes one, and it is
+ * recorded in the event log: a later reader interprets the project's end
+ * differently depending on which of these it was.
+ */
+export const TRANSITION_REASONS = ["technical", "scope", "abandon"] as const;
+
+export type TransitionReason = (typeof TRANSITION_REASONS)[number];
+
+/** Arguments some gates test directly rather than reading from the record. */
+export type GateArgs = {
+  reason?: string;
+  approver_id?: string;
+  approver_name?: string;
+  rationale?: string;
+};
+
 /** Reads the gate for one target stage. */
-export function useGate(projectRoot: string, stage: string | null) {
+export function useGate(projectRoot: string, stage: string | null, args?: GateArgs) {
   const [gate, setGate] = useState<Gate | null>(null);
   const [reason, setReason] = useState<string>();
   const [loading, setLoading] = useState(false);
@@ -77,7 +96,14 @@ export function useGate(projectRoot: string, stage: string | null) {
     let cancelled = false;
     setLoading(true);
     setReason(undefined);
-    void invoke<Gate>("agent_gate", { projectPath: projectRoot, stage })
+    void invoke<Gate>("agent_gate", {
+      projectPath: projectRoot,
+      stage,
+      reason: args?.reason ?? null,
+      approverId: args?.approver_id ?? null,
+      approverName: args?.approver_name ?? null,
+      rationale: args?.rationale ?? null
+    })
       .then((result) => {
         if (!cancelled) setGate(result);
       })
@@ -90,7 +116,8 @@ export function useGate(projectRoot: string, stage: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [projectRoot, stage, nonce]);
+    // The arguments are part of the question, so a change to them re-asks it.
+  }, [projectRoot, stage, nonce, args?.reason, args?.approver_id, args?.approver_name, args?.rationale]);
 
   return { gate, reason, loading, reload };
 }
@@ -105,11 +132,11 @@ export function useGate(projectRoot: string, stage: string | null) {
 export function advanceStage(
   projectRoot: string,
   stage: string,
-  approval?: { approver_id: string; approver_name: string; rationale: string }
+  args?: GateArgs
 ): Promise<Advance> {
   return invoke<Advance>("agent_advance", {
     projectPath: projectRoot,
     stage,
-    ...(approval ?? {})
+    ...(args ?? {})
   });
 }

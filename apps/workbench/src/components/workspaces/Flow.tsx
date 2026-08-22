@@ -7,6 +7,8 @@ import { useProjectStatus } from "../../project";
 import { isConfigured, loadOperator } from "../../operator";
 import {
   STAGES,
+  TRANSITION_REASONS,
+  type GateArgs,
   type Requirement,
   advanceStage,
   requirementTone,
@@ -33,10 +35,31 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
   const { status, reload: reloadStatus } = useProjectStatus(projectRoot, true);
   const current = status?.stage ?? "";
   const [target, setTarget] = useState<string | null>(null);
-  const { gate, reason, loading, reload } = useGate(projectRoot, target);
+  const [transitionReason, setTransitionReason] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState(false);
   const [failure, setFailure] = useState<string>();
   const [operator] = useState(() => loadOperator());
+
+  /**
+   * Cutting an experiment short is the one transition whose gate tests what it
+   * is given rather than what is recorded, so the reason and approver travel
+   * with the check as well as with the advance. Without that the checklist
+   * would report requirements as missing that the advance then satisfies.
+   */
+  const early = current === "PROTOTYPING" && target === "PROTOTYPE_DECISION";
+  const args: GateArgs | undefined = React.useMemo(() => {
+    if (!early) return undefined;
+    const approval = isConfigured(operator)
+      ? {
+          approver_id: operator.id,
+          approver_name: operator.name,
+          rationale: t("stage.advanceRationale", { stage: target ?? "" })
+        }
+      : {};
+    return { ...(transitionReason ? { reason: transitionReason } : {}), ...approval };
+  }, [early, transitionReason, operator, target, t]);
+
+  const { gate, reason, loading, reload } = useGate(projectRoot, target, args);
 
   // Default to the first legal successor once the project's stage is known.
   React.useEffect(() => {
@@ -53,15 +76,17 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
       await advanceStage(
         projectRoot,
         target,
-        isConfigured(operator)
-          ? {
-              approver_id: operator.id,
-              approver_name: operator.name,
-              rationale: t("stage.advanceRationale", { stage: target })
-            }
-          : undefined
+        args ??
+          (isConfigured(operator)
+            ? {
+                approver_id: operator.id,
+                approver_name: operator.name,
+                rationale: t("stage.advanceRationale", { stage: target })
+              }
+            : undefined)
       );
       setTarget(null);
+      setTransitionReason(null);
       reloadStatus();
       reload();
     } catch (error: unknown) {
@@ -95,7 +120,11 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
               style={{ gridColumn: stage.column, gridRow: stage.row }}
               data-arrow={stage.arrow || undefined}
               disabled={!selectable && !reached}
-              onClick={() => selectable && setTarget(stage.id)}
+              onClick={() => {
+                if (!selectable) return;
+                setTarget(stage.id);
+                setTransitionReason(null);
+              }}
             >
               <div className="node-head">
                 <span className={`note-label${reached ? " accent" : ""}`}>
@@ -124,6 +153,33 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
           </button>
         )}
       </div>
+
+      {/*
+        Shown only where it applies. The reason is written into the event log,
+        and a later reader reads the project's ending differently depending on
+        which one it was, so it is an explicit choice with no default.
+      */}
+      {early && (
+        <>
+          <fieldset className="hypothesis-field consent-field">
+            <legend className="hypothesis-field-head">{t("stage.reason")}</legend>
+            <div className="consent-row">
+              {TRANSITION_REASONS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={transitionReason === value ? "chip selected" : "chip"}
+                  aria-pressed={transitionReason === value}
+                  onClick={() => setTransitionReason(value)}
+                >
+                  {t(`stage.reason.${value}` as MessageKey)}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <p className="settings-note">{t("stage.reasonNote")}</p>
+        </>
+      )}
 
       <Card className="suite-list">
         {loading && !gate ? (

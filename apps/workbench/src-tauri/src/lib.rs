@@ -716,21 +716,52 @@ fn agent_evidence(project_path: String) -> Result<Value, String> {
 }
 
 /// Whether a stage transition is allowed, and what is blocking it.
+///
+/// Sent as a POST once arguments are involved. The early decision gate tests
+/// the reason and approver it is given rather than anything recorded, so
+/// checking without them would report requirements the advance would satisfy.
 #[tauri::command]
-fn agent_gate(project_path: String, stage: String) -> Result<Value, String> {
+fn agent_gate(
+    project_path: String,
+    stage: String,
+    reason: Option<String>,
+    approver_id: Option<String>,
+    approver_name: Option<String>,
+    rationale: Option<String>,
+) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
-    // The stage is a path segment, so it is constrained here rather than
-    // trusted: only the core's own uppercase stage names can be formed.
-    if stage.is_empty() || !stage.bytes().all(|b| b.is_ascii_uppercase() || b == b'_') {
-        return Err("Stage must be an uppercase stage name".to_string());
+    let parameterless =
+        reason.is_none() && approver_id.is_none() && approver_name.is_none() && rationale.is_none();
+    if parameterless {
+        // The stage is a path segment here, so it is constrained rather than
+        // trusted: only the core's own uppercase stage names can be formed.
+        if stage.is_empty() || !stage.bytes().all(|b| b.is_ascii_uppercase() || b == b'_') {
+            return Err("Stage must be an uppercase stage name".to_string());
+        }
+        return agent_request(
+            &metadata,
+            "GET",
+            &format!("/v1/gate/{stage}"),
+            None,
+            Duration::from_secs(15),
+        );
+    }
+    let mut body = json!({ "stage": stage });
+    if let Some(value) = reason {
+        body["reason"] = json!(value);
+    }
+    if let (Some(id), Some(name), Some(why)) = (approver_id, approver_name, rationale) {
+        body["approver_id"] = json!(id);
+        body["approver_name"] = json!(name);
+        body["rationale"] = json!(why);
     }
     agent_request(
         &metadata,
-        "GET",
-        &format!("/v1/gate/{stage}"),
-        None,
+        "POST",
+        "/v1/gate",
+        Some(body),
         Duration::from_secs(15),
     )
 }

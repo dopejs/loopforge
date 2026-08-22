@@ -177,6 +177,20 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             self._execute(
                 lambda: self.server.agent.register_capture(str(body.get("path", "")))
             )
+        elif self.path == "/v1/gate":
+            # A POST for a read, because this check takes arguments. The early
+            # decision gate tests the reason and approver it is *given*, not
+            # anything recorded, so a parameterless GET would report them
+            # missing while the advance that supplies them succeeds.
+            self._execute(
+                lambda: self.server.agent.gate(
+                    str(body.get("stage", "")),
+                    str(body["reason"]) if body.get("reason") else None,
+                    str(body["approver_id"]) if body.get("approver_id") else None,
+                    str(body["approver_name"]) if body.get("approver_name") else None,
+                    str(body["rationale"]) if body.get("rationale") else None,
+                )
+            )
         elif self.path == "/v1/advance":
             self._execute(
                 lambda: self.server.agent.advance(

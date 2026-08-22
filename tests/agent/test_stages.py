@@ -101,6 +101,42 @@ class StageTests(unittest.TestCase):
         self.assertEqual(result["result"], "blocked")
         self.assertIn("TRANSITION_ALLOWED", self._statuses("VERTICAL_SLICE"))
 
+    def _reach_prototyping_with_scope_evidence(self) -> None:
+        self._record_hypothesis()
+        self.agent.advance("PROTOTYPING", **APPROVAL)
+        note = self.root / "scope.md"
+        note.write_text("Needs netcode the project cannot fund.")
+        self.agent.project.add_evidence(
+            "technical", note, "human_attested", "observation", None, "operator-note"
+        )
+
+    def test_the_early_gate_tests_its_arguments_not_the_record(self) -> None:
+        """The reason and approver are checked as supplied, which is why the
+        gate has to be answerable with them. Checking without them reports
+        requirements that the advance would immediately satisfy."""
+        self._reach_prototyping_with_scope_evidence()
+
+        bare = {r["code"]: r["status"] for r in self.agent.gate("PROTOTYPE_DECISION")["requirements"]}
+        self.assertEqual(bare["EARLY_DECISION_REASON"], "missing")
+        self.assertEqual(bare["HUMAN_APPROVAL"], "missing")
+        self.assertEqual(bare["EARLY_DECISION_EVIDENCE"], "satisfied")
+
+        answered = self.agent.gate("PROTOTYPE_DECISION", reason="scope", **APPROVAL)
+        self.assertEqual(answered["result"], "pass")
+        self.assertTrue(all(r["status"] == "satisfied" for r in answered["requirements"]))
+
+    def test_an_early_decision_advances_with_its_reason(self) -> None:
+        self._reach_prototyping_with_scope_evidence()
+        result = self.agent.advance("PROTOTYPE_DECISION", reason="scope", **APPROVAL)
+        self.assertEqual(result["to_stage"], "PROTOTYPE_DECISION")
+        self.assertEqual(self.agent.project_status()["stage"], "PROTOTYPE_DECISION")
+
+    def test_an_early_decision_without_a_reason_is_refused(self) -> None:
+        self._reach_prototyping_with_scope_evidence()
+        with self.assertRaises(Exception) as caught:
+            self.agent.advance("PROTOTYPE_DECISION", **APPROVAL)
+        self.assertIn("gate", getattr(caught.exception, "details", {}))
+
     def test_an_unsupported_reason_is_refused_before_the_core(self) -> None:
         with self.assertRaises(LoopforgeAgentError) as caught:
             self.agent.advance("PROTOTYPE_DECISION", reason="because")
