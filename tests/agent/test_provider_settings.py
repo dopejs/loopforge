@@ -91,6 +91,71 @@ class ProviderSettingsTests(unittest.TestCase):
         self.assertIsNone(self.agent.user_store.provider("openai_compatible"))
 
 
+class ProviderIdentityTests(unittest.TestCase):
+    """The fields a picked source needs beyond an endpoint."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.agent = object.__new__(LoopforgeAgent)
+        self.agent._user_store = UserStore(Path(self.temporary.name) / "home")
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def test_a_picked_source_keeps_its_name_and_protocol(self) -> None:
+        """So the wizard can show what was chosen rather than making the user
+        recognise a bare URL."""
+        self.agent.save_provider_settings(
+            "https://api.deepseek.com/v1",
+            "sk-1",
+            "deepseek-chat",
+            display_name="DeepSeek",
+            protocol="openai_compatible",
+        )
+
+        result = self.agent.provider_settings()
+
+        self.assertEqual(result["display_name"], "DeepSeek")
+        self.assertEqual(result["protocol"], "openai_compatible")
+
+    def test_a_protocol_is_always_present(self) -> None:
+        """Every endpoint is spoken to somehow; a blank protocol would say
+        nothing about how."""
+        self.agent.save_provider_settings("https://x.test/v1", "k", "m")
+        self.assertEqual(self.agent.provider_settings()["protocol"], "openai_compatible")
+
+
+class RoleRoutingTests(unittest.TestCase):
+    """Routing lives in Kura; the Agent only forwards."""
+
+    def setUp(self) -> None:
+        self.agent = object.__new__(LoopforgeAgent)
+
+        class _Runtime:
+            def status(self) -> dict:
+                return {"healthy": False, "reason": "not started"}
+
+        self.agent.runtime = _Runtime()
+
+    def test_a_blank_role_is_refused_before_the_runtime(self) -> None:
+        for value in ("", "   "):
+            with self.subTest(value=value), self.assertRaises(LoopforgeAgentError) as caught:
+                self.agent.route_model_role(value, "openai_compatible")
+            self.assertEqual(caught.exception.code, "ROLE_INVALID")
+
+    def test_routing_without_a_runtime_says_so(self) -> None:
+        """Routing is a runtime capability, so an unstarted runtime is the
+        answer rather than a queued change that never lands."""
+        with self.assertRaises(LoopforgeAgentError) as caught:
+            self.agent.route_model_role("primary", "openai_compatible")
+        self.assertEqual(caught.exception.code, "AGENT_NOT_READY")
+
+    def test_clearing_without_a_runtime_says_so(self) -> None:
+        with self.assertRaises(LoopforgeAgentError) as caught:
+            self.agent.clear_model_role("primary")
+        self.assertEqual(caught.exception.code, "AGENT_NOT_READY")
+
+
 class OperatorSettingsTests(unittest.TestCase):
     """Who the Agent records as the approver.
 

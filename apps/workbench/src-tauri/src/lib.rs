@@ -587,6 +587,8 @@ fn agent_save_provider_settings(
     base_url: String,
     api_key: String,
     model: String,
+    display_name: String,
+    protocol: String,
 ) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
@@ -595,7 +597,48 @@ fn agent_save_provider_settings(
         &metadata,
         "POST",
         "/v1/settings/provider",
-        Some(json!({ "base_url": base_url, "api_key": api_key, "model": model })),
+        Some(json!({
+            "base_url": base_url,
+            "api_key": api_key,
+            "model": model,
+            "display_name": display_name,
+            "protocol": protocol,
+        })),
+        Duration::from_secs(30),
+    )
+}
+
+/// Points one modality at a provider. Routing lives in Kura.
+#[tauri::command]
+fn agent_route_role(
+    project_path: String,
+    role: String,
+    provider_id: String,
+    model: String,
+) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/settings/role",
+        Some(json!({ "role": role, "provider_id": provider_id, "model": model })),
+        Duration::from_secs(30),
+    )
+}
+
+/// Leaves a modality unrouted.
+#[tauri::command]
+fn agent_clear_role(project_path: String, role: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/settings/role/clear",
+        Some(json!({ "role": role })),
         Duration::from_secs(30),
     )
 }
@@ -1083,6 +1126,8 @@ pub fn run() {
             agent_operator_settings,
             agent_save_operator_settings,
             agent_provider_settings,
+            agent_route_role,
+            agent_clear_role,
             agent_save_provider_settings,
             agent_forget_provider_settings,
             agent_project_health,

@@ -390,5 +390,56 @@ class HypothesisDraftIntegrationTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "BRIEF_INVALID")
 
 
+@requires_kura
+class RoleRoutingIntegrationTests(unittest.TestCase):
+    """Routing forwarded to a live runtime, which is the only thing that can
+    accept or refuse it."""
+
+    daemon: KuraDaemon
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.daemon = KuraDaemon().start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.daemon.stop()
+
+    def _agent(self):
+        from loopforge_agent.application import LoopforgeAgent
+
+        daemon = self.daemon
+        agent = object.__new__(LoopforgeAgent)
+
+        class _Runtime:
+            def status(self) -> dict:
+                return {"healthy": True, "base_url": daemon.base_url, "token": daemon.token}
+
+        agent.runtime = _Runtime()
+        agent.sessions_store = SessionStore(Path(tempfile.mkdtemp(prefix="lf-role-")))
+        return agent
+
+    def test_a_role_is_routed_and_cleared(self) -> None:
+        agent = self._agent()
+
+        routed = agent.route_model_role("vision", "echo")
+        by_role = {item["role"]: item for item in routed["roles"]}
+        self.assertEqual(by_role["vision"]["provider_id"], "echo")
+
+        cleared = agent.clear_model_role("vision")
+        after = {item["role"]: item for item in cleared["roles"]}
+        self.assertFalse(after["vision"]["routed"])
+
+    def test_routing_to_an_unknown_provider_is_refused(self) -> None:
+        """The runtime refuses it, and its refusal names the provider -- more
+        useful than anything the Agent could restate."""
+        from loopforge_agent.application import LoopforgeAgentError
+
+        with self.assertRaises(LoopforgeAgentError) as caught:
+            self._agent().route_model_role("image", "not-a-provider")
+        self.assertEqual(caught.exception.code, "ROLE_ROUTING_FAILED")
+        self.assertIn("not-a-provider", str(caught.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

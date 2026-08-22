@@ -601,6 +601,10 @@ class LoopforgeAgent:
             "provider_id": CONFIGURABLE_PROVIDER,
             "base_url": str((record or {}).get("base_url") or ""),
             "model": str((record or {}).get("model") or ""),
+            # Which source the user picked, so the wizard can show it again
+            # rather than making them recognise a bare URL.
+            "display_name": str((record or {}).get("display_name") or ""),
+            "protocol": str((record or {}).get("protocol") or CONFIGURABLE_PROVIDER),
             # Whether a credential exists, never what it is.
             "has_api_key": bool((record or {}).get("api_key")),
             "configured": bool(
@@ -610,7 +614,12 @@ class LoopforgeAgent:
         }
 
     def save_provider_settings(
-        self, base_url: str, api_key: str, model: str
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        display_name: str = "",
+        protocol: str = "",
     ) -> dict[str, Any]:
         """Record the endpoint the user supplied.
 
@@ -633,7 +642,14 @@ class LoopforgeAgent:
                 "The base URL must be an HTTP or HTTPS address.",
                 "PROVIDER_SETTINGS_INVALID",
             )
-        self.user_store.save_provider(CONFIGURABLE_PROVIDER, url, str(api_key or ""), name)
+        self.user_store.save_provider(
+            CONFIGURABLE_PROVIDER,
+            url,
+            str(api_key or ""),
+            name,
+            display_name=str(display_name or "").strip(),
+            protocol=str(protocol or "").strip() or CONFIGURABLE_PROVIDER,
+        )
         result = self.provider_settings()
         # Stated rather than implied: nothing the user just typed is live yet.
         result["restart_required"] = True
@@ -644,6 +660,57 @@ class LoopforgeAgent:
         result = self.provider_settings()
         result["restart_required"] = True
         return result
+
+    def route_model_role(self, role: str, provider_id: str, model: str = "") -> dict[str, Any]:
+        """Point one modality at a provider.
+
+        Routing lives in Kura, not here: which model answers a vision request
+        is a runtime capability, and Loopforge owns no provider state. This
+        forwards, so the Workbench does not have to reach the runtime itself.
+        """
+        target = str(role or "").strip()
+        if not target:
+            raise LoopforgeAgentError("A role is required.", "ROLE_INVALID")
+        status = self.runtime.status()
+        if not status.get("healthy") or not status.get("base_url"):
+            raise LoopforgeAgentError(
+                "The Loopforge Agent runtime is not ready.", "AGENT_NOT_READY"
+            )
+        client = KuraClient(
+            str(status["base_url"]),
+            timeout=PROVIDER_TIMEOUT_SECONDS,
+            token=status.get("token"),
+        )
+        body: dict[str, Any] = {"providerId": str(provider_id or "").strip()}
+        if model:
+            body["model"] = str(model).strip()
+        try:
+            client.put(f"/v1/model-roles/{urllib.parse.quote(target, safe='')}", body)
+        except KuraAgentError as exc:
+            # The runtime refuses an unknown provider or role, and its refusal
+            # names which -- more useful than anything restated here.
+            raise LoopforgeAgentError(str(exc), "ROLE_ROUTING_FAILED") from exc
+        return self.providers()
+
+    def clear_model_role(self, role: str) -> dict[str, Any]:
+        target = str(role or "").strip()
+        if not target:
+            raise LoopforgeAgentError("A role is required.", "ROLE_INVALID")
+        status = self.runtime.status()
+        if not status.get("healthy") or not status.get("base_url"):
+            raise LoopforgeAgentError(
+                "The Loopforge Agent runtime is not ready.", "AGENT_NOT_READY"
+            )
+        client = KuraClient(
+            str(status["base_url"]),
+            timeout=PROVIDER_TIMEOUT_SECONDS,
+            token=status.get("token"),
+        )
+        try:
+            client.delete(f"/v1/model-roles/{urllib.parse.quote(target, safe='')}")
+        except KuraAgentError as exc:
+            raise LoopforgeAgentError(str(exc), "ROLE_ROUTING_FAILED") from exc
+        return self.providers()
 
     def project_health(self) -> dict[str, Any]:
         """State integrity and tool availability in one answer.

@@ -142,6 +142,67 @@ class ProviderTests(StoreFixture):
                 self.store.save_provider(value, "https://x.test", "k", "m")
             self.assertEqual(caught.exception.code, "PROVIDER_ID_INVALID")
 
+    def test_a_provider_carries_its_name_and_protocol(self) -> None:
+        """Added in schema 2. A source picked from a list needs a name to be
+        recognised by later, and the protocol says how it is spoken to."""
+        saved = self.store.save_provider(
+            "openai_compatible",
+            "https://api.deepseek.com/v1",
+            "sk-1",
+            "deepseek-chat",
+            display_name="DeepSeek",
+            protocol="openai_compatible",
+        )
+        self.assertEqual(saved["display_name"], "DeepSeek")
+        self.assertEqual(saved["protocol"], "openai_compatible")
+
+    def test_a_provider_saved_without_them_still_has_a_protocol(self) -> None:
+        """The column defaults rather than being nullable: every endpoint is
+        spoken to somehow, and a blank protocol would have no meaning."""
+        saved = self.store.save_provider("openai_compatible", "https://x.test/v1", "k", "m")
+        self.assertEqual(saved["protocol"], "openai_compatible")
+        self.assertEqual(saved["display_name"], "")
+
+    def test_an_existing_store_gains_the_new_columns(self) -> None:
+        """The migration path, not just the fresh-database one: a store
+        created before schema 2 must come forward without losing its rows."""
+        import sqlite3
+
+        # A schema-1 store with a provider already in it.
+        self.store.home.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.store.path) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE providers (
+                    provider_id TEXT PRIMARY KEY,
+                    base_url    TEXT NOT NULL DEFAULT '',
+                    api_key     TEXT NOT NULL DEFAULT '',
+                    model       TEXT NOT NULL DEFAULT '',
+                    updated_at  TEXT NOT NULL
+                );
+                CREATE TABLE operator (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE projects (
+                    path TEXT PRIMARY KEY, last_opened_at TEXT NOT NULL,
+                    last_mode TEXT NOT NULL DEFAULT ''
+                );
+                CREATE TABLE preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                INSERT INTO providers VALUES ('openai_compatible', 'https://old.test/v1',
+                    'sk-old', 'old-model', '2026-01-01T00:00:00.000000Z');
+                PRAGMA user_version = 1;
+                """
+            )
+
+        migrated = self.store.provider("openai_compatible")
+
+        self.assertEqual(migrated["api_key"], "sk-old", "the credential survived")
+        self.assertEqual(migrated["base_url"], "https://old.test/v1")
+        self.assertEqual(migrated["protocol"], "openai_compatible")
+        self.assertEqual(migrated["display_name"], "")
+
     def test_forgetting_a_provider_reports_whether_it_existed(self) -> None:
         self.store.save_provider("openai_compatible", "https://x.test/v1", "k", "m")
         self.assertTrue(self.store.forget_provider("openai_compatible"))

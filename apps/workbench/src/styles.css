@@ -2251,3 +2251,43 @@ button.chip.selected {
 .field-input:focus { border-color: var(--accent); outline: none; }
 .field-input::placeholder { color: var(--faint); }
 .dialog-section { margin-block-start: 18px; }
+
+/* Provider wizard. The step rail is a header element rather than a section in
+   the body, so the three steps stay visible while the body scrolls. */
+.wizard { max-width: 640px; }
+.wizard-steps {
+  display: flex;
+  margin: 12px 0 0;
+  padding: 0;
+  gap: 18px;
+  list-style: none;
+}
+.wizard-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--faint);
+  font-size: var(--font-xs);
+}
+.wizard-step-index {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-size: 10px;
+  place-items: center;
+}
+.wizard-step.current { color: var(--text); }
+.wizard-step.current .wizard-step-index { border-color: var(--accent); color: var(--accent); }
+.wizard-step.done { color: var(--dim); }
+.wizard-step.done .wizard-step-index { border-color: var(--dim); }
+.source-option {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: start;
+}
+.source-option:hover { background: var(--surface3); }

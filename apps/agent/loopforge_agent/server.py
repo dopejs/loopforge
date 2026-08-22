@@ -162,7 +162,21 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body.get("base_url", "")),
                     str(body.get("api_key", "")),
                     str(body.get("model", "")),
+                    str(body.get("display_name", "")),
+                    str(body.get("protocol", "")),
                 )
+            )
+        elif self.path == "/v1/settings/role":
+            self._execute(
+                lambda: self.server.agent.route_model_role(
+                    str(body.get("role", "")),
+                    str(body.get("provider_id", "")),
+                    str(body.get("model", "")),
+                )
+            )
+        elif self.path == "/v1/settings/role/clear":
+            self._execute(
+                lambda: self.server.agent.clear_model_role(str(body.get("role", "")))
             )
         elif self.path == "/v1/settings/provider/forget":
             self._execute(self.server.agent.forget_provider_settings)

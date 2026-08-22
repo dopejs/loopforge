@@ -1,29 +1,55 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useI18n } from "../i18n";
 import { errorMessage } from "../daemon";
 import { isDesktopRuntime } from "../agent";
 import {
   type Provider,
+  clearModelRole,
   forgetProviderSettings,
+  routeModelRole,
   saveProviderSettings,
-  useProviderSettings
+  useProviderSettings,
+  useProviders
 } from "../providers";
-import { useKey } from "./primitives";
+import {
+  type Source,
+  matchSources,
+  needsApiKey,
+  sourceForBaseUrl,
+  SOURCES
+} from "../sources";
+import type { MessageKey } from "../i18n/locales/en";
+
+type Step = "source" | "connection" | "models";
+
+const STEPS: readonly Step[] = ["source", "connection", "models"];
+
+const STEP_LABEL: Record<Step, MessageKey> = {
+  source: "wizard.step.source",
+  connection: "wizard.step.connection",
+  models: "wizard.step.models"
+};
+
+const KIND_HINT: Record<Source["kind"], MessageKey> = {
+  cloud: "wizard.hint.cloud",
+  local: "wizard.hint.local",
+  custom: "wizard.hint.custom"
+};
 
 /**
- * Configuring the model endpoint.
+ * Adding a model provider, in the three steps the design lays out: pick a
+ * source, connect it, then decide what its models are used for.
  *
- * This was previously read-only: it listed the providers Kura exposes and
- * explained what each one needed, on the reasoning that credentials belong to
- * the Agent's configuration rather than the Workbench. That reasoning was
- * right and the result was a dead end -- there was no way to reach that
- * configuration, so a user holding a base URL and a key had nowhere to put
- * them.
+ * The sources are presets over one protocol rather than distinct providers.
+ * Kura implements exactly one HTTP provider, so choosing "DeepSeek" fills in
+ * an endpoint the user would otherwise have to look up and nothing more. That
+ * is worth doing -- knowing a vendor's base URL by heart is not a reasonable
+ * thing to require -- but it is not a catalogue of integrations, and the
+ * wizard does not pretend otherwise.
  *
- * The Workbench still does not keep the credential. It is passed to the Agent,
- * which stores it once per machine under `~/.loopforge` rather than once per
- * project, and hands it to Kura at startup. It is never read back: the form
- * shows whether a key is set, not what it is.
+ * The Workbench never keeps the credential. It goes to the Agent, which stores
+ * it once per machine and hands it to Kura at startup, and is never read back:
+ * the form shows whether a key is set, not what it is.
  */
 export function AddProvider({
   providers,
@@ -37,8 +63,12 @@ export function AddProvider({
   onSaved?: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
-  const key = useKey();
   const { settings, reload } = useProviderSettings(projectRoot, true);
+
+  const [step, setStep] = useState<Step>("source");
+  const [query, setQuery] = useState("");
+  const [source, setSource] = useState<Source | null>(null);
+  const [displayName, setDisplayName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -46,12 +76,17 @@ export function AddProvider({
   const [saved, setSaved] = useState(false);
   const [failure, setFailure] = useState<string>();
 
-  // Seeded from what is stored, except the key, which is never sent back.
+  // An endpoint already configured reopens on its own source, so revisiting
+  // the wizard is editing rather than starting over.
   useEffect(() => {
-    if (!settings) return;
-    setBaseUrl(settings.base_url ?? "");
+    if (!settings?.base_url || source) return;
+    const known = sourceForBaseUrl(settings.base_url) ?? SOURCES[SOURCES.length - 1];
+    setSource(known);
+    setBaseUrl(settings.base_url);
     setModel(settings.model ?? "");
-  }, [settings]);
+    setDisplayName(settings.display_name || known.name);
+    setStep("connection");
+  }, [settings, source]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -61,16 +96,34 @@ export function AddProvider({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  const run = async (action: () => Promise<unknown>): Promise<void> => {
-    if (busy || !isDesktopRuntime()) return;
+  const matches = useMemo(() => matchSources(query), [query]);
+
+  const choose = (picked: Source): void => {
+    setSource(picked);
+    setBaseUrl(picked.baseUrl);
+    setDisplayName(picked.name);
+    if (!model && picked.exampleModel) setModel(picked.exampleModel);
+    setStep("connection");
+    setFailure(undefined);
+  };
+
+  const save = async (): Promise<void> => {
+    if (busy || !source || !isDesktopRuntime()) return;
     setBusy(true);
     setFailure(undefined);
     try {
-      await action();
+      await saveProviderSettings(projectRoot, {
+        base_url: baseUrl,
+        api_key: apiKey,
+        model,
+        display_name: displayName,
+        protocol: source.protocol
+      });
       setApiKey("");
       setSaved(true);
       reload();
       onSaved?.();
+      setStep("models");
     } catch (error: unknown) {
       setFailure(errorMessage(error, t("settings.provider.saveFailed")));
     } finally {
@@ -79,11 +132,13 @@ export function AddProvider({
   };
 
   const hasKey = settings?.has_api_key === true;
+  const keyRequired = source ? needsApiKey(source) : true;
+  const canSave = Boolean(baseUrl.trim() && model.trim() && (!keyRequired || apiKey || hasKey));
 
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div
-        className="modal"
+        className="modal wizard"
         role="dialog"
         aria-modal="true"
         aria-label={t("wizard.title")}
@@ -91,112 +146,86 @@ export function AddProvider({
       >
         <header className="modal-head">
           <strong>{t("wizard.title")}</strong>
-          <p className="wizard-note">{t("wizard.intro")}</p>
+          <ol className="wizard-steps">
+            {STEPS.map((name, index) => (
+              <li
+                key={name}
+                className={
+                  name === step
+                    ? "wizard-step current"
+                    : STEPS.indexOf(step) > index
+                      ? "wizard-step done"
+                      : "wizard-step"
+                }
+              >
+                <span className="wizard-step-index">{index + 1}</span>
+                {t(STEP_LABEL[name])}
+              </li>
+            ))}
+          </ol>
         </header>
 
         <div className="modal-body">
-          <label className="field-block">
-            <span className="field-label">{t("settings.provider.baseUrl")}</span>
-            <input
-              className="field-input"
-              value={baseUrl}
-              placeholder="https://api.example.com/v1"
-              onChange={(event) => {
-                setBaseUrl(event.target.value);
-                setSaved(false);
-              }}
+          {step === "source" && (
+            <SourceStep
+              query={query}
+              matches={matches}
+              onQuery={setQuery}
+              onChoose={choose}
             />
-          </label>
-
-          <label className="field-block">
-            <span className="field-label">{t("settings.provider.model")}</span>
-            <input
-              className="field-input"
-              value={model}
-              placeholder="gpt-4o-mini"
-              onChange={(event) => {
-                setModel(event.target.value);
-                setSaved(false);
-              }}
-            />
-          </label>
-
-          <label className="field-block">
-            <span className="field-label">
-              {t("settings.provider.apiKey")}
-              {hasKey && <span className="badge ok">{t("settings.provider.keySet")}</span>}
-            </span>
-            <input
-              className="field-input"
-              type="password"
-              value={apiKey}
-              placeholder={hasKey ? t("settings.provider.keyKept") : t("settings.provider.keyNew")}
-              onChange={(event) => {
-                setApiKey(event.target.value);
-                setSaved(false);
-              }}
-            />
-          </label>
-          {/*
-            Said plainly rather than left to be discovered: the key is on this
-            machine in a file, not in a keychain, and it is not encrypted.
-          */}
-          <p className="wizard-note">{t("settings.provider.storageNote")}</p>
-
-          {saved && <p className="wizard-note tone-ok">{t("settings.provider.restart")}</p>}
-          {failure && <p className="wizard-note tone-bad">{failure}</p>}
-
-          {providers.length > 0 && (
-            <>
-              <span className="field-label dialog-section">
-                {t("settings.provider.runtime")}
-              </span>
-              <div className="source-list">
-                {providers.map((provider) => (
-                  <div key={provider.id} className="model-choice">
-                    <div className="model-choice-head">
-                      <span
-                        className={`state-dot ${provider.health === "ready" ? "ok" : provider.health === "error" ? "bad" : "off"}`}
-                        aria-hidden="true"
-                      />
-                      <span className="source-identity">
-                        <span className="source-name">{provider.title}</span>
-                        <span className="mono faint truncate">
-                          {provider.base_url || provider.family}
-                        </span>
-                      </span>
-                      <span className={`badge ${provider.ready ? "ok" : ""}`}>
-                        {key("provider.status", provider.health)}
-                      </span>
-                    </div>
-                    {/* The runtime's own issues, verbatim: they name exactly
-                        what is missing. */}
-                    {provider.issues && provider.issues.length > 0 && (
-                      <div className="model-choice-body">
-                        <ul className="issue-list">
-                          {provider.issues.map((issue) => (
-                            <li key={issue}>{issue}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </>
           )}
+
+          {step === "connection" && source && (
+            <ConnectionStep
+              source={source}
+              displayName={displayName}
+              baseUrl={baseUrl}
+              model={model}
+              apiKey={apiKey}
+              hasKey={hasKey}
+              onDisplayName={setDisplayName}
+              onBaseUrl={setBaseUrl}
+              onModel={setModel}
+              onApiKey={setApiKey}
+            />
+          )}
+
+          {step === "models" && (
+            <ModelsStep projectRoot={projectRoot} providers={providers} saved={saved} />
+          )}
+
+          {failure && <p className="wizard-note tone-bad">{failure}</p>}
         </div>
 
         <footer className="modal-foot">
           <span className="faint truncate">
-            {hasKey ? t("settings.provider.storedFor") : ""}
+            {step === "source"
+              ? t("wizard.footer.source")
+              : step === "models"
+                ? t("wizard.footer.models")
+                : t("settings.provider.storageNote")}
           </span>
           <div className="card-actions">
-            {hasKey && (
+            {step !== "source" && (
               <button
                 type="button"
                 className="secondary-button"
-                onClick={() => void run(() => forgetProviderSettings(projectRoot))}
+                onClick={() => setStep(step === "models" ? "connection" : "source")}
+              >
+                {t("wizard.back")}
+              </button>
+            )}
+            {step === "connection" && hasKey && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  void forgetProviderSettings(projectRoot).then(() => {
+                    reload();
+                    setStep("source");
+                    setSource(null);
+                  });
+                }}
                 disabled={busy}
               >
                 {t("settings.provider.forget")}
@@ -205,25 +234,253 @@ export function AddProvider({
             <button type="button" className="secondary-button" onClick={onClose}>
               {t("action.close")}
             </button>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={() =>
-                void run(() =>
-                  saveProviderSettings(projectRoot, {
-                    base_url: baseUrl,
-                    api_key: apiKey,
-                    model
-                  })
-                )
-              }
-              disabled={busy || !isDesktopRuntime()}
-            >
-              {busy ? t("settings.provider.saving") : t("settings.provider.save")}
-            </button>
+            {step === "connection" && (
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void save()}
+                // Not disabled on validity alone: the Agent decides whether an
+                // endpoint is acceptable, and its refusal names the reason.
+                disabled={busy || !canSave}
+              >
+                {busy ? t("settings.provider.saving") : t("wizard.next")}
+              </button>
+            )}
           </div>
         </footer>
       </div>
     </div>
+  );
+}
+
+/** Step one: which source, out of the ones this protocol reaches. */
+function SourceStep({
+  query,
+  matches,
+  onQuery,
+  onChoose
+}: {
+  query: string;
+  matches: readonly Source[];
+  onQuery: (value: string) => void;
+  onChoose: (source: Source) => void;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  return (
+    <>
+      <input
+        className="field-input"
+        value={query}
+        placeholder={t("wizard.search")}
+        onChange={(event) => onQuery(event.target.value)}
+      />
+      <p className="wizard-note">
+        {query.trim()
+          ? t("wizard.matchCount", { matched: matches.length, total: SOURCES.length })
+          : t("wizard.sourceCount", { count: SOURCES.length })}
+      </p>
+      {/* Custom always survives a search, so this only shows when the query
+          matched nothing else and the user may not have noticed it. */}
+      {query.trim() && matches.length === 1 && (
+        <p className="wizard-note">{t("wizard.noMatch")}</p>
+      )}
+      <div className="source-list">
+        {matches.map((source) => (
+          <button
+            key={source.id}
+            type="button"
+            className="model-choice source-option"
+            onClick={() => onChoose(source)}
+          >
+            <div className="model-choice-head">
+              <span className="source-identity">
+                <span className="source-name">{source.name}</span>
+                <span className="mono faint truncate">
+                  {source.baseUrl || t("wizard.hint.custom")}
+                </span>
+              </span>
+              <span className="badge">{t(`wizard.kind.${source.kind}` as MessageKey)}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/** Step two: how to reach it. */
+function ConnectionStep({
+  source,
+  displayName,
+  baseUrl,
+  model,
+  apiKey,
+  hasKey,
+  onDisplayName,
+  onBaseUrl,
+  onModel,
+  onApiKey
+}: {
+  source: Source;
+  displayName: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  hasKey: boolean;
+  onDisplayName: (value: string) => void;
+  onBaseUrl: (value: string) => void;
+  onModel: (value: string) => void;
+  onApiKey: (value: string) => void;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const keyRequired = needsApiKey(source);
+  return (
+    <>
+      <p className="wizard-note">{t(KIND_HINT[source.kind])}</p>
+
+      <label className="field-block">
+        <span className="field-label">{t("wizard.displayName")}</span>
+        <input
+          className="field-input"
+          value={displayName}
+          placeholder={source.name}
+          onChange={(event) => onDisplayName(event.target.value)}
+        />
+      </label>
+
+      <label className="field-block">
+        <span className="field-label">{t("wizard.protocol")}</span>
+        {/*
+          One option, shown rather than hidden: it is what the endpoint has to
+          speak, and a form that omitted it would leave the user guessing why
+          an endpoint that is not OpenAI-compatible fails.
+        */}
+        <select
+          className="field-input"
+          value={source.protocol}
+          disabled
+          aria-readonly="true"
+        >
+          <option value="openai_compatible">OpenAI-compatible</option>
+        </select>
+      </label>
+
+      <label className="field-block">
+        <span className="field-label">{t("settings.provider.baseUrl")}</span>
+        <input
+          className="field-input"
+          value={baseUrl}
+          placeholder="https://api.example.com/v1"
+          onChange={(event) => onBaseUrl(event.target.value)}
+        />
+      </label>
+
+      <label className="field-block">
+        <span className="field-label">{t("settings.provider.model")}</span>
+        <input
+          className="field-input"
+          value={model}
+          placeholder={source.exampleModel || "model-name"}
+          onChange={(event) => onModel(event.target.value)}
+        />
+      </label>
+
+      {keyRequired && (
+        <label className="field-block">
+          <span className="field-label">
+            {t("settings.provider.apiKey")}
+            {hasKey && <span className="badge ok">{t("settings.provider.keySet")}</span>}
+          </span>
+          <input
+            className="field-input"
+            type="password"
+            value={apiKey}
+            placeholder={hasKey ? t("settings.provider.keyKept") : t("settings.provider.keyNew")}
+            onChange={(event) => onApiKey(event.target.value)}
+          />
+        </label>
+      )}
+    </>
+  );
+}
+
+/** Step three: what the runtime does with it. */
+function ModelsStep({
+  projectRoot,
+  providers,
+  saved
+}: {
+  projectRoot: string;
+  providers: readonly Provider[];
+  saved: boolean;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const { roles, reload } = useProviders(projectRoot, true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string>();
+
+  const configured = providers.find((provider) => provider.id === "openai_compatible");
+  const live = configured?.ready === true;
+
+  const route = async (role: string, providerId: string): Promise<void> => {
+    if (busy) return;
+    setBusy(role);
+    setFailure(undefined);
+    try {
+      await (providerId ? routeModelRole(projectRoot, role, providerId) : clearModelRole(projectRoot, role));
+      reload();
+    } catch (error: unknown) {
+      setFailure(errorMessage(error, t("wizard.routeFailed")));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <>
+      {/*
+        Said rather than worked around: Kura reads provider configuration at
+        startup, so an endpoint saved a moment ago is not answering yet and its
+        model list cannot be fetched. Pretending otherwise would mean an empty
+        list that looks like a broken endpoint.
+      */}
+      {saved && <p className="wizard-note tone-ok">{t("settings.provider.restart")}</p>}
+      {!live && <p className="wizard-note">{t("wizard.fetchHintManual")}</p>}
+
+      <span className="field-label dialog-section">{t("wizard.roleRouting")}</span>
+      <p className="wizard-note">{t("wizard.roleHint")}</p>
+      <div className="source-list">
+        {(roles ?? []).map((role) => (
+          <div key={role.role} className="settings-row">
+            <div className="row-label">
+              <span>{t(`role.${role.role}` as MessageKey)}</span>
+              <small>{role.provider_id || t("wizard.roleUnrouted")}</small>
+            </div>
+            <div className="card-actions">
+              {role.routed ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void route(role.role, "")}
+                  disabled={busy !== null}
+                >
+                  {t("wizard.roleClear")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void route(role.role, "openai_compatible")}
+                  disabled={busy !== null || !live}
+                >
+                  {busy === role.role ? t("wizard.routing") : t("wizard.roleUse")}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      {failure && <p className="wizard-note tone-bad">{failure}</p>}
+    </>
   );
 }

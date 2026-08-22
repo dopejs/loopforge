@@ -183,6 +183,8 @@ export type ProviderSettings = {
   provider_id: string;
   base_url?: string;
   model?: string;
+  display_name?: string;
+  protocol?: string;
   has_api_key?: boolean;
   configured?: boolean;
   updated_at?: string;
@@ -219,14 +221,49 @@ export function useProviderSettings(projectRoot: string, enabled: boolean) {
 /** Saves the endpoint. An empty key keeps the stored one. */
 export function saveProviderSettings(
   projectRoot: string,
-  input: { base_url: string; api_key: string; model: string }
+  input: {
+    base_url: string;
+    api_key: string;
+    model: string;
+    display_name?: string;
+    protocol?: string;
+  }
 ): Promise<ProviderSettings> {
   return invoke<ProviderSettings>("agent_save_provider_settings", {
     projectPath: projectRoot,
     baseUrl: input.base_url,
     apiKey: input.api_key,
-    model: input.model
+    model: input.model,
+    displayName: input.display_name ?? "",
+    protocol: input.protocol ?? ""
   });
+}
+
+/**
+ * Points one modality at a provider.
+ *
+ * Routing is a Kura capability; this forwards through the Agent so the
+ * Workbench never reaches the runtime itself.
+ */
+export function routeModelRole(
+  projectRoot: string,
+  role: string,
+  providerId: string,
+  model = ""
+): Promise<ProviderInventory> {
+  return invoke<ProviderInventory>("agent_route_role", {
+    projectPath: projectRoot,
+    role,
+    providerId,
+    model
+  });
+}
+
+export function clearModelRole(
+  projectRoot: string,
+  role: string
+): Promise<ProviderInventory> {
+  return invoke<ProviderInventory>("agent_clear_role", { projectPath: projectRoot, role });
 }
 
 export function forgetProviderSettings(projectRoot: string): Promise<ProviderSettings> {

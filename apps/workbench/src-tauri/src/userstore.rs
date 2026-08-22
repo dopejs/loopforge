@@ -16,13 +16,15 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 
-/// Matches `SCHEMA_VERSION` in the Python store.
+/// Columns the shell reads. Presence of these is the compatibility test.
 ///
-/// The shell never migrates: the Agent creates and upgrades this database, and
-/// two writers racing to apply migrations is how a store gets corrupted. A
-/// version the shell does not recognise is treated as "no projects" rather
-/// than as an error to show, since the recent list is a convenience.
-const KNOWN_SCHEMA_VERSION: i64 = 1;
+/// Checked instead of the schema version deliberately. The shell never
+/// migrates -- the Agent owns this database, and two writers racing to apply
+/// migrations is how a store gets corrupted -- but pinning an exact version
+/// would mean every column the Agent adds elsewhere blinds the shell to a
+/// table it did not touch. What matters is whether `projects` still has what
+/// is read here.
+const REQUIRED_PROJECT_COLUMNS: [&str; 3] = ["path", "last_opened_at", "last_mode"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RecentProject {
@@ -55,13 +57,21 @@ fn open_readonly(path: &Path) -> Option<Connection> {
         return None;
     }
     let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
-    let version: i64 = connection
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .ok()?;
-    if version != KNOWN_SCHEMA_VERSION {
-        return None;
-    }
-    Some(connection)
+    has_project_columns(&connection).then_some(connection)
+}
+
+/// Whether `projects` still carries the columns this module reads.
+fn has_project_columns(connection: &Connection) -> bool {
+    let Ok(mut statement) = connection.prepare("PRAGMA table_info(projects)") else {
+        return false;
+    };
+    let Ok(rows) = statement.query_map([], |row| row.get::<_, String>(1)) else {
+        return false;
+    };
+    let present: Vec<String> = rows.filter_map(Result::ok).collect();
+    REQUIRED_PROJECT_COLUMNS
+        .iter()
+        .all(|needed| present.iter().any(|column| column == needed))
 }
 
 /// Opens the store for writing, or `None` when the Agent has not created it.
@@ -74,13 +84,7 @@ fn open_writable(path: &Path) -> Option<Connection> {
         return None;
     }
     let connection = Connection::open(path).ok()?;
-    let version: i64 = connection
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .ok()?;
-    if version != KNOWN_SCHEMA_VERSION {
-        return None;
-    }
-    Some(connection)
+    has_project_columns(&connection).then_some(connection)
 }
 
 /// Recent projects, most recent first. Empty when there is no store yet.
@@ -253,14 +257,36 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_schema_reads_as_no_projects() {
-        // The Agent owns migrations. A shell that guessed at a schema it does
-        // not know would be reading columns that may not mean what it thinks.
+    fn a_later_schema_version_still_reads() {
+        // The Agent migrates this database for its own tables. Refusing to
+        // read `projects` because some unrelated column was added elsewhere
+        // would blind the window for no reason.
         let path = agent_style_store("newer");
         Connection::open(&path)
             .expect("open")
-            .execute_batch("PRAGMA user_version = 99")
+            .execute_batch(
+                "ALTER TABLE projects ADD COLUMN unrelated TEXT NOT NULL DEFAULT '';
+                 PRAGMA user_version = 99;",
+            )
             .expect("bump");
+
+        assert!(remember_project_at(&path, "/a", "chat"));
+        assert_eq!(recent_projects_at(&path, 10).len(), 1);
+    }
+
+    #[test]
+    fn a_missing_column_reads_as_no_projects() {
+        // The real incompatibility: a table that no longer holds what is read
+        // here. Guessing at it would mean reading columns that may not mean
+        // what this code thinks.
+        let home = std::env::temp_dir().join("loopforge-shell-store-shape");
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("create home");
+        let path = home.join("loopforge.db");
+        Connection::open(&path)
+            .expect("open")
+            .execute_batch("CREATE TABLE projects (path TEXT PRIMARY KEY); PRAGMA user_version = 1;")
+            .expect("schema");
 
         assert!(recent_projects_at(&path, 10).is_empty());
         assert!(!remember_project_at(&path, "/a", "chat"));

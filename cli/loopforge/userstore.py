@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: Overridable so tests never touch a developer's real store.
 HOME_VARIABLE = "LOOPFORGE_HOME"
@@ -88,6 +88,14 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
             value TEXT NOT NULL
         )
         """,
+    ),
+    (
+        # A source picked from a list needs a name to be recognised by later,
+        # and the protocol says how the endpoint is spoken to. Both were
+        # missing when a provider was only ever the one built-in slot.
+        "ALTER TABLE providers ADD COLUMN display_name TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE providers ADD COLUMN protocol TEXT NOT NULL DEFAULT "
+        "'openai_compatible'",
     ),
 )
 
@@ -170,7 +178,13 @@ class UserStore:
         return [dict(row) for row in rows]
 
     def save_provider(
-        self, provider_id: str, base_url: str, api_key: str, model: str
+        self,
+        provider_id: str,
+        base_url: str,
+        api_key: str,
+        model: str,
+        display_name: str = "",
+        protocol: str = "openai_compatible",
     ) -> dict[str, Any]:
         """Record a provider's configuration.
 
@@ -188,15 +202,27 @@ class UserStore:
             key = api_key or (existing["api_key"] if existing else "")
             connection.execute(
                 """
-                INSERT INTO providers (provider_id, base_url, api_key, model, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO providers
+                    (provider_id, base_url, api_key, model, display_name, protocol,
+                     updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(provider_id) DO UPDATE SET
                     base_url = excluded.base_url,
                     api_key = excluded.api_key,
                     model = excluded.model,
+                    display_name = excluded.display_name,
+                    protocol = excluded.protocol,
                     updated_at = excluded.updated_at
                 """,
-                (identifier, base_url.strip(), key, model.strip(), _utc_now()),
+                (
+                    identifier,
+                    base_url.strip(),
+                    key,
+                    model.strip(),
+                    display_name.strip(),
+                    protocol.strip() or "openai_compatible",
+                    _utc_now(),
+                ),
             )
             connection.commit()
         recorded = self.provider(identifier)
