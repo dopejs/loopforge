@@ -118,6 +118,7 @@ export const ar: Messages = {
   "settings.language.hint": "يتبع Loopforge لغة النظام إلى أن تختار لغة هنا.",
   "settings.language.system": "حسب النظام",
 
+  "settings.provider.storedFor": "محفوظ لهذا الجهاز",
   "settings.provider.baseUrl": "عنوان URL الأساسي",
   "settings.provider.model": "النموذج",
   "settings.provider.apiKey": "مفتاح API",
@@ -637,7 +638,6 @@ export const ar: Messages = {
 
   "wizard.intro": "يوفّر Kura مجموعة ثابتة من المزوّدات. اضبط أحدها بدل إضافة نقطة وصول.",
   "wizard.providerReady": "جاهز للاستخدام.",
-  "wizard.credentialsNote": "لا تحتفظ منضدة العمل بأي بيانات اعتماد؛ إعدادات الوكيل هي التي تحتفظ بها.",
   "wizard.howTo.api_key": "يحتاج إلى عنوان أساسي ومفتاح واجهة برمجية ونموذج افتراضي في إعدادات الوكيل.",
   "wizard.howTo.local_cli_bridge": "يتطلب تثبيت أداة سطر الأوامر الخاصة به وتسجيل الدخول على هذا الجهاز.",
   "wizard.howTo.none": "مدمج؛ متاح دائماً للاختبار.",

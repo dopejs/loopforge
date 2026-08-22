@@ -117,6 +117,7 @@ export const fr: Messages = {
   "settings.language.hint": "Loopforge suit la langue du système tant que vous n'en choisissez pas une ici.",
   "settings.language.system": "Comme le système",
 
+  "settings.provider.storedFor": "Enregistrée pour cette machine",
   "settings.provider.baseUrl": "URL de base",
   "settings.provider.model": "Modèle",
   "settings.provider.apiKey": "Clé d'API",
@@ -636,7 +637,6 @@ export const fr: Messages = {
 
   "wizard.intro": "Kura expose un ensemble fixe de fournisseurs. Configurez-en un plutôt que d'ajouter un point d'accès.",
   "wizard.providerReady": "Prêt à l'emploi.",
-  "wizard.credentialsNote": "L'établi ne conserve aucun identifiant ; la configuration de l'agent s'en charge.",
   "wizard.howTo.api_key": "Nécessite une URL de base, une clé d'API et un modèle par défaut dans la configuration de l'agent.",
   "wizard.howTo.local_cli_bridge": "Nécessite son outil en ligne de commande installé et connecté sur cette machine.",
   "wizard.howTo.none": "Intégré ; toujours disponible pour les tests.",

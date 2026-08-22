@@ -117,6 +117,7 @@ export const ko: Messages = {
   "settings.language.hint": "여기에서 선택하기 전까지 Loopforge는 시스템 언어를 따릅니다.",
   "settings.language.system": "시스템 설정",
 
+  "settings.provider.storedFor": "이 기기에 저장됨",
   "settings.provider.baseUrl": "베이스 URL",
   "settings.provider.model": "모델",
   "settings.provider.apiKey": "API 키",
@@ -636,7 +637,6 @@ export const ko: Messages = {
 
   "wizard.intro": "Kura는 고정된 프로바이더 집합을 제공합니다. 추가가 아니라 그중 하나를 설정합니다.",
   "wizard.providerReady": "사용할 수 있습니다.",
-  "wizard.credentialsNote": "워크벤치는 자격 증명을 보관하지 않습니다. 에이전트 설정이 보관합니다.",
   "wizard.howTo.api_key": "에이전트 설정에 기본 URL, API 키, 기본 모델이 필요합니다.",
   "wizard.howTo.local_cli_bridge": "이 기기에 해당 명령줄 도구를 설치하고 로그인해야 합니다.",
   "wizard.howTo.none": "내장되어 있어 테스트에 항상 사용할 수 있습니다.",

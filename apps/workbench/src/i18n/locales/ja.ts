@@ -117,6 +117,7 @@ export const ja: Messages = {
   "settings.language.hint": "ここで選ぶまで、Loopforge はシステムの言語に従います。",
   "settings.language.system": "システムに合わせる",
 
+  "settings.provider.storedFor": "この端末に保存済み",
   "settings.provider.baseUrl": "ベース URL",
   "settings.provider.model": "モデル",
   "settings.provider.apiKey": "API キー",
@@ -636,7 +637,6 @@ export const ja: Messages = {
 
   "wizard.intro": "Kura のプロバイダは固定です。追加ではなく、いずれかを設定します。",
   "wizard.providerReady": "利用可能です。",
-  "wizard.credentialsNote": "ワークベンチは認証情報を保持しません。エージェントの設定が保持します。",
   "wizard.howTo.api_key": "エージェントの設定にベース URL、API キー、既定モデルが必要です。",
   "wizard.howTo.local_cli_bridge": "この端末にコマンドラインツールをインストールしてサインインする必要があります。",
   "wizard.howTo.none": "組み込みで、テストに常時利用できます。",

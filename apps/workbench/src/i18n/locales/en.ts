@@ -120,6 +120,7 @@ export const en = {
   "settings.language.hint": "Loopforge follows your system language until you choose one here.",
   "settings.language.system": "Match system",
 
+  "settings.provider.storedFor": "Stored for this machine",
   "settings.provider.baseUrl": "Base URL",
   "settings.provider.model": "Model",
   "settings.provider.apiKey": "API key",
@@ -639,7 +640,6 @@ export const en = {
 
   "wizard.intro": "Kura exposes a fixed set of providers. Configure one rather than adding an endpoint.",
   "wizard.providerReady": "Ready to use.",
-  "wizard.credentialsNote": "The Workbench stores no credentials; the agent's configuration does.",
   "wizard.howTo.api_key": "Needs a base URL, an API key and a default model in the agent's configuration.",
   "wizard.howTo.local_cli_bridge": "Needs its command-line tool installed and signed in on this machine.",
   "wizard.howTo.none": "Built in; always available for testing.",

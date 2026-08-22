@@ -95,12 +95,10 @@ export function AddProvider({
         </header>
 
         <div className="modal-body">
-          <label className="hypothesis-field">
-            <span className="hypothesis-field-head">
-              <span>{t("settings.provider.baseUrl")}</span>
-            </span>
+          <label className="field-block">
+            <span className="field-label">{t("settings.provider.baseUrl")}</span>
             <input
-              className="hypothesis-brief"
+              className="field-input"
               value={baseUrl}
               placeholder="https://api.example.com/v1"
               onChange={(event) => {
@@ -110,12 +108,10 @@ export function AddProvider({
             />
           </label>
 
-          <label className="hypothesis-field">
-            <span className="hypothesis-field-head">
-              <span>{t("settings.provider.model")}</span>
-            </span>
+          <label className="field-block">
+            <span className="field-label">{t("settings.provider.model")}</span>
             <input
-              className="hypothesis-brief"
+              className="field-input"
               value={model}
               placeholder="gpt-4o-mini"
               onChange={(event) => {
@@ -125,13 +121,13 @@ export function AddProvider({
             />
           </label>
 
-          <label className="hypothesis-field">
-            <span className="hypothesis-field-head">
-              <span>{t("settings.provider.apiKey")}</span>
+          <label className="field-block">
+            <span className="field-label">
+              {t("settings.provider.apiKey")}
               {hasKey && <span className="badge ok">{t("settings.provider.keySet")}</span>}
             </span>
             <input
-              className="hypothesis-brief"
+              className="field-input"
               type="password"
               value={apiKey}
               placeholder={hasKey ? t("settings.provider.keyKept") : t("settings.provider.keyNew")}
@@ -145,16 +141,16 @@ export function AddProvider({
             Said plainly rather than left to be discovered: the key is on this
             machine in a file, not in a keychain, and it is not encrypted.
           */}
-          <p className="settings-note">{t("settings.provider.storageNote")}</p>
+          <p className="wizard-note">{t("settings.provider.storageNote")}</p>
 
-          {saved && <p className="settings-note">{t("settings.provider.restart")}</p>}
-          {failure && <p className="settings-note tone-bad">{failure}</p>}
+          {saved && <p className="wizard-note tone-ok">{t("settings.provider.restart")}</p>}
+          {failure && <p className="wizard-note tone-bad">{failure}</p>}
 
           {providers.length > 0 && (
             <>
-              <div className="settings-section">
-                <span className="section-title">{t("settings.provider.runtime")}</span>
-              </div>
+              <span className="field-label dialog-section">
+                {t("settings.provider.runtime")}
+              </span>
               <div className="source-list">
                 {providers.map((provider) => (
                   <div key={provider.id} className="model-choice">
@@ -192,7 +188,9 @@ export function AddProvider({
         </div>
 
         <footer className="modal-foot">
-          <span className="faint truncate">{t("wizard.credentialsNote")}</span>
+          <span className="faint truncate">
+            {hasKey ? t("settings.provider.storedFor") : ""}
+          </span>
           <div className="card-actions">
             {hasKey && (
               <button

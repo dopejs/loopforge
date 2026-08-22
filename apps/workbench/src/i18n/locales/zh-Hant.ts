@@ -117,6 +117,7 @@ export const zhHant: Messages = {
   "settings.language.hint": "在此選擇之前，Loopforge 會跟隨系統語言。",
   "settings.language.system": "跟隨系統",
 
+  "settings.provider.storedFor": "已按機器儲存",
   "settings.provider.baseUrl": "Base URL",
   "settings.provider.model": "模型",
   "settings.provider.apiKey": "API 金鑰",
@@ -636,7 +637,6 @@ export const zhHant: Messages = {
 
   "wizard.intro": "Kura 提供固定的一組 Provider。你設定其中之一，而不是新增端點。",
   "wizard.providerReady": "可以使用。",
-  "wizard.credentialsNote": "工作臺不保存任何憑證，憑證由 agent 的設定管理。",
   "wizard.howTo.api_key": "需要在 agent 設定中填寫 Base URL、API 金鑰與預設模型。",
   "wizard.howTo.local_cli_bridge": "需要在本機安裝並登入對應的命令列工具。",
   "wizard.howTo.none": "內建，始終可用於測試。",

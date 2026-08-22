@@ -117,6 +117,7 @@ export const es: Messages = {
   "settings.language.hint": "Loopforge sigue el idioma del sistema hasta que elijas uno aquí.",
   "settings.language.system": "Según el sistema",
 
+  "settings.provider.storedFor": "Guardada para esta máquina",
   "settings.provider.baseUrl": "URL base",
   "settings.provider.model": "Modelo",
   "settings.provider.apiKey": "Clave de API",
@@ -636,7 +637,6 @@ export const es: Messages = {
 
   "wizard.intro": "Kura expone un conjunto fijo de proveedores. Configura uno en lugar de añadir un endpoint.",
   "wizard.providerReady": "Listo para usar.",
-  "wizard.credentialsNote": "El banco de trabajo no guarda credenciales; lo hace la configuración del agente.",
   "wizard.howTo.api_key": "Necesita una URL base, una clave de API y un modelo por defecto en la configuración del agente.",
   "wizard.howTo.local_cli_bridge": "Requiere su herramienta de línea de comandos instalada y con sesión iniciada en este equipo.",
   "wizard.howTo.none": "Integrado; siempre disponible para pruebas.",

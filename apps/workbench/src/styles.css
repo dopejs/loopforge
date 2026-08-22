@@ -1922,8 +1922,16 @@ button:disabled {
 .wizard-note { margin: 12px 0 0; color: var(--faint); font-size: var(--font-xs); line-height: 1.65; }
 
 .field-block { margin-block-end: 12px; }
-.field-label { display: block; margin-block-end: 6px; color: var(--dim); font-size: var(--font-xs); }
-.field-value {
+.field-label {
+  display: flex;
+  align-items: center;
+  margin-block-end: 6px;
+  gap: 8px;
+  color: var(--dim);
+  font-size: var(--font-xs);
+}
+.field-value,
+.field-input {
   padding: 9px 11px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -2236,3 +2244,10 @@ button.chip.selected {
 .decision-choice small { color: var(--faint); font-size: var(--font-xs); line-height: 1.5; }
 .evidence-choice { cursor: pointer; }
 .evidence-choice input { margin-inline-end: 4px; }
+
+/* The editable variant of .field-value shares its metrics above: a form inside
+   a modal should not be taller than the values it replaces. */
+.field-input { width: 100%; color: var(--text); font-family: inherit; }
+.field-input:focus { border-color: var(--accent); outline: none; }
+.field-input::placeholder { color: var(--faint); }
+.dialog-section { margin-block-start: 18px; }
