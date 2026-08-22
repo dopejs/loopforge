@@ -5,6 +5,7 @@ import { isDesktopRuntime } from "../../agent";
 import { errorMessage } from "../../daemon";
 import { HypothesisSection } from "../HypothesisEditor";
 import { EvidencePanel } from "../EvidencePanel";
+import { PlaytestPanel } from "../PlaytestPanel";
 import { type Claim, claimTone, initializeProject, useProjectStatus } from "../../project";
 import type { MessageKey } from "../../i18n/locales/en";
 
@@ -134,6 +135,9 @@ export function TasksWorkspace({ projectRoot }: { projectRoot: string }): React.
       {/* Registering a capture changes VISUALLY_REVIEWED above, so the claims
           are reloaded rather than left stale. */}
       <EvidencePanel projectRoot={projectRoot} onRegistered={reload} />
+
+      {/* Importing a report changes HUMAN_PLAYTESTED above. */}
+      <PlaytestPanel projectRoot={projectRoot} onImported={reload} />
     </div>
   );
 }

@@ -2194,3 +2194,22 @@ button:disabled {
   font-size: var(--font-xs);
 }
 .operator-input:focus { border-color: var(--accent); outline: none; }
+
+/* Consent choice. Nothing is selected until the user answers, so the unselected
+   state has to read as unanswered rather than as a disabled option. */
+.consent-row { display: flex; gap: 8px; }
+button.chip {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  font-family: inherit;
+}
+button.chip:hover { border-color: var(--dim); color: var(--text); }
+button.chip.selected {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accentInk);
+}
+.consent-field { margin: 0 0 14px; padding: 0; border: 0; }
+.consent-field legend { padding: 0; }

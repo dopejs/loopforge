@@ -503,6 +503,67 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
     );
 }
 
+/// Whether the stage allows playtest work, and whether a protocol exists.
+#[tauri::command]
+fn agent_playtest(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/playtest",
+        None,
+        Duration::from_secs(15),
+    )
+}
+
+/// Asks the model for a playtest protocol. Records nothing.
+#[tauri::command]
+fn agent_playtest_draft(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    // A model round trip, so this outlasts the Agent's own request timeout.
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/playtest/protocol/draft",
+        Some(json!({})),
+        Duration::from_secs(180),
+    )
+}
+
+/// Records a reviewed playtest protocol.
+#[tauri::command]
+fn agent_playtest_protocol(project_path: String, content: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/playtest/protocol",
+        Some(json!({ "content": content })),
+        Duration::from_secs(30),
+    )
+}
+
+/// Imports an observed playtest report.
+#[tauri::command]
+fn agent_playtest_report(project_path: String, report: Value) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/playtest/report",
+        Some(json!({ "report": report })),
+        Duration::from_secs(30),
+    )
+}
+
 /// Picks a screenshot to register as visual evidence.
 ///
 /// A native dialog rather than a typed path: the Workbench should not invent a
@@ -793,6 +854,10 @@ pub fn run() {
             agent_run,
             agent_run_engine,
             agent_project_init,
+            agent_playtest,
+            agent_playtest_draft,
+            agent_playtest_protocol,
+            agent_playtest_report,
             select_capture_file,
             agent_capture,
             agent_evidence,

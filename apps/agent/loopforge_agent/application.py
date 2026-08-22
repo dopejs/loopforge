@@ -16,6 +16,7 @@ from loopforge.errors import LoopforgeError
 from loopforge.project import (
     HYPOTHESIS_FIELDS,
     HYPOTHESIS_HEADINGS,
+    PLAYTEST_REPORT_FIELDS,
     TRANSITIONS,
     LoopforgeProject,
 )
@@ -30,6 +31,21 @@ PROJECT_STATUS_SCHEMA = "loopforge-project-status-v1"
 HYPOTHESIS_SCHEMA = "loopforge-hypothesis-v1"
 GATE_SCHEMA = "loopforge-gate-v1"
 EVIDENCE_SCHEMA = "loopforge-evidence-v1"
+PLAYTEST_SCHEMA = "loopforge-playtest-v1"
+#: The core's own vocabulary. Consent is never inferred, so both values are an
+#: explicit human answer -- "not_required" is a claim someone makes, not a
+#: default for the unanswered case.
+CONSENT_VALUES = ("obtained", "not_required")
+#: Report fields the core requires to be lists.
+PLAYTEST_LIST_FIELDS = (
+    "raw_observations",
+    "confusion_points",
+    "failure_points",
+    "abandonment_points",
+    "strategies",
+)
+MAX_PLAYTEST_CHARS = 64 * 1024
+MAX_PLAYTEST_ITEMS = 200
 #: Bounds the listing. Evidence accrues slowly; this only caps a runaway log.
 MAX_EVIDENCE = 500
 #: Reasons the core accepts for an early decision transition.
@@ -467,6 +483,169 @@ class LoopforgeAgent:
         finally:
             Path(handle.name).unlink(missing_ok=True)
         return self.hypothesis()
+
+    def playtest(self) -> dict[str, Any]:
+        """Whether a protocol exists and whether the stage allows this work.
+
+        Both steps are legal only in PLAYTEST_REQUIRED, and a report needs a
+        protocol first. Returning that as state lets a surface explain the
+        ordering instead of surfacing PLAYTEST_STAGE_INVALID as a raw code.
+        """
+        try:
+            status = self.project.status()
+        except LoopforgeError:
+            return {
+                "schema_version": PLAYTEST_SCHEMA,
+                "stage": "",
+                "allowed": False,
+                "protocol": None,
+                "consent_values": list(CONSENT_VALUES),
+                "fields": list(PLAYTEST_REPORT_FIELDS),
+                "list_fields": list(PLAYTEST_LIST_FIELDS),
+            }
+        stage = str(status.get("stage") or "")
+        protocol = None
+        if status.get("initialized"):
+            state, _ = self.project.store.current_state()
+            record = self.project._latest_protocol(state)
+            if record:
+                protocol = {
+                    "protocol_id": str(record.get("protocol_id") or ""),
+                    "created_at": str(record.get("created_at") or ""),
+                }
+        return {
+            "schema_version": PLAYTEST_SCHEMA,
+            "stage": stage,
+            "allowed": stage == "PLAYTEST_REQUIRED",
+            "protocol": protocol,
+            "consent_values": list(CONSENT_VALUES),
+            "fields": list(PLAYTEST_REPORT_FIELDS),
+            "list_fields": list(PLAYTEST_LIST_FIELDS),
+        }
+
+    def draft_playtest_protocol(self) -> dict[str, Any]:
+        """Ask the model for a protocol. Records nothing.
+
+        The protocol is run away from this machine, by a person, so what the
+        model produces is a document to read and hand over rather than data.
+        The core stores it as free-form Markdown without schema validation,
+        which means its quality is entirely the skill's responsibility and the
+        Workbench cannot check it.
+        """
+        status = self.runtime.status()
+        if not status.get("healthy") or not status.get("base_url"):
+            raise LoopforgeAgentError(
+                "The Loopforge Agent runtime is not ready.", "AGENT_NOT_READY"
+            )
+        hypothesis = self.hypothesis()
+        prompt = (
+            "You are writing a playtest protocol for a Loopforge prototype. "
+            "Follow the external playtest procedure in the internal skill "
+            "below.\n\n"
+            f"<loopforge_internal_skill>{self._internal_skill('prototype-gameplay')}"
+            "</loopforge_internal_skill>\n\n"
+            "Reply with Markdown only: the instructions a facilitator reads "
+            "while watching one person play. Cover what to say, what to watch "
+            "for, and what not to prompt. Do not interpret results and do not "
+            "predict what the player will do.\n\n"
+            f"<active_hypothesis_json>{json.dumps(hypothesis['fields'], ensure_ascii=True)}"
+            "</active_hypothesis_json>"
+        )
+        response = KuraClient(
+            str(status["base_url"]), timeout=120.0, token=status.get("token")
+        ).post("/v1/chat/query", {"query": prompt})
+        return {
+            "schema_version": PLAYTEST_SCHEMA,
+            "draft": True,
+            "content": str(response.get("reply", "")),
+        }
+
+    def create_playtest_protocol(self, content: str) -> dict[str, Any]:
+        """Record a protocol the user has reviewed."""
+        text = str(content or "").strip()
+        if not text:
+            raise LoopforgeAgentError(
+                "A playtest protocol must not be empty.", "PLAYTEST_PROTOCOL_INVALID"
+            )
+        if len(text) > MAX_PLAYTEST_CHARS:
+            raise LoopforgeAgentError(
+                "The playtest protocol is too large.", "PLAYTEST_PROTOCOL_INVALID"
+            )
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".md", encoding="utf-8", delete=False
+        )
+        try:
+            handle.write(text)
+            handle.close()
+            self.project.create_playtest_protocol(
+                Path(handle.name), expected_revision=None
+            )
+        finally:
+            Path(handle.name).unlink(missing_ok=True)
+        return self.playtest()
+
+    def import_playtest_report(self, report: Any) -> dict[str, Any]:
+        """Import an observed playtest.
+
+        Consent is validated here as well as in the core, because this is the
+        layer that can say which values are meaningful. It is never defaulted:
+        an unanswered consent question must fail rather than resolve to
+        `not_required`, which is itself a claim about a real person.
+        """
+        cleaned = self._clean_playtest_report(report)
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", encoding="utf-8", delete=False
+        )
+        try:
+            json.dump(cleaned, handle, ensure_ascii=True)
+            handle.close()
+            self.project.import_playtest(Path(handle.name), expected_revision=None)
+        finally:
+            Path(handle.name).unlink(missing_ok=True)
+        return self.playtest()
+
+    @staticmethod
+    def _clean_playtest_report(report: Any) -> dict[str, Any]:
+        if not isinstance(report, dict):
+            raise LoopforgeAgentError(
+                "The playtest report must be an object.", "PLAYTEST_REPORT_INVALID"
+            )
+        unknown = sorted(set(report) - set(PLAYTEST_REPORT_FIELDS))
+        if unknown:
+            raise LoopforgeAgentError(
+                f"Unknown playtest fields: {', '.join(unknown)}",
+                "PLAYTEST_REPORT_INVALID",
+            )
+        consent = report.get("consent_status")
+        if consent not in CONSENT_VALUES:
+            raise LoopforgeAgentError(
+                "Consent must be recorded as obtained or explicitly not required.",
+                "PLAYTEST_CONSENT_INVALID",
+            )
+        cleaned: dict[str, Any] = {"consent_status": consent}
+        for field in PLAYTEST_LIST_FIELDS:
+            value = report.get(field, [])
+            if not isinstance(value, list):
+                raise LoopforgeAgentError(
+                    f"Playtest {field} must be a list.", "PLAYTEST_REPORT_INVALID"
+                )
+            items = [str(item).strip() for item in value[:MAX_PLAYTEST_ITEMS]]
+            cleaned[field] = [item for item in items if item]
+        if not cleaned["raw_observations"]:
+            raise LoopforgeAgentError(
+                "At least one raw observation is required.", "PLAYTEST_REPORT_INVALID"
+            )
+        for field in ("participant_context", "comprehension_time", "replay_behavior"):
+            cleaned[field] = str(report.get(field) or "").strip()
+        interpretation = str(report.get("interpretation") or "").strip()
+        if not interpretation:
+            raise LoopforgeAgentError(
+                "An interpretation is required, and is recorded separately from "
+                "the raw observations.",
+                "PLAYTEST_REPORT_INVALID",
+            )
+        cleaned["interpretation"] = interpretation
+        return cleaned
 
     def register_capture(self, path: str) -> dict[str, Any]:
         """Register a screenshot the user produced.
