@@ -140,7 +140,8 @@ class KuraClient:
             )
         except urllib.error.HTTPError as exc:
             raise KuraAgentError(
-                f"Kura request failed: POST {path} returned HTTP {exc.code}",
+                f"Kura request failed: POST {path} returned HTTP {exc.code}"
+                f"{_reason(exc)}",
                 "KURA_REQUEST_FAILED",
             ) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
@@ -183,8 +184,13 @@ class KuraClient:
                     return {}
                 payload = json.loads(raw)
         except urllib.error.HTTPError as exc:
+            # The runtime explains its own failures in the response body, and
+            # dropping it leaves a bare status code that says nothing about
+            # which provider failed or why. Bounded, because an error body is
+            # occasionally a whole upstream response.
             raise KuraAgentError(
-                f"Kura request failed: {method} {path} returned HTTP {exc.code}",
+                f"Kura request failed: {method} {path} returned HTTP {exc.code}"
+                f"{_reason(exc)}",
                 "KURA_REQUEST_FAILED",
             ) from exc
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
@@ -195,6 +201,28 @@ class KuraClient:
                 "KURA_INVALID_RESPONSE",
             )
         return payload
+
+
+#: Bounds an error body quoted into an exception message.
+MAX_ERROR_BODY_CHARS = 400
+
+
+def _reason(exc: urllib.error.HTTPError) -> str:
+    """The runtime's own explanation, if it gave one.
+
+    Returns an empty string rather than raising: this runs while another error
+    is being reported, and a failure to read the body must not replace the
+    status code with something less useful.
+    """
+    try:
+        body = exc.read().decode("utf-8", errors="replace").strip()
+    except Exception:
+        return ""
+    if not body:
+        return ""
+    if len(body) > MAX_ERROR_BODY_CHARS:
+        body = body[:MAX_ERROR_BODY_CHARS] + "…"
+    return f": {body}"
 
 
 # Compatibility aliases for clients written before the Kura rename.

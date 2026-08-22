@@ -190,5 +190,59 @@ class AgentContractTests(unittest.TestCase):
         self.assertEqual(result["context"]["stage"], "DISCOVERY")
 
 
+class KuraClientErrorReportingTests(unittest.TestCase):
+    """A failure has to say why, not just that.
+
+    The runtime explains itself in the response body -- which provider was not
+    found, which task panicked. Dropping it leaves a bare status code, and a
+    live dispatch failure that read as "HTTP 500" cost a full diagnosis
+    detour before the body turned out to name the cause exactly.
+    """
+
+    def _serve(self, status: int, body: bytes):
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return KuraClient(f"http://127.0.0.1:{server.server_port}", timeout=5.0)
+
+    def test_the_runtime_reason_reaches_the_caller(self) -> None:
+        client = self._serve(
+            500, b'{"code":"internal","message":"provider not found: openai_compatible"}'
+        )
+        with self.assertRaises(KuraAgentError) as caught:
+            client.get("/v1/chat/query")
+        message = str(caught.exception)
+        self.assertIn("HTTP 500", message)
+        self.assertIn("provider not found: openai_compatible", message)
+
+    def test_a_large_body_is_bounded(self) -> None:
+        """An error body is occasionally a whole upstream response."""
+        client = self._serve(502, b"x" * 5000)
+        with self.assertRaises(KuraAgentError) as caught:
+            client.get("/v1/chat/query")
+        self.assertLess(len(str(caught.exception)), 600)
+        self.assertIn("…", str(caught.exception))
+
+    def test_an_empty_body_leaves_the_message_clean(self) -> None:
+        client = self._serve(404, b"")
+        with self.assertRaises(KuraAgentError) as caught:
+            client.get("/v1/missing")
+        self.assertTrue(str(caught.exception).endswith("HTTP 404"))
+
+
 if __name__ == "__main__":
     unittest.main()

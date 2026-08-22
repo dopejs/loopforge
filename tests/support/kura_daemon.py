@@ -25,6 +25,19 @@ from typing import Any
 from loopforge.agent.kura_client import KuraAgentError, KuraClient
 
 _STARTUP_TIMEOUT_SECONDS = 30.0
+
+#: A real model provider, supplied by the developer running the tests.
+#:
+#: The built-in `echo` provider proves the pipeline carries a request and
+#: parses a reply, but it cannot answer in a requested format, so it says
+#: nothing about whether a draft is usable. These variables opt a run into
+#: asking a real model. The key is read from the environment and never written
+#: to disk: Kura takes it as an override, so no config file holds it.
+LIVE_PROVIDER_VARIABLES = (
+    "LOOPFORGE_TEST_LLM_BASE_URL",
+    "LOOPFORGE_TEST_LLM_API_KEY",
+    "LOOPFORGE_TEST_LLM_MODEL",
+)
 _POLL_INTERVAL_SECONDS = 0.2
 
 
@@ -50,6 +63,61 @@ def kura_binary() -> str | None:
     return shutil.which("kura")
 
 
+def stale_binary_reason() -> str | None:
+    """Whether any submodule source is newer than the located binary.
+
+    Found the hard way: a binary built before the commit that made the
+    OpenAI-compatible provider dispatchable produced a dispatch failure that
+    read exactly like a configuration problem. The tests were honest about what
+    they saw and completely misleading about the cause, because nothing checked
+    that the thing under test was the thing on disk.
+
+    Compares against source modification times rather than the pinned commit
+    date, because the normal order is build, test, then commit -- keying on the
+    commit would call a correct binary stale for the minutes between.
+
+    Returns None when the question cannot be answered -- no submodule, no
+    binary, an explicit override -- since an unanswerable check must not block
+    a run.
+    """
+    binary = kura_binary()
+    if binary is None or os.environ.get("LOOPFORGE_KURA_BIN"):
+        # An explicit override is the developer's own choice of binary.
+        return None
+    sources = (
+        Path(__file__).resolve().parents[2]
+        / "apps" / "workbench" / "vendor" / "kura" / "crates"
+    )
+    if not sources.is_dir():
+        return None
+    try:
+        built = Path(binary).stat().st_mtime
+        newer = subprocess.run(
+            [
+                "find", str(sources),
+                "-name", "target", "-prune", "-o",
+                "-newer", str(binary),
+                "(", "-name", "*.rs", "-o", "-name", "*.toml", ")",
+                "-print",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    del built
+    changed = [line for line in newer.stdout.splitlines() if line.strip()]
+    if not changed:
+        return None
+    example = Path(changed[0]).name
+    return (
+        f"{len(changed)} Kura source file(s) are newer than the built binary "
+        f"(for example {example}); rebuild with `pnpm build:kura`"
+    )
+
+
 #: Integration tests are skipped rather than failed when no daemon binary is
 #: available, so CI (which does not build the sidecar) stays green while a
 #: developer with a build gets the coverage.
@@ -65,10 +133,23 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def live_provider() -> dict[str, str] | None:
+    """The configured live provider, or None when the run is not opted in."""
+    values = {name: os.environ.get(name, "").strip() for name in LIVE_PROVIDER_VARIABLES}
+    return values if all(values.values()) else None
+
+
+requires_live_provider = unittest.skipUnless(
+    live_provider() is not None,
+    "needs a live model: set "
+    + ", ".join(LIVE_PROVIDER_VARIABLES),
+)
+
+
 class KuraDaemon:
     """A running daemon plus an authenticated client for it."""
 
-    def __init__(self) -> None:
+    def __init__(self, live: bool = False) -> None:
         self.binary = kura_binary()
         if self.binary is None:
             raise unittest.SkipTest("no Kura binary available")
@@ -82,10 +163,41 @@ class KuraDaemon:
             "KURA_DATA_DIR": str(self.data_dir),
             "KURA_BIND_ADDR": self.bind_addr,
         }
+        if live:
+            provider = live_provider()
+            if provider is None:
+                raise unittest.SkipTest("no live provider configured")
+            # Passed as overrides so the credential stays in the environment
+            # rather than being written into the daemon's config file.
+            self._environment.update(
+                {
+                    "KURA_LLM_DEFAULT_PROVIDER": "openai_compatible",
+                    "KURA_LLM_OPENAI_COMPATIBLE_BASE_URL": provider[
+                        "LOOPFORGE_TEST_LLM_BASE_URL"
+                    ],
+                    "KURA_LLM_OPENAI_COMPATIBLE_API_KEY": provider[
+                        "LOOPFORGE_TEST_LLM_API_KEY"
+                    ],
+                    "KURA_LLM_OPENAI_COMPATIBLE_MODEL": provider[
+                        "LOOPFORGE_TEST_LLM_MODEL"
+                    ],
+                    # A real model drafting eleven sections needs longer than
+                    # the default half minute.
+                    "KURA_LLM_OPENAI_COMPATIBLE_TIMEOUT_MS": "180000",
+                    "KURA_LLM_OPENAI_COMPATIBLE_STREAM_FIRST_CHUNK_TIMEOUT_MS": "120000",
+                    "KURA_LLM_OPENAI_COMPATIBLE_STREAM_IDLE_TIMEOUT_MS": "120000",
+                    "KURA_LLM_OPENAI_COMPATIBLE_STREAM_MAX_DURATION_MS": "300000",
+                }
+            )
 
     # -- lifecycle ----------------------------------------------------------
 
     def start(self) -> KuraDaemon:
+        stale = stale_binary_reason()
+        if stale is not None:
+            # Raised, not skipped: the binary exists and would answer, just
+            # not as the pinned source says it should.
+            raise RuntimeError(f"Kura daemon is out of date: {stale}")
         completed = subprocess.run(
             [self.binary, "daemon", "start"],
             env=self._environment,
