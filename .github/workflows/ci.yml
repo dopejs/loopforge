@@ -18,13 +18,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The submodule is only needed to build the Kura sidecar, which this
-      # workflow does not do; the tests stub the runtime.
+      # No submodule: these tests stub the runtime. The integration job below
+      # is the one that builds a daemon and talks to it.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Test
         run: PYTHONPATH=cli:apps/agent python -m unittest discover -s tests -t .
+
+  integration:
+    name: Agent against a real Kura daemon
+    # Every wire-level bug in this stack -- a rejected URL shape, a route that
+    # needs a bearer token, a token that authenticates but resolves to no
+    # tenant -- passed the mocked tests and failed here. Without this job CI
+    # cannot see the class of failure that actually ships.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/workbench/vendor/kura/crates
+      # A debug daemon, not the release sidecar: these tests exercise the
+      # protocol, and the dev profile compiles several times faster.
+      - name: Build the Kura daemon
+        run: cargo build -p kura-cli --manifest-path apps/workbench/vendor/kura/crates/Cargo.toml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # `requires_kura` skips when no binary is found, and a skipped suite
+      # still reports success. Fail here instead, so a broken build cannot
+      # quietly turn this job into a no-op.
+      - name: Require a discoverable daemon binary
+        env:
+          LOOPFORGE_KURA_BIN: ${{ github.workspace }}/apps/workbench/vendor/kura/crates/target/debug/kura
+        run: PYTHONPATH=cli:apps/agent python -c "import sys; from tests.support.kura_daemon import kura_binary; sys.exit(0 if kura_binary() else 'no Kura binary was discoverable')"
+      - name: Integration tests
+        env:
+          LOOPFORGE_KURA_BIN: ${{ github.workspace }}/apps/workbench/vendor/kura/crates/target/debug/kura
+        run: PYTHONPATH=cli:apps/agent python -m unittest tests.agent.test_integration -v
 
   workbench:
     name: Workbench (TypeScript)
