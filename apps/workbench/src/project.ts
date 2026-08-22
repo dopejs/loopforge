@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { errorMessage } from "./daemon";
 import { isDesktopRuntime } from "./agent";
@@ -42,10 +42,32 @@ export type ProjectStatus = {
   reason?: string;
 };
 
+/** Result of creating project state; `created` is false when one existed. */
+export type ProjectInit = {
+  schema_version: "loopforge-project-status-v1";
+  created: boolean;
+  project_root: string;
+  stage: string;
+};
+
+/**
+ * Creates Loopforge state in a directory.
+ *
+ * Idempotent in the core, so this adopts an existing project rather than
+ * failing. Callers reload status afterwards rather than trusting the returned
+ * stage, since the core derives more than this response carries.
+ */
+export function initializeProject(projectRoot: string): Promise<ProjectInit> {
+  return invoke<ProjectInit>("agent_project_init", { projectPath: projectRoot });
+}
+
 export function useProjectStatus(projectRoot: string, enabled: boolean) {
   const [status, setStatus] = useState<ProjectStatus | null>(null);
   const [reason, setReason] = useState<string>();
   const [loading, setLoading] = useState(false);
+  const [nonce, setNonce] = useState(0);
+
+  const reload = useCallback(() => setNonce((value) => value + 1), []);
 
   useEffect(() => {
     if (!enabled || !projectRoot) return;
@@ -71,9 +93,9 @@ export function useProjectStatus(projectRoot: string, enabled: boolean) {
     return () => {
       cancelled = true;
     };
-  }, [enabled, projectRoot]);
+  }, [enabled, projectRoot, nonce]);
 
-  return { status, reason, loading };
+  return { status, reason, loading, reload };
 }
 
 /** Display tone for a claim. `stale` is warned about, never shown as met. */

@@ -503,6 +503,24 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
     );
 }
 
+/// Creates Loopforge project state in this directory.
+///
+/// Idempotent in the core, so a repeated call adopts the existing project
+/// rather than failing; the response says which happened.
+#[tauri::command]
+fn agent_project_init(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/project/init",
+        None,
+        Duration::from_secs(30),
+    )
+}
+
 /// The project's lifecycle stage and derived quality claims.
 #[tauri::command]
 fn agent_project_status(project_path: String) -> Result<Value, String> {
@@ -608,6 +626,7 @@ pub fn run() {
             agent_runs,
             agent_run,
             agent_run_engine,
+            agent_project_init,
             agent_project_status
         ])
         .run(tauri::generate_context!())

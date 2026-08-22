@@ -107,6 +107,8 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body["thread_id"]) if body.get("thread_id") else None,
                 )
             )
+        elif self.path == "/v1/project/init":
+            self._execute(self.server.agent.init_project)
         elif self.path == "/v1/engine/run":
             self._execute(
                 lambda: self.server.agent.run_engine(str(body.get("operation", "")))

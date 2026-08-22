@@ -133,3 +133,48 @@ class ProjectStatusOnDiskTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProjectInitTests(unittest.TestCase):
+    """Creating project state, which is the entry point to every other stage."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def _agent(self) -> LoopforgeAgent:
+        from loopforge.project import LoopforgeProject
+
+        agent = object.__new__(LoopforgeAgent)
+        agent.project = LoopforgeProject(self.root)
+        return agent
+
+    def test_initializing_creates_state_and_reaches_discovery(self) -> None:
+        agent = self._agent()
+        self.assertFalse(agent.project_status()["initialized"])
+
+        result = agent.init_project()
+
+        self.assertTrue(result["created"])
+        self.assertEqual(result["stage"], "DISCOVERY")
+        self.assertEqual(result["project_root"], str(self.root.resolve()))
+        self.assertTrue((self.root / ".loopforge").is_dir())
+
+        status = agent.project_status()
+        self.assertTrue(status["initialized"])
+        self.assertEqual(status["stage"], "DISCOVERY")
+
+    def test_initializing_twice_adopts_rather_than_fails(self) -> None:
+        """The core's init is idempotent, and the caller must be able to tell
+        an adoption from a creation -- a user who expected an empty folder
+        should learn they opened an existing project."""
+        agent = self._agent()
+        self.assertTrue(agent.init_project()["created"])
+
+        second = agent.init_project()
+
+        self.assertFalse(second["created"])
+        self.assertEqual(second["stage"], "DISCOVERY")

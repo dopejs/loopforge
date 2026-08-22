@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useI18n } from "../../i18n";
 import { type Run, useRunDetail, useRuns, runTone } from "../../runs";
+import { useProjectStatus } from "../../project";
 
 /**
  * Engine run output. Runs are produced by the deterministic core, so this
@@ -13,6 +14,9 @@ export function TerminalWorkspace({
 }): React.JSX.Element {
   const { t } = useI18n();
   const { runs, reason, loading } = useRuns(projectRoot, true);
+  // An unmanaged folder has no runs and never will; saying "none yet" would
+  // suggest waiting for something that cannot happen.
+  const { status } = useProjectStatus(projectRoot, true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = selectedId ?? runs[0]?.id ?? null;
   const detail = useRunDetail(projectRoot, selected);
@@ -28,7 +32,13 @@ export function TerminalWorkspace({
   if (runs.length === 0) {
     return (
       <div className="workspace-body padded">
-        <p className="settings-note">{reason ? t("runs.unavailable") : t("runs.none")}</p>
+        <p className="settings-note">
+          {reason
+            ? t("runs.unavailable")
+            : status?.initialized === true
+              ? t("runs.none")
+              : t("runs.notAProject")}
+        </p>
       </div>
     );
   }

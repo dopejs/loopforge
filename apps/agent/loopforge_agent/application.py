@@ -246,6 +246,22 @@ class LoopforgeAgent:
             "run": detail if detail is not None else result,
         }
 
+    def init_project(self) -> dict[str, Any]:
+        """Create the Loopforge project state for this directory.
+
+        The core's `init` is idempotent and reports whether it created the
+        state or found it, so re-running is safe. That distinction is returned
+        rather than flattened: a caller that expected to create a project and
+        instead adopted an existing one should be able to tell.
+        """
+        result = self.project.init()
+        return {
+            "schema_version": PROJECT_STATUS_SCHEMA,
+            "created": bool(result.get("created")),
+            "project_root": str(result.get("project_root") or self.project.root),
+            "stage": str(result.get("state", {}).get("stage") or ""),
+        }
+
     def project_status(self) -> dict[str, Any]:
         """The project's lifecycle position and derived quality claims.
 

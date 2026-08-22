@@ -34,6 +34,14 @@ class FakeAgent:
             "thread_id": thread_id,
         }
 
+    def init_project(self) -> dict[str, Any]:
+        return {
+            "schema_version": "loopforge-project-status-v1",
+            "created": True,
+            "project_root": "/tmp/example",
+            "stage": "DISCOVERY",
+        }
+
     def session(self, session_id: str) -> dict[str, Any]:
         raise LoopforgeAgentError("Session not found.", "SESSION_NOT_FOUND")
 
@@ -109,6 +117,19 @@ class AgentServerTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as raised:
             self.request("/v1/runs?operation=test")
         self.assertEqual(raised.exception.code, 400)
+
+    def test_project_init_is_routed_and_authorized(self) -> None:
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(
+                urllib.request.Request(f"{self.base_url}/v1/project/init", data=b"", method="POST"),
+                timeout=2,
+            )
+        self.assertEqual(raised.exception.code, 401)
+
+        status, payload = self.request("/v1/project/init", "POST", {})
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["created"])
+        self.assertEqual(payload["stage"], "DISCOVERY")
 
     def test_query_uses_agent_contract(self) -> None:
         status, payload = self.request(

@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useState } from "react";
 import { useI18n } from "../../i18n";
 import { Card } from "../primitives";
-import { type Claim, claimTone, useProjectStatus } from "../../project";
+import { isDesktopRuntime } from "../../agent";
+import { errorMessage } from "../../daemon";
+import { type Claim, claimTone, initializeProject, useProjectStatus } from "../../project";
 import type { MessageKey } from "../../i18n/locales/en";
 
 /**
@@ -15,7 +17,23 @@ import type { MessageKey } from "../../i18n/locales/en";
  */
 export function TasksWorkspace({ projectRoot }: { projectRoot: string }): React.JSX.Element {
   const { t } = useI18n();
-  const { status, reason, loading } = useProjectStatus(projectRoot, true);
+  const { status, reason, loading, reload } = useProjectStatus(projectRoot, true);
+  const [initializing, setInitializing] = useState(false);
+  const [failure, setFailure] = useState<string>();
+
+  const initialize = async (): Promise<void> => {
+    if (initializing || !isDesktopRuntime()) return;
+    setInitializing(true);
+    setFailure(undefined);
+    try {
+      await initializeProject(projectRoot);
+      reload();
+    } catch (error: unknown) {
+      setFailure(errorMessage(error, t("project.initFailed")));
+    } finally {
+      setInitializing(false);
+    }
+  };
 
   if (loading && !status) {
     return (
@@ -25,20 +43,43 @@ export function TasksWorkspace({ projectRoot }: { projectRoot: string }): React.
     );
   }
 
-  if (!status || (!status.initialized && !status.reason)) {
+  // A runtime-level failure is not the same as an unmanaged folder: only the
+  // latter can be fixed by initializing, so only the latter offers it.
+  if (reason && !status) {
     return (
       <div className="workspace-body padded">
-        <p className="settings-note">
-          {reason ? t("project.unavailable") : t("project.uninitialized")}
-        </p>
+        <p className="settings-note">{t("project.unavailable")}</p>
       </div>
     );
   }
 
-  if (!status.initialized) {
+  if (!status || !status.initialized) {
     return (
       <div className="workspace-body padded">
-        <p className="settings-note">{status.reason}</p>
+        <div className="settings-section">
+          <span className="section-title">{t("project.uninitializedTitle")}</span>
+        </div>
+        <Card className="suite-list">
+          <div className="settings-row">
+            <div className="row-label">
+              <span>{t("project.uninitialized")}</span>
+              {/* Shown in full: the user may have opened the wrong folder, and
+                  this action writes to it. */}
+              <small className="mono">{projectRoot}</small>
+            </div>
+            <button
+              type="button"
+              className="primary-button small"
+              onClick={() => void initialize()}
+              disabled={initializing || !isDesktopRuntime()}
+            >
+              {initializing ? t("project.initializing") : t("project.initialize")}
+            </button>
+          </div>
+        </Card>
+        <p className="settings-note">{t("project.initHint")}</p>
+        {status?.reason && <p className="settings-note">{status.reason}</p>}
+        {failure && <p className="settings-note tone-bad">{failure}</p>}
       </div>
     );
   }

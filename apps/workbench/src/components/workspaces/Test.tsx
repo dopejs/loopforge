@@ -4,6 +4,7 @@ import { useI18n } from "../../i18n";
 import { Card } from "../primitives";
 import { isDesktopRuntime } from "../../agent";
 import { type Run, type RunStatus, useRunDetail, useRuns, runTone } from "../../runs";
+import { useProjectStatus } from "../../project";
 import type { MessageKey } from "../../i18n/locales/en";
 
 type Operation = "build" | "test";
@@ -62,6 +63,11 @@ function operationLabel(operation: string): MessageKey | null {
 export function TestWorkspace({ projectRoot }: { projectRoot: string }): React.JSX.Element {
   const { t } = useI18n();
   const { runs, reason, loading, reload } = useRuns(projectRoot, true);
+  // An unmanaged folder returns an empty run list, which would otherwise read
+  // as "nothing has run yet" when the truth is that this is not a project. The
+  // controls would fail with PROJECT_NOT_INITIALIZED if pressed.
+  const { status } = useProjectStatus(projectRoot, true);
+  const initialized = status?.initialized === true;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [running, setRunning] = useState<Operation | null>(null);
   const selected = selectedId ?? runs[0]?.id ?? null;
@@ -98,7 +104,7 @@ export function TestWorkspace({ projectRoot }: { projectRoot: string }): React.J
           type="button"
           className="primary-button small"
           onClick={() => void run(operation)}
-          disabled={running !== null || !isDesktopRuntime()}
+          disabled={running !== null || !initialized || !isDesktopRuntime()}
         >
           {busy ? t("test.running") : t(OPERATION_ACTION[operation])}
         </button>
@@ -126,7 +132,13 @@ export function TestWorkspace({ projectRoot }: { projectRoot: string }): React.J
       </div>
       {runs.length === 0 ? (
         <p className="settings-note">
-          {loading ? t("runs.loading") : reason ? t("runs.unavailable") : t("runs.none")}
+          {loading
+            ? t("runs.loading")
+            : reason
+              ? t("runs.unavailable")
+              : initialized
+                ? t("runs.none")
+                : t("runs.notAProject")}
         </p>
       ) : (
         <>
