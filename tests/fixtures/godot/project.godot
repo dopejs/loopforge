@@ -1,0 +1,16 @@
+; Minimal Godot 4 project used to exercise the engine adapter against a real
+; binary. Kept as small as the adapter's own checks allow: `doctor` requires a
+; configured `run/main_scene` that resolves to a file that exists, and
+; `run test` boots that scene headlessly.
+
+config_version=5
+
+[application]
+
+config/name="Loopforge Engine Fixture"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"

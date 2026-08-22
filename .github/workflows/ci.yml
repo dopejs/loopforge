@@ -60,6 +60,37 @@ jobs:
           LOOPFORGE_KURA_BIN: ${{ github.workspace }}/apps/workbench/vendor/kura/crates/target/debug/kura
         run: PYTHONPATH=cli:apps/agent python -m unittest tests.agent.test_integration -v
 
+  engine:
+    name: Engine adapter against a real Godot
+    # run_engine had no test coverage at all while already being reachable from
+    # a button in the Workbench, and the only Godot-related test substituted a
+    # shell script that echoed a version string. The adapter's actual contract
+    # with the engine is only observable against a real binary.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Godot ships as a single binary, so this is an unzip rather than an
+      # install. Pinned: a version bump should be a visible change here, not a
+      # silent difference in what the adapter was tested against.
+      - name: Install Godot 4
+        run: |
+          curl -sSLo godot.zip https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip
+          unzip -q godot.zip
+          mkdir -p "$HOME/.local/bin"
+          mv Godot_v4.3-stable_linux.x86_64 "$HOME/.local/bin/godot4"
+          chmod +x "$HOME/.local/bin/godot4"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # requires_godot skips when no usable binary is found, and a skipped suite
+      # still reports success. Fail here instead, so a broken download cannot
+      # quietly turn this job into a no-op that reports green.
+      - name: Require a discoverable engine
+        run: PYTHONPATH=cli:apps/agent python -c "import sys; from tests.support.godot import godot_binary, godot_major_version; b = godot_binary(); sys.exit('no Godot binary was discoverable') if b is None else None; v = godot_major_version(b); sys.exit(f'Godot major version {v} is not the supported 4') if v != 4 else None"
+      - name: Engine integration tests
+        run: PYTHONPATH=cli:apps/agent python -m unittest tests.cli.test_engine_integration -v
+
   workbench:
     name: Workbench (TypeScript)
     runs-on: ubuntu-latest
