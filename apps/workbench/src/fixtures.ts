@@ -104,30 +104,6 @@ export const HOTSPOTS = [
   { name: "Audio.MixGroup(Boss)", ms: "0.94", calls: "3,600", delta: "−0.05", tone: "ok" }
 ] as const;
 
-/* -------------------------------------------------------------------- diff */
-
-export const DIFF_FILE = { name: "ForgeGuardian.cs", stat: "+18 −6" } as const;
-
-export type DiffKind = "context" | "add" | "delete";
-
-export const DIFF_LINES: readonly { kind: DiffKind; n: number; text: string }[] = [
-  { kind: "context", n: 216, text: "    void EnterPhaseTwo()" },
-  { kind: "context", n: 217, text: "    {" },
-  { kind: "context", n: 218, text: "        phase = BossPhase.Two;" },
-  { kind: "delete", n: 219, text: "        attackInterval = 0.80f;" },
-  { kind: "delete", n: 220, text: "        damageScale    = 1.40f;" },
-  { kind: "delete", n: 221, text: "        pillarBurst    = 5;" },
-  { kind: "add", n: 219, text: "        // tuned · -15% difficulty (run #3412)" },
-  { kind: "add", n: 220, text: "        attackInterval = 0.95f;" },
-  { kind: "add", n: 221, text: "        damageScale    = 1.19f;" },
-  { kind: "add", n: 222, text: "        pillarBurst    = 4;" },
-  { kind: "context", n: 223, text: "" },
-  { kind: "context", n: 224, text: '        telemetry.Mark("boss.phase2.enter");' },
-  { kind: "delete", n: 225, text: "        StartCoroutine(PillarLoop(0.6f));" },
-  { kind: "add", n: 226, text: "        StartCoroutine(PillarLoop(0.75f));" },
-  { kind: "context", n: 227, text: "    }" }
-];
-
 /* ---------------------------------------------------------------- terminal */
 
 export type LogLevel = "INFO" | "PLAN" | "TOOL" | "EDIT" | "PASS" | "WARN" | "RUN";
@@ -210,12 +186,6 @@ export const SIDEBAR_ITEMS: Record<string, readonly { label: string; sub: string
     { label: "SaveMigration", sub: "11 cases", meta: "PASS", tone: "ok" },
     { label: "Playtest sim", sub: "3600 frames", meta: "PASS", tone: "ok" }
   ],
-  diff: [
-    { label: "ForgeGuardian.cs", sub: "Assets/Scripts/Boss", meta: "+18 −6" },
-    { label: "BossPhase2CurveTests.cs", sub: "Assets/Tests/Boss", meta: "+74", tone: "ok" },
-    { label: "boss_tuning.json", sub: "Assets/Config", meta: "+6 −6" },
-    { label: "CHANGELOG.md", sub: ".", meta: "+3", tone: "ok" }
-  ],
   terminal: [
     { label: "#3412 boss tuning", sub: "3m 02s" },
     { label: "#3411 inventory UI", sub: "11m 40s" },
@@ -265,6 +235,6 @@ export const AGENT_TOOL_CALLS = [
   { name: "run_tests", arg: "BossRegression", result: "24 passed · 8.4s" }
 ] as const;
 
-export const COMPOSER_CHIPS = ["@file", "/test", "/playtest", "/diff"] as const;
+export const COMPOSER_CHIPS = ["@file", "/test", "/playtest"] as const;
 
 export const SESSION_USAGE = { provider: "Anthropic · claude-sonnet", usage: "38.2k tokens · $0.42" } as const;

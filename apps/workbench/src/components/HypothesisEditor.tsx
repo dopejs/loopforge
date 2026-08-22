@@ -12,6 +12,7 @@ import {
   emptyFields,
   useHypothesis
 } from "../hypothesis";
+import { isConfigured, loadOperator } from "../operator";
 import type { MessageKey } from "../i18n/locales/en";
 
 /**
@@ -41,6 +42,9 @@ export function HypothesisEditor({
   const { t } = useI18n();
   const [fields, setFields] = useState<HypothesisFields>(initial?.fields ?? emptyFields());
   const [brief, setBrief] = useState("");
+  const [rationale, setRationale] = useState("");
+  // Read once per open: Settings writes it, and this dialog mounts fresh.
+  const [operator] = useState(() => loadOperator());
   const [drafting, setDrafting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -82,7 +86,11 @@ export function HypothesisEditor({
     setSaving(true);
     setFailure(undefined);
     try {
-      await createHypothesis(projectRoot, fields);
+      await createHypothesis(projectRoot, fields, {
+        approver_id: operator.id,
+        approver_name: operator.name,
+        rationale
+      });
       onSaved();
       onClose();
     } catch (error: unknown) {
@@ -150,6 +158,30 @@ export function HypothesisEditor({
               </label>
             ))}
           </div>
+          {/*
+            The gate for leaving discovery requires an approval on the record
+            itself, so this is not optional decoration. It is checksummed under
+            the operator's name, which is why it is written here rather than
+            drafted by the agent.
+          */}
+          <div className="settings-row">
+            <div className="row-label">
+              <span>{t("hypothesis.rationale")}</span>
+              <small>
+                {isConfigured(operator)
+                  ? t("hypothesis.rationaleHint", { name: operator.name })
+                  : t("hypothesis.operatorMissing")}
+              </small>
+            </div>
+          </div>
+          <textarea
+            className="hypothesis-text"
+            rows={2}
+            value={rationale}
+            placeholder={t("hypothesis.rationalePlaceholder")}
+            onChange={(event) => setRationale(event.target.value)}
+          />
+
           {failure && <p className="settings-note tone-bad">{failure}</p>}
         </div>
 

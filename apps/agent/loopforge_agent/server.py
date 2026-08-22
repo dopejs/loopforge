@@ -74,6 +74,14 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             operation = self.path.split("=", 1)[1]
             self._execute(lambda: self.server.agent.runs(operation))
             return
+        if self.path.startswith("/v1/gate/"):
+            # No reason or approver here: this is the read-only view of where
+            # the project stands. Transitions that need those supply them on
+            # the advance itself, and their absence is correctly reported as a
+            # missing requirement rather than assumed.
+            stage = self.path[len("/v1/gate/") :]
+            self._execute(lambda: self.server.agent.gate(stage))
+            return
         if self.path.startswith("/v1/runs/"):
             run_id = self.path[len("/v1/runs/") :]
             self._execute(lambda: self.server.agent.run(run_id))
@@ -118,6 +126,16 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             self._execute(
                 lambda: self.server.agent.create_hypothesis(
                     body.get("fields"),
+                    str(body["approver_id"]) if body.get("approver_id") else None,
+                    str(body["approver_name"]) if body.get("approver_name") else None,
+                    str(body["rationale"]) if body.get("rationale") else None,
+                )
+            )
+        elif self.path == "/v1/advance":
+            self._execute(
+                lambda: self.server.agent.advance(
+                    str(body.get("stage", "")),
+                    str(body["reason"]) if body.get("reason") else None,
                     str(body["approver_id"]) if body.get("approver_id") else None,
                     str(body["approver_name"]) if body.get("approver_name") else None,
                     str(body["rationale"]) if body.get("rationale") else None,

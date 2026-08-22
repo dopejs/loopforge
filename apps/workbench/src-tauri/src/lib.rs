@@ -503,6 +503,53 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
     );
 }
 
+/// Whether a stage transition is allowed, and what is blocking it.
+#[tauri::command]
+fn agent_gate(project_path: String, stage: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    // The stage is a path segment, so it is constrained here rather than
+    // trusted: only the core's own uppercase stage names can be formed.
+    if stage.is_empty() || !stage.bytes().all(|b| b.is_ascii_uppercase() || b == b'_') {
+        return Err("Stage must be an uppercase stage name".to_string());
+    }
+    agent_request(
+        &metadata,
+        "GET",
+        &format!("/v1/gate/{stage}"),
+        None,
+        Duration::from_secs(15),
+    )
+}
+
+/// Performs a stage transition. The core refuses a blocked gate.
+#[tauri::command]
+fn agent_advance(
+    project_path: String,
+    stage: String,
+    approver_id: Option<String>,
+    approver_name: Option<String>,
+    rationale: Option<String>,
+) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    let mut body = json!({ "stage": stage });
+    if let (Some(id), Some(name), Some(why)) = (approver_id, approver_name, rationale) {
+        body["approver_id"] = json!(id);
+        body["approver_name"] = json!(name);
+        body["rationale"] = json!(why);
+    }
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/advance",
+        Some(body),
+        Duration::from_secs(30),
+    )
+}
+
 /// The active hypothesis, or the absence of one.
 #[tauri::command]
 fn agent_hypothesis(project_path: String) -> Result<Value, String> {
@@ -535,16 +582,32 @@ fn agent_hypothesis_draft(project_path: String, brief: String) -> Result<Value, 
 }
 
 /// Records a hypothesis from reviewed fields.
+///
+/// The approval travels whole or not at all: the core requires approver id,
+/// name and rationale together and refuses a partial set, which is the
+/// behaviour we want rather than one to work around here.
 #[tauri::command]
-fn agent_hypothesis_create(project_path: String, fields: Value) -> Result<Value, String> {
+fn agent_hypothesis_create(
+    project_path: String,
+    fields: Value,
+    approver_id: Option<String>,
+    approver_name: Option<String>,
+    rationale: Option<String>,
+) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    let mut body = json!({ "fields": fields });
+    if let (Some(id), Some(name), Some(why)) = (approver_id, approver_name, rationale) {
+        body["approver_id"] = json!(id);
+        body["approver_name"] = json!(name);
+        body["rationale"] = json!(why);
+    }
     agent_request(
         &metadata,
         "POST",
         "/v1/hypothesis",
-        Some(json!({ "fields": fields })),
+        Some(body),
         Duration::from_secs(30),
     )
 }
@@ -673,6 +736,8 @@ pub fn run() {
             agent_run,
             agent_run_engine,
             agent_project_init,
+            agent_gate,
+            agent_advance,
             agent_hypothesis,
             agent_hypothesis_draft,
             agent_hypothesis_create,

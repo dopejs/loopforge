@@ -22,7 +22,6 @@ const GLYPHS: Record<Mode | "chevron" | "check" | "folder" | "search" | "plus", 
   ),
   test: <path d="M4 12.8l4.8 4.7L20 6.4" />,
   chat: <path d="M4 7a2 2 0 012-2h12a2 2 0 012 2v7a2 2 0 01-2 2H9.5L4.5 20V7z" />,
-  diff: <path d="M7 19V6M7 6L4.2 8.8M7 6l2.8 2.8M17 5v13M17 18l2.8-2.8M17 18l-2.8-2.8" />,
   terminal: (
     <>
       <rect x="3.5" y="5" width="17" height="14" rx="2.5" />

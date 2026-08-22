@@ -26,9 +26,10 @@ describe("stepMode", () => {
 
 describe("mode classification", () => {
   it("marks only agent-backed workspaces as wired", () => {
-    // Chat streams from the runtime; Terminal and Test read engine run history
-    // and Tasks reads project state, all written by the deterministic core.
-    const wired = ["chat", "terminal", "test", "tasks"];
+    // Chat streams from the runtime; Flow reads the stage machine and its
+    // gates; Terminal and Test read engine run history; Tasks reads project
+    // state. All are served by the Agent over the deterministic core.
+    const wired = ["chat", "flow", "terminal", "test", "tasks"];
     for (const mode of wired) {
       expect(isWired(mode as (typeof WORKSPACE_MODES)[number]), mode).toBe(true);
     }

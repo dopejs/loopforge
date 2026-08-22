@@ -7,7 +7,6 @@ import { Composer, Transcript } from "./AgentPanel";
 import { CanvasWorkspace } from "./workspaces/Canvas";
 import { FlowWorkspace } from "./workspaces/Flow";
 import { TestWorkspace } from "./workspaces/Test";
-import { DiffWorkspace } from "./workspaces/Diff";
 import { TerminalWorkspace } from "./workspaces/Terminal";
 import { TasksWorkspace } from "./workspaces/Tasks";
 import { AssetsWorkspace } from "./workspaces/Assets";
@@ -80,7 +79,6 @@ const PREVIEW_WORKSPACES: Record<
   canvas: CanvasWorkspace,
   flow: FlowWorkspace,
   test: TestWorkspace,
-  diff: DiffWorkspace,
   terminal: TerminalWorkspace,
   tasks: TasksWorkspace,
   assets: AssetsWorkspace,

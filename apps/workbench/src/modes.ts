@@ -6,7 +6,6 @@ export const WORKSPACE_MODES = [
   "flow",
   "test",
   "chat",
-  "diff",
   "terminal",
   "tasks",
   "assets",
@@ -44,6 +43,7 @@ export function sidebarTitleKey(mode: WorkspaceMode): MessageKey {
  */
 const WIRED_MODES: ReadonlySet<WorkspaceMode> = new Set<WorkspaceMode>([
   "chat",
+  "flow",
   "terminal",
   "test",
   "tasks"

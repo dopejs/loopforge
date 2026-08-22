@@ -1555,46 +1555,6 @@ button:disabled {
   text-transform: uppercase;
 }
 
-/* ==================================================================== diff == */
-
-.diff-head {
-  display: flex;
-  flex: none;
-  align-items: center;
-  padding: 11px 16px;
-  border-block-end: 1px solid var(--line);
-  background: var(--surface2);
-  gap: 10px;
-}
-
-.diff-head .card-actions { margin-inline-start: auto; }
-
-.diff-body {
-  min-height: 0;
-  flex: 1;
-  padding: 10px 0;
-  font-family: var(--mono);
-  font-size: var(--font-xs);
-  line-height: 1.85;
-  overflow: auto;
-}
-
-.diff-line { display: flex; }
-.diff-line.add { background: var(--okSoft); }
-.diff-line.delete { background: var(--badSoft); }
-.diff-n {
-  width: 52px;
-  flex: none;
-  padding-inline-end: 14px;
-  color: var(--faint);
-  text-align: end;
-}
-.diff-marker { width: 14px; flex: none; }
-.diff-line.add .diff-marker { color: var(--ok); }
-.diff-line.delete .diff-marker { color: var(--bad); }
-.diff-text { color: var(--dim); white-space: pre; }
-.diff-line.add .diff-text { color: var(--text); }
-
 /* ================================================================ terminal == */
 
 .terminal-body {
@@ -2223,3 +2183,14 @@ button:disabled {
   color: var(--dim);
   font-size: var(--font-xs);
 }
+.operator-input {
+  min-width: 180px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--font-xs);
+}
+.operator-input:focus { border-color: var(--accent); outline: none; }

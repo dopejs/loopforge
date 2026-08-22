@@ -16,6 +16,7 @@ from loopforge.errors import LoopforgeError
 from loopforge.project import (
     HYPOTHESIS_FIELDS,
     HYPOTHESIS_HEADINGS,
+    TRANSITIONS,
     LoopforgeProject,
 )
 
@@ -27,6 +28,9 @@ AGENT_RESPONSE_SCHEMA = "loopforge-agent-response-v1"
 PROVIDER_SCHEMA = "loopforge-provider-v1"
 PROJECT_STATUS_SCHEMA = "loopforge-project-status-v1"
 HYPOTHESIS_SCHEMA = "loopforge-hypothesis-v1"
+GATE_SCHEMA = "loopforge-gate-v1"
+#: Reasons the core accepts for an early decision transition.
+TRANSITION_REASONS = frozenset({"technical", "scope", "abandon"})
 #: Bounds one field. Discovery answers are prose, not documents; a runaway
 #: model draft must not become an unbounded write.
 MAX_HYPOTHESIS_FIELD_CHARS = 4_000
@@ -460,6 +464,80 @@ class LoopforgeAgent:
         finally:
             Path(handle.name).unlink(missing_ok=True)
         return self.hypothesis()
+
+    def gate(
+        self,
+        stage: str,
+        reason: str | None = None,
+        approver_id: str | None = None,
+        approver_name: str | None = None,
+        rationale: str | None = None,
+    ) -> dict[str, Any]:
+        """Whether a transition is allowed, and what is stopping it.
+
+        The requirement list is returned as the core produced it, remediation
+        text included. Paraphrasing it in the Workbench would put the rule in
+        two places, and the core's wording is the actionable part.
+
+        `next_stages` is projected so a surface can show where a project may go
+        without restating the transition table -- the one thing that would
+        drift silently, since a UI-side copy stays plausible while being wrong.
+        """
+        target = str(stage or "").upper()
+        result = self.project.gate_check(
+            target, reason, approver_id, approver_name, rationale
+        )
+        return {
+            "schema_version": GATE_SCHEMA,
+            "gate": target,
+            "from_stage": str(result.get("from_stage") or ""),
+            "result": str(result.get("result") or ""),
+            "requirements": [
+                {
+                    "code": str(item.get("code") or ""),
+                    "status": str(item.get("status") or ""),
+                    "message": str(item.get("message") or ""),
+                    "evidence_ids": list(item.get("evidence_ids") or []),
+                }
+                for item in result.get("requirements") or []
+            ],
+            "next_stages": sorted(TRANSITIONS.get(result.get("from_stage") or "", set())),
+            "observed_revision": result.get("observed_revision"),
+        }
+
+    def advance(
+        self,
+        stage: str,
+        reason: str | None = None,
+        approver_id: str | None = None,
+        approver_name: str | None = None,
+        rationale: str | None = None,
+    ) -> dict[str, Any]:
+        """Perform a stage transition.
+
+        A blocked gate is raised by the core rather than pre-checked here. The
+        Workbench is allowed to attempt a transition it believes is ready; if
+        the core disagrees, its refusal is the answer, and a second copy of the
+        rule in the Agent could only ever disagree with the first.
+        """
+        if reason is not None and reason not in TRANSITION_REASONS:
+            raise LoopforgeAgentError(
+                f"Unsupported transition reason: {reason}", "TRANSITION_REASON_INVALID"
+            )
+        result = self.project.advance(
+            str(stage or "").upper(),
+            expected_revision=None,
+            reason=reason,
+            approver_id=approver_id,
+            approver_name=approver_name,
+            rationale=rationale,
+        )
+        return {
+            "schema_version": GATE_SCHEMA,
+            "from_stage": str(result.get("from_stage") or ""),
+            "to_stage": str(result.get("to_stage") or ""),
+            "committed_revision": result.get("committed_revision"),
+        }
 
     def init_project(self) -> dict[str, Any]:
         """Create the Loopforge project state for this directory.

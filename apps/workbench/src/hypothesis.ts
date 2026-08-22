@@ -89,10 +89,30 @@ export function draftHypothesis(projectRoot: string, brief: string): Promise<Hyp
   return invoke<Hypothesis>("agent_hypothesis_draft", { projectPath: projectRoot, brief });
 }
 
-/** Records reviewed fields. The Agent refuses an incomplete set. */
+/** Approver identity and reasoning, recorded alongside a hypothesis. */
+export type Approval = {
+  approver_id: string;
+  approver_name: string;
+  rationale: string;
+};
+
+/**
+ * Records reviewed fields. The Agent refuses an incomplete set.
+ *
+ * The approval is sent whole or not at all: the core requires id, name and
+ * rationale together, and half an approval would attribute a decision to
+ * nobody. Leaving discovery needs one, so this is not optional in practice.
+ */
 export function createHypothesis(
   projectRoot: string,
-  fields: HypothesisFields
+  fields: HypothesisFields,
+  approval?: Approval
 ): Promise<Hypothesis> {
-  return invoke<Hypothesis>("agent_hypothesis_create", { projectPath: projectRoot, fields });
+  const complete =
+    approval && approval.approver_id && approval.approver_name.trim() && approval.rationale.trim();
+  return invoke<Hypothesis>("agent_hypothesis_create", {
+    projectPath: projectRoot,
+    fields,
+    ...(complete ? approval : {})
+  });
 }

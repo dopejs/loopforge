@@ -9,6 +9,7 @@ import {
   type ThemePreference,
   accentColor
 } from "../appearance";
+import { type Operator, isConfigured, loadOperator, saveOperator } from "../operator";
 import { SHORTCUTS, displayShortcut, isApplePlatform } from "../shortcuts";
 import { ProviderSettings } from "./ProviderSettings";
 import type { Provider } from "../providers";
@@ -148,6 +149,9 @@ export function Settings({
   onClose: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
+  // Read on mount rather than lifted into App: this is Workbench-local, and
+  // the editor that consumes it mounts fresh each time it opens.
+  const [operator, setOperator] = React.useState<Operator>(() => loadOperator());
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardProviders, setWizardProviders] = useState<readonly Provider[]>([]);
   const apple = isApplePlatform(
@@ -189,6 +193,30 @@ export function Settings({
 
           {group === "general" && (
             <div className="settings-card">
+              {/*
+                Recorded on every approval this Workbench makes. Left blank
+                deliberately until the user fills it: an approver nobody chose
+                would attribute decisions to a placeholder.
+              */}
+              <Row
+                label={t("settings.operator")}
+                hint={
+                  isConfigured(operator)
+                    ? t("settings.operatorHint")
+                    : t("settings.operatorMissing")
+                }
+              >
+                <input
+                  className="operator-input"
+                  value={operator.name}
+                  placeholder={t("settings.operatorPlaceholder")}
+                  onChange={(event) => {
+                    const next: Operator = { ...operator, name: event.target.value };
+                    setOperator(next);
+                    saveOperator(next);
+                  }}
+                />
+              </Row>
               <Row
                 label={t("settings.general.restore")}
                 hint={t("settings.general.restoreHint")}
