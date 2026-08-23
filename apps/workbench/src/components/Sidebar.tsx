@@ -4,7 +4,7 @@ import { useI18n } from "../i18n";
 import { type WorkspaceMode, sidebarTitleKey } from "../modes";
 import { projectName } from "../projects";
 import type { AgentPhase, AgentState } from "../agent";
-import { SESSION_USAGE, SIDEBAR_ITEMS } from "../fixtures";
+import { SIDEBAR_ITEMS } from "../fixtures";
 import { useSessions } from "../providers";
 
 function ProjectSwitcher({
@@ -136,14 +136,7 @@ function AgentFooter({
       )}
       {version && <p className="footer-meta">{t("agent.runtime")} · {version}</p>}
       {phase === "unsupported" && <p className="footer-meta">{t("agent.unsupportedHint")}</p>}
-      {phase === "ready" && (
-        <p className="footer-meta preview-inline">
-          <span className="preview-dot" title={t("preview.badge")} aria-label={t("preview.badge")} />
-          {SESSION_USAGE.provider}
-          <br />
-          {SESSION_USAGE.usage}
-        </p>
-      )}
+
       {phase === "offline" && state.reason && <p className="footer-error">{state.reason}</p>}
     </div>
   );

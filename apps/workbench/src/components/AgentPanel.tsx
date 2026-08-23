@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import type { AgentPhase, AgentState, TranscriptEntry } from "../agent";
-import { AGENT_PLAN, AGENT_TOOL_CALLS, COMPOSER_CHIPS, PREVIEW_PROJECT } from "../fixtures";
 
 export function Composer({
   disabled,
@@ -121,6 +120,15 @@ export function Transcript({
   );
 }
 
+/**
+ * Shortcuts the composer inserts into the draft.
+ *
+ * Kept here rather than with the preview fixtures: these do something -- each
+ * one appends itself to what the user is typing -- and living alongside
+ * made-up canvas data made a working affordance look like a mock-up.
+ */
+const COMPOSER_CHIPS = ["@file", "/test", "/playtest"] as const;
+
 export function AgentPanel({
   phase,
   state,
@@ -139,9 +147,9 @@ export function AgentPanel({
   const { t } = useI18n();
   const nextActions = state.project?.next_actions ?? [];
   const realPlan = nextActions.length > 0;
-  const steps = realPlan
-    ? nextActions.map((title) => ({ title, meta: "", state: "done" as const }))
-    : AGENT_PLAN.map((step) => ({ ...step }));
+  // No invented fallback: the Agent either reported next actions or it did
+  // not, and a plan the user never asked for reads as work in progress.
+  const steps = nextActions.map((title) => ({ title, meta: "", state: "done" as const }));
 
   const status = {
     unsupported: t("agent.status.unsupported"),
@@ -156,7 +164,8 @@ export function AgentPanel({
       <header className="panel-header">
         <div className="section-head">
           <span className="section-title">{t("agent.title")}</span>
-          <span className="mono faint">{t("agent.runId", { id: PREVIEW_PROJECT.runId })}</span>
+          {/* A run id is shown once there is a run. Inventing one made the
+              panel look like it was tracking work that did not exist. */}
         </div>
         <p className={`agent-state ${phase}`}>
           <span className="state-dot" aria-hidden="true" />
@@ -169,12 +178,10 @@ export function AgentPanel({
         driven by `next_actions` when the Agent reports them and falls back to
         preview steps otherwise — flagged as preview in that case.
       */}
+      {realPlan && (
       <section className="panel-plan">
         <div className="section-head">
           <span className="section-title">{t("agent.plan")}</span>
-          {!realPlan && (
-            <span className="preview-dot" title={t("preview.badge")} aria-label={t("preview.badge")} />
-          )}
         </div>
         <ol className="plan-steps">
           {steps.map((step, index) => (
@@ -191,23 +198,6 @@ export function AgentPanel({
           ))}
         </ol>
       </section>
-
-      {transcript.length === 0 && (
-        <section className="panel-tools">
-          <div className="section-head">
-            <span className="section-title">{t("agent.toolCalls")}</span>
-            <span className="preview-dot" title={t("preview.badge")} aria-label={t("preview.badge")} />
-          </div>
-          <div className="tool-chips">
-            {AGENT_TOOL_CALLS.map((call) => (
-              <span key={call.name} className="tool-chip">
-                <span className="tone-ok" aria-hidden="true">✓</span>
-                <span className="mono">{call.name}</span>
-                <span className="mono faint truncate">{call.result}</span>
-              </span>
-            ))}
-          </div>
-        </section>
       )}
 
       <Transcript transcript={transcript} busy={busy} variant="panel" />

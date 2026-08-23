@@ -11,13 +11,6 @@
  * lines), which is never translated either.
  */
 
-export const PREVIEW_PROJECT = {
-  name: "星轨 Odyssey",
-  engine: "Unity 2022.3",
-  branch: "feat/boss-tuning",
-  runId: "#3412"
-} as const;
-
 /* ------------------------------------------------------------------ canvas */
 
 export const CANVAS_ASSETS = [
@@ -221,20 +214,4 @@ export const SIDEBAR_ITEMS: Record<string, readonly { label: string; sub: string
 
 /* ------------------------------------------------------------ agent panel  */
 
-export const AGENT_PLAN = [
-  { title: "Locate the phase 2 difficulty parameters", meta: "read_file · grep · 2 files", state: "done" },
-  { title: "Adjust the curve and sync config", meta: "edit_file · +24 −12", state: "done" },
-  { title: "Add regression tests", meta: "BossPhase2CurveTests · 24 cases", state: "done" },
-  { title: "Verify feel with a playtest sim", meta: "3600 frames · headless", state: "active" }
-] as const;
 
-export const AGENT_TOOL_CALLS = [
-  { name: "read_file", arg: "Assets/Scripts/Boss/ForgeGuardian.cs", result: "412 lines" },
-  { name: "grep", arg: '"phase2" in Assets/Scripts/Boss', result: "7 matches" },
-  { name: "edit_file", arg: "ForgeGuardian.cs · phase2 curve", result: "+18 −6" },
-  { name: "run_tests", arg: "BossRegression", result: "24 passed · 8.4s" }
-] as const;
-
-export const COMPOSER_CHIPS = ["@file", "/test", "/playtest"] as const;
-
-export const SESSION_USAGE = { provider: "Anthropic · claude-sonnet", usage: "38.2k tokens · $0.42" } as const;
