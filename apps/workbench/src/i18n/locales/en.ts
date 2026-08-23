@@ -694,6 +694,7 @@ export const en = {
   "wizard.save": "Save",
   "wizard.pickModel": "Choose the model this endpoint will use.",
   "wizard.noModelList": "The endpoint returned no model list. Type a model name instead.",
+  "settings.provider.live": "Saved. It is in service from the next request; nothing running was interrupted.",
 } as const;
 export type MessageKey = keyof typeof en;
 

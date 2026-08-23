@@ -30,6 +30,18 @@ export type Account = {
    * saying it is unavailable.
    */
   configured?: boolean;
+  /**
+   * Where this account's requests go, and in what shape.
+   *
+   * Taken from the account, not from the preset it was chosen under: a
+   * vendor's API-key endpoint and its subscription endpoint differ, and two of
+   * them speak a wire that is not OpenAI-compatible. Empty where no dispatch
+   * endpoint is established -- the account can still be signed in and read for
+   * usage, but is not somewhere a request is routed at a guess.
+   */
+  api_base_url?: string;
+  protocol?: string;
+  default_model?: string;
   account_label: string;
   plan: string;
   expires_at: string;

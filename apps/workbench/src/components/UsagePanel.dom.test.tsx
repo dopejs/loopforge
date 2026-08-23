@@ -48,7 +48,7 @@ function report(accounts: unknown[]) {
 
 function codex(overrides: Record<string, unknown> = {}) {
   return {
-    provider_id: "codex_managed",
+    provider_id: "openai_codex",
     available: true,
     reason: "",
     observed_at: new Date(Date.now() - 3 * 3600_000).toISOString(),
@@ -75,7 +75,7 @@ function codex(overrides: Record<string, unknown> = {}) {
 }
 
 const claudeUnavailable = {
-  provider_id: "claude_managed",
+  provider_id: "anthropic",
   available: false,
   reason: "Claude Code records no limit windows locally.",
   observed_at: "",
@@ -121,7 +121,7 @@ describe("UsagePanel", () => {
     render(<UsagePanel projectRoot="/p" />);
 
     // Omitting it would read as "no such account" rather than "no figure".
-    expect(await screen.findByText(/Claude \(subscription\)/)).toBeTruthy();
+    expect(await screen.findByText("Anthropic")).toBeTruthy();
   });
 
   it("names an account that no endpoint preset covers", async () => {

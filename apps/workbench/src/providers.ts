@@ -235,6 +235,15 @@ export function saveProviderSettings(
      * OAuth token expires in about an hour.
      */
     oauth_provider_id?: string;
+    /**
+     * The id this provider is stored and dispatched under.
+     *
+     * Taken from the source the user chose, so adding a second provider adds
+     * one rather than overwriting the first. Everything used to land in a
+     * single slot named `openai_compatible`, which is what an endpoint came
+     * back called however it had been named.
+     */
+    provider_id?: string;
   }
 ): Promise<ProviderSettings> {
   return invoke<ProviderSettings>("agent_save_provider_settings", {
@@ -244,7 +253,8 @@ export function saveProviderSettings(
     model: input.model,
     displayName: input.display_name ?? "",
     protocol: input.protocol ?? "",
-    oauthProviderId: input.oauth_provider_id ?? ""
+    oauthProviderId: input.oauth_provider_id ?? "",
+    providerId: input.provider_id ?? ""
   });
 }
 
@@ -288,55 +298,6 @@ export function forgetProviderSettings(projectRoot: string): Promise<ProviderSet
  * runtime keeps auth state only once something has. That is a state to render,
  * not an error, and it is why the first thing the surface offers is a check.
  */
-export type ProviderAuth = {
-  schema_version: "loopforge-provider-auth-v1";
-  provider_id: string;
-  status: "unknown" | "login_required" | "pending_login" | "authenticated" | "revoked" | "error";
-  checked: boolean;
-  auth_mode: string;
-  /** Without the borrowed tool installed, no sign-in is possible at all. */
-  cli_available: boolean;
-  cli_path: string;
-  account_label: string;
-  plan: string;
-  /** What the user runs themselves. Nothing here spawns it for them. */
-  login_command: readonly string[];
-  logout_command: readonly string[];
-  last_error: string;
-  models?: readonly ProviderModel[];
-};
-
-export function providerAuth(
-  projectRoot: string,
-  providerId: string
-): Promise<ProviderAuth> {
-  return invoke<ProviderAuth>("agent_provider_auth", {
-    projectPath: projectRoot,
-    providerId
-  });
-}
-
-export function providerAuthAction(
-  projectRoot: string,
-  providerId: string,
-  action: "start" | "complete" | "refresh" | "revoke"
-): Promise<ProviderAuth> {
-  return invoke<ProviderAuth>("agent_provider_auth_action", {
-    projectPath: projectRoot,
-    providerId,
-    action
-  });
-}
-
-/** Mirrors `loopforge-provider-probe-v1`. */
-export type ProviderProbe = {
-  schema_version: "loopforge-provider-probe-v1";
-  reachable: boolean;
-  models: readonly string[];
-  /** Present when the endpoint answered; absent when it was never reached. */
-  status?: number;
-  error?: string;
-};
 
 /**
  * Asks an endpoint what models it serves, before anything is stored.
@@ -346,14 +307,29 @@ export type ProviderProbe = {
  * typed. It doubles as the connection check: a wrong key answers 401 here
  * instead of failing a conversation after a restart.
  */
+/** What an endpoint answered when asked for its model list. */
+export type ProviderProbe = {
+  schema_version: string;
+  reachable: boolean;
+  /** The status it answered with, where it answered at all. */
+  status?: number;
+  models: readonly string[];
+  error?: string;
+};
+
 export function probeProvider(
   projectRoot: string,
   baseUrl: string,
-  apiKey: string
+  apiKey: string,
+  protocol = "openai_compatible",
+  /** A signed-in account to draw the credential from, instead of a key. */
+  oauthProviderId = ""
 ): Promise<ProviderProbe> {
   return invoke<ProviderProbe>("agent_probe_provider", {
     projectPath: projectRoot,
     baseUrl,
-    apiKey
+    apiKey,
+    protocol,
+    oauthProviderId
   });
 }

@@ -691,4 +691,5 @@ export const es: Messages = {
   "wizard.save": "Guardar",
   "wizard.pickModel": "Elige el modelo que usará este endpoint.",
   "wizard.noModelList": "El endpoint no devolvió una lista de modelos. Escribe un nombre de modelo.",
+  "settings.provider.live": "Guardado. Entra en servicio a partir de la próxima solicitud; nada en curso se interrumpió.",
 };

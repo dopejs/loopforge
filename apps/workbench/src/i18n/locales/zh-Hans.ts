@@ -691,4 +691,5 @@ export const zhHans: Messages = {
   "wizard.save": "保存",
   "wizard.pickModel": "选择该 endpoint 要使用的模型。",
   "wizard.noModelList": "该 endpoint 没有返回模型列表，请手动填写模型名。",
+  "settings.provider.live": "已保存。下一次请求即生效，不会打断正在运行的任务。",
 };

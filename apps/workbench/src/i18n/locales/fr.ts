@@ -691,4 +691,5 @@ export const fr: Messages = {
   "wizard.save": "Enregistrer",
   "wizard.pickModel": "Choisissez le modèle que cet endpoint utilisera.",
   "wizard.noModelList": "L'endpoint n'a renvoyé aucune liste de modèles. Saisissez un nom de modèle.",
+  "settings.provider.live": "Enregistré. Actif dès la prochaine requête ; rien en cours n'a été interrompu.",
 };

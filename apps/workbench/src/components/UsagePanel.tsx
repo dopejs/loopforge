@@ -41,7 +41,7 @@ const WINDOW_LABEL: Record<string, MessageKey> = {
  * it up in and a bare `kimi` is not what the user chose.
  */
 function accountName(account: AccountUsage): string {
-  const preset = SOURCES.find((source) => source.providerId === account.provider_id);
+  const preset = SOURCES.find((source) => source.oauthProviderId === account.provider_id);
   return preset?.name ?? account.display_name ?? account.provider_id;
 }
 

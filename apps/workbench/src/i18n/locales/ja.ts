@@ -691,4 +691,5 @@ export const ja: Messages = {
   "wizard.save": "保存",
   "wizard.pickModel": "このエンドポイントで使うモデルを選んでください。",
   "wizard.noModelList": "モデル一覧が返りませんでした。モデル名を入力してください。",
+  "settings.provider.live": "保存しました。次のリクエストから有効になり、実行中の処理は中断されません。",
 };

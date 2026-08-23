@@ -692,4 +692,5 @@ export const ar: Messages = {
   "wizard.save": "حفظ",
   "wizard.pickModel": "اختر النموذج الذي ستستخدمه نقطة النهاية هذه.",
   "wizard.noModelList": "لم تُرجع نقطة النهاية قائمة نماذج. اكتب اسم نموذج بدلاً من ذلك.",
+  "settings.provider.live": "تم الحفظ. يسري من الطلب التالي، ولم يُقاطَع أي عمل جارٍ.",
 };

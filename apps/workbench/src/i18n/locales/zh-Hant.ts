@@ -691,4 +691,5 @@ export const zhHant: Messages = {
   "wizard.save": "儲存",
   "wizard.pickModel": "選擇該 endpoint 要使用的模型。",
   "wizard.noModelList": "該 endpoint 沒有回傳模型清單，請手動填寫模型名稱。",
+  "settings.provider.live": "已儲存。下一次請求即生效，不會中斷正在執行的工作。",
 };

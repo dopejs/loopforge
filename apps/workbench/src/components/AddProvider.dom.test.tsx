@@ -187,6 +187,10 @@ describe("AddProvider", () => {
       expect(payload.baseUrl).toBe("https://api.deepseek.com/v1");
       expect(payload.displayName).toBe("DeepSeek");
       expect(payload.protocol).toBe("openai_compatible");
+      // Its own id: every endpoint used to be written into one slot called
+      // `openai_compatible`, so a second provider replaced the first and both
+      // came back under that name.
+      expect(payload.providerId).toBe("deepseek");
     });
   });
 
@@ -208,40 +212,160 @@ describe("AddProvider", () => {
   });
 
 
-  it("offers subscription accounts as sources", async () => {
+  it("offers a vendor whose subscription can be signed into", async () => {
     mockAgent();
     open();
 
-    // The design's account tier, which Kura reaches by borrowing a CLI the
-    // user has already signed into.
-    expect(await screen.findByRole("button", { name: /Claude \(subscription\)/ })).toBeTruthy();
+    // Claude is reached by signing into the subscription and calling the
+    // vendor's API, not by borrowing a command-line tool.
+    expect(await screen.findByRole("button", { name: /Anthropic/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Codex/ })).toBeTruthy();
   });
 
-  it("signs an account in rather than asking it for an endpoint", async () => {
+
+  it("asks a subscription vendor for its endpoint like any other", async () => {
+    accounts = [
+      { id: "openai_codex", name: "Codex", flow: "callback", signed_in: false,
+        account_label: "", plan: "", expires_at: "", grant_deadline: "", configured: true }
+    ];
     mockAgent();
     open();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Claude \(subscription\)/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Codex/ }));
 
-    // No endpoint or key: the session was established elsewhere.
-    await waitFor(() =>
-      expect(screen.queryByPlaceholderText("https://api.example.com/v1")).toBeNull()
-    );
-    expect(screen.queryByText("API key")).toBeNull();
-    expect(await screen.findByRole("button", { name: "Check sign-in" })).toBeTruthy();
+    // It is an endpoint with a credential, not a separate kind of thing: what
+    // differs is only where the credential comes from.
+    expect(screen.getByText("https://chatgpt.com/backend-api/codex")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Use a signed-in account" })).toBeTruthy();
   });
 
-  it("shows the command to run rather than pretending to run it", async () => {
+
+  it("probes the account's own endpoint, with its own credential", async () => {
+    // Probing the preset's URL with the key field -- empty, because the
+    // account supplies the credential -- asked the wrong endpoint about a key
+    // the user never typed, and reported its 401 as their mistake.
+    accounts = [
+      { id: "anthropic", name: "Claude", flow: "callback", signed_in: true,
+        account_label: "", plan: "", expires_at: "", grant_deadline: "", configured: true,
+        api_base_url: "https://api.anthropic.com", protocol: "anthropic_messages",
+        default_model: "claude-sonnet-4-5" }
+    ];
     mockAgent();
     open();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Claude \(subscription\)/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Anthropic/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use a signed-in account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
-    // The login belongs to the user's own account, so the honest instruction
-    // is the command, not a button that opens nothing.
-    expect(await screen.findByText("claude login")).toBeTruthy();
-    expect(screen.getByText(/does not run it for you/)).toBeTruthy();
+    await waitFor(() => {
+      const call = invoke.mock.calls.find(([command]) => command === "agent_probe_provider");
+      expect(call).toBeTruthy();
+      const sent = (call as [string, Record<string, unknown>])[1];
+      expect(sent.baseUrl).toBe("https://api.anthropic.com");
+      expect(sent.protocol).toBe("anthropic_messages");
+      expect(sent.oauthProviderId).toBe("anthropic");
+    });
   });
+
+  it("saves the account's own endpoint, not the preset's", async () => {
+    accounts = [
+      { id: "anthropic", name: "Claude", flow: "callback", signed_in: true,
+        account_label: "", plan: "", expires_at: "", grant_deadline: "", configured: true,
+        api_base_url: "https://api.anthropic.com", protocol: "anthropic_messages",
+        default_model: "claude-sonnet-4-5" }
+    ];
+    mockAgent();
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Anthropic/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use a signed-in account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.change(await screen.findByPlaceholderText("claude-sonnet-4-5"), {
+      target: { value: "claude-sonnet-4-5" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const call = invoke.mock.calls.find(
+        ([command]) => command === "agent_save_provider_settings"
+      );
+      // A vendor's API-key URL and its subscription URL are not the same.
+      expect((call as [string, Record<string, unknown>])[1].baseUrl).toBe(
+        "https://api.anthropic.com"
+      );
+    });
+  });
+
+  it("offers a way back out of a signed-in account", async () => {
+    accounts = [
+      { id: "anthropic", name: "Claude", flow: "callback", signed_in: true,
+        account_label: "", plan: "", expires_at: "", grant_deadline: "", configured: true,
+        api_base_url: "https://api.anthropic.com", protocol: "anthropic_messages",
+        default_model: "claude-sonnet-4-5" }
+    ];
+    mockAgent();
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Anthropic/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use a signed-in account" }));
+
+    // A grant can be refused later -- these expire outright about a month
+    // after the interactive login -- and there was no way to establish a new
+    // one once the first existed.
+    expect(await screen.findByRole("button", { name: "Sign out" })).toBeTruthy();
+  });
+
+  it("shows the sign-in URL even when a browser cannot be opened", async () => {
+    accounts = [
+      { id: "openai_codex", name: "Codex", flow: "callback", signed_in: false,
+        account_label: "", plan: "", expires_at: "", grant_deadline: "", configured: true }
+    ];
+    invoke.mockImplementation((command: string) => {
+      if (command === "agent_oauth_accounts") return Promise.resolve({ accounts });
+      if (command === "agent_provider_settings") return Promise.resolve(settings());
+      if (command === "agent_providers") return Promise.resolve({ providers: [], roles: [] });
+      if (command === "agent_oauth_begin") {
+        return Promise.resolve({
+          provider_id: "openai_codex",
+          flow: "callback",
+          url: "https://auth.openai.com/oauth/authorize?x=1",
+          user_code: ""
+        });
+      }
+      // The shell cannot launch a browser here.
+      if (command === "open_external") return Promise.reject(new Error("no opener"));
+      if (command === "agent_oauth_complete") return new Promise(() => {});
+      throw new Error(`unexpected command: ${command}`);
+    });
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Codex/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use a signed-in account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    // Without this the user waits on a page that never opened, with nothing
+    // to click and no way to tell why.
+    const link = await screen.findByRole("link", { name: /Open the sign-in page/ });
+    expect(link.getAttribute("href")).toBe("https://auth.openai.com/oauth/authorize?x=1");
+  });
+
+  it("signs a subscription in here rather than through its command-line tool", async () => {
+    accounts = [
+      { id: "openai_codex", name: "Codex", flow: "callback", signed_in: false,
+        account_label: "", plan: "", expires_at: "", grant_deadline: "", configured: true }
+    ];
+    mockAgent();
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Codex/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use a signed-in account" }));
+
+    // Driving the vendor's own agent cost twenty-seven thousand tokens for a
+    // ten-token question, so the subscription is reached directly.
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+    expect(screen.queryByText(/claude login/)).toBeNull();
+  });
+
 
   it("asks the endpoint for its catalogue on the way to the model step", async () => {
     mockAgent();

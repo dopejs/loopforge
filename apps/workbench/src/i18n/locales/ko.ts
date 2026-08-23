@@ -691,4 +691,5 @@ export const ko: Messages = {
   "wizard.save": "저장",
   "wizard.pickModel": "이 엔드포인트가 사용할 모델을 선택하세요.",
   "wizard.noModelList": "모델 목록이 반환되지 않았습니다. 모델 이름을 입력하세요.",
+  "settings.provider.live": "저장되었습니다. 다음 요청부터 적용되며 실행 중인 작업은 중단되지 않습니다.",
 };

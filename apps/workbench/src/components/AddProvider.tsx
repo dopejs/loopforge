@@ -5,18 +5,16 @@ import {
   beginSignIn,
   completeSignIn,
   openExternal,
+  signOut,
   useAccounts
 } from "../accounts";
 import { errorMessage } from "../daemon";
 import { isDesktopRuntime } from "../agent";
 import {
   type Provider,
-  type ProviderAuth,
   clearModelRole,
   type ProviderProbe,
   probeProvider,
-  providerAuth,
-  providerAuthAction,
   forgetProviderSettings,
   routeModelRole,
   saveProviderSettings,
@@ -25,7 +23,6 @@ import {
 } from "../providers";
 import {
   type Source,
-  isAccountSource,
   matchSources,
   needsApiKey,
   sourceForBaseUrl,
@@ -44,7 +41,6 @@ const STEP_LABEL: Record<Step, MessageKey> = {
 };
 
 const KIND_HINT: Record<Source["kind"], MessageKey> = {
-  account: "wizard.hint.account",
   cloud: "wizard.hint.cloud",
   local: "wizard.hint.local",
   custom: "wizard.hint.custom"
@@ -57,7 +53,6 @@ const KIND_HINT: Record<Source["kind"], MessageKey> = {
  * caught adding a kind without its label.
  */
 const KIND_BADGE: Record<Source["kind"], MessageKey> = {
-  account: "wizard.kind.account",
   cloud: "wizard.kind.cloud",
   local: "wizard.kind.local",
   custom: "wizard.kind.custom"
@@ -170,17 +165,32 @@ export function AddProvider({
    */
   const advance = async (): Promise<void> => {
     if (busy || !source || !isDesktopRuntime()) return;
+    // An account brings its own endpoint, wire and credential. Probing with
+    // the key field -- empty, because the account supplies it -- and against
+    // the OpenAI shape, which this vendor does not serve, produced a 401 about
+    // a key the user never typed.
+    const account = oauthProviderId ? vendorAccount : null;
+    const endpoint = account?.api_base_url || baseUrl;
+    const protocol = account?.protocol || "openai_compatible";
     setBusy(true);
     setFailure(undefined);
     try {
-      const found = await probeProvider(projectRoot, baseUrl, apiKey);
+      const found = await probeProvider(
+        projectRoot,
+        endpoint,
+        apiKey,
+        protocol,
+        oauthProviderId
+      );
       setModels(found.reachable ? found.models : []);
       if (!found.reachable && found.status === 401) {
         setFailure(t("wizard.probeBadKey"));
         return;
       }
     } catch {
-      setModels([]);
+      // A catalogue is a convenience. A vendor that does not publish one still
+      // works when the user names a model, so the step advances either way.
+      setModels(account?.default_model ? [account.default_model] : []);
     } finally {
       setBusy(false);
     }
@@ -193,12 +203,17 @@ export function AddProvider({
     setFailure(undefined);
     try {
       await saveProviderSettings(projectRoot, {
-        base_url: baseUrl,
+        // The account's endpoint wins where one supplies the credential: the
+        // preset's URL is the API-key one, which is not always the same.
+        base_url:
+          (oauthProviderId && vendorAccount?.api_base_url) || baseUrl,
         api_key: apiKey,
         model,
         display_name: displayName,
-        protocol: source.protocol,
-        oauth_provider_id: oauthProviderId
+        protocol: vendorAccount?.protocol || source.protocol,
+        oauth_provider_id: oauthProviderId,
+        // Named after the source, so a second provider is a second provider.
+        provider_id: oauthProviderId || source.id
       });
       setApiKey("");
       setSaved(true);
@@ -265,11 +280,7 @@ export function AddProvider({
             />
           )}
 
-          {step === "connection" && source && isAccountSource(source) && (
-            <AccountStep source={source} projectRoot={projectRoot} />
-          )}
-
-          {step === "connection" && source && !isAccountSource(source) && (
+          {step === "connection" && source && (
             <ConnectionStep
               source={source}
               projectRoot={projectRoot}
@@ -341,16 +352,7 @@ export function AddProvider({
             <button type="button" className="secondary-button" onClick={onClose}>
               {t("action.close")}
             </button>
-            {step === "connection" && source && isAccountSource(source) && (
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => setStep("models")}
-              >
-                {t("wizard.next")}
-              </button>
-            )}
-            {step === "connection" && source && !isAccountSource(source) && (
+            {step === "connection" && source && (
               <button
                 type="button"
                 className="primary-button"
@@ -460,6 +462,19 @@ function AccountCredential({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
 
+  async function leave(): Promise<void> {
+    setBusy(true);
+    setFailure("");
+    try {
+      await signOut(projectRoot, account.id);
+      onSignedIn();
+    } catch (error: unknown) {
+      setFailure(errorMessage(error, t("account.failed")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (account.signed_in) {
     return (
       <>
@@ -467,7 +482,17 @@ function AccountCredential({
           <span className="badge ok">{t("account.signedIn")}</span>{" "}
           {account.account_label || account.name}
         </p>
+        {/*
+          A way back out. A grant can be refused later -- these expire outright
+          about a month after the interactive login -- and without this the
+          only recovery was to sign in again somewhere that no longer exists.
+        */}
+        <button type="button" className="ghost-button small" disabled={busy} onClick={leave}>
+          {t("account.signOut")}
+        </button>
         <small className="field-hint">{t("wizard.accountCredential")}</small>
+        <small className="field-hint">{t("account.localOnly")}</small>
+        {failure && <p className="settings-note issue-line">{failure}</p>}
       </>
     );
   }
@@ -478,6 +503,9 @@ function AccountCredential({
     try {
       const started = await beginSignIn(projectRoot, account.id);
       setPending({ url: started.url, user_code: started.user_code });
+      // Failure to launch is not fatal, but it must be visible: the URL is
+      // shown either way, so a shell that cannot open a browser leaves the
+      // user with something to click rather than a wait that never ends.
       void openExternal(started.url).catch(() => {});
       await completeSignIn(projectRoot, account.id);
       setPending(null);
@@ -514,6 +542,9 @@ function AccountCredential({
           ) : (
             <span>{t("account.waiting")}</span>
           )}
+          <a href={pending.url} target="_blank" rel="noreferrer" className="mono">
+            {t("account.openPage")}
+          </a>
         </div>
       )}
       {failure && <p className="settings-note issue-line">{failure}</p>}
@@ -599,22 +630,13 @@ function ConnectionStep({
         />
       </label>
 
-      <label className="field-block">
-        <span className="field-label">{t("wizard.protocol")}</span>
-        {/*
-          One option, shown rather than hidden: it is what the endpoint has to
-          speak, and a form that omitted it would leave the user guessing why
-          an endpoint that is not OpenAI-compatible fails.
-        */}
-        <select
-          className="field-input"
-          value={source.protocol}
-          disabled
-          aria-readonly="true"
-        >
-          <option value="openai_compatible">OpenAI-compatible</option>
-        </select>
-      </label>
+      {/*
+        A preset carries its own protocol, so there is nothing to choose. The
+        field was a select with one option, permanently disabled -- it asked
+        the user to confirm something they had already decided by picking the
+        preset. A custom endpoint has the same single option today, so it is
+        stated in the hint above rather than dressed up as a choice.
+      */}
 
       {/*
         A chosen preset already carries its endpoint. Presenting it as a field
@@ -789,7 +811,9 @@ function ModelsStep({
         </small>
       </label>
 
-      {saved && <p className="wizard-note tone-ok">{t("settings.provider.restart")}</p>}
+      {/* Live on the next request; nothing to restart and nothing in flight
+          was ended to get there. */}
+      {saved && <p className="wizard-note tone-ok">{t("settings.provider.live")}</p>}
 
       <span className="field-label dialog-section">{t("wizard.roleRouting")}</span>
       <p className="wizard-note">{t("wizard.roleHint")}</p>
@@ -829,142 +853,3 @@ function ModelsStep({
   );
 }
 
-/**
- * Connecting a subscription account.
- *
- * Nothing here signs the user in. A managed provider borrows a command-line
- * tool they have already authenticated -- the runtime can see whether that
- * tool exists and whether it is signed in, and it hands back the command to
- * run, but running it belongs to the user and their own account. So this shows
- * the state, shows the command, and offers to re-check.
- */
-function AccountStep({
-  source,
-  projectRoot
-}: {
-  source: Source;
-  projectRoot: string;
-}): React.JSX.Element {
-  const { t } = useI18n();
-  const [auth, setAuth] = useState<ProviderAuth | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<string>();
-  const providerId = source.providerId ?? source.id;
-
-  const load = React.useCallback(async () => {
-    try {
-      setAuth(await providerAuth(projectRoot, providerId));
-    } catch (error: unknown) {
-      setFailure(errorMessage(error, t("wizard.authFailed")));
-    }
-  }, [projectRoot, providerId, t]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const act = async (action: "start" | "complete" | "refresh" | "revoke"): Promise<void> => {
-    if (busy || !isDesktopRuntime()) return;
-    setBusy(true);
-    setFailure(undefined);
-    try {
-      setAuth(await providerAuthAction(projectRoot, providerId, action));
-    } catch (error: unknown) {
-      setFailure(errorMessage(error, t("wizard.authFailed")));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const status = auth?.status ?? "unknown";
-  const signedIn = status === "authenticated";
-  const command = (auth?.login_command ?? []).join(" ");
-
-  return (
-    <>
-      <p className="wizard-note">{t("wizard.hint.account")}</p>
-
-      <div className="settings-row">
-        <div className="row-label">
-          <span>{source.name}</span>
-          <small>
-            {signedIn && auth?.account_label
-              ? [auth.account_label, auth.plan].filter(Boolean).join(" · ")
-              : auth?.checked === false
-                ? t("wizard.authUnchecked")
-                : t("wizard.authCliMissing")}
-          </small>
-        </div>
-        <span className={`badge ${signedIn ? "ok" : ""}`}>
-          {t(AUTH_BADGE[status] ?? "wizard.badge.idle")}
-        </span>
-      </div>
-
-      {/*
-        Stated before anything else is offered: without the tool installed
-        there is no sign-in to attempt, and a button that opened nothing would
-        be the worst possible answer.
-      */}
-      {auth?.checked && !auth.cli_available && (
-        <p className="wizard-note tone-bad">{t("wizard.authCliMissing")}</p>
-      )}
-
-      {auth?.cli_available && !signedIn && command && (
-        <>
-          <p className="wizard-note">{t("wizard.authRunCommand")}</p>
-          <pre className="run-stream">{command}</pre>
-        </>
-      )}
-
-      {signedIn && auth?.models && auth.models.length > 0 && (
-        <p className="wizard-note">
-          {t("wizard.acctModels")}: {auth.models.length}
-        </p>
-      )}
-
-      <div className="card-actions dialog-section">
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={() => void act("refresh")}
-          disabled={busy}
-        >
-          {busy ? t("wizard.authChecking") : t("wizard.authCheck")}
-        </button>
-        {auth?.cli_available && !signedIn && (
-          <>
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => void act("start")}
-              disabled={busy}
-            >
-              {t("wizard.signIn")}
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => void act("complete")}
-              disabled={busy}
-            >
-              {t("wizard.confirmed")}
-            </button>
-          </>
-        )}
-        {signedIn && (
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void act("revoke")}
-            disabled={busy}
-          >
-            {t("wizard.signOut")}
-          </button>
-        )}
-      </div>
-
-      {auth?.last_error && <p className="wizard-note tone-bad">{auth.last_error}</p>}
-      {failure && <p className="wizard-note tone-bad">{failure}</p>}
-    </>
-  );
-}
