@@ -4,6 +4,7 @@ use std::fs::{self, OpenOptions};
 use std::io;
 use std::io::{BufRead, BufReader};
 use std::net::{SocketAddr, TcpListener};
+use std::sync::Mutex;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -26,6 +27,143 @@ struct AgentRuntimeMetadata {
     bind_addr: String,
     token: String,
     project_root: String,
+    /// The Agent process, so it can be ended with the window that opened it.
+    ///
+    /// Recorded rather than only held in memory: an app that crashed leaves an
+    /// Agent behind, and the next launch has to be able to adopt or replace it
+    /// instead of leaving a process the user never asked for running forever.
+    #[serde(default)]
+    pid: u32,
+}
+
+/// Agent processes this app is responsible for ending.
+///
+/// The lifetime of an Agent -- and of the runtime it supervises -- is the
+/// lifetime of the app. A `Child` dropped at the end of a command does not end
+/// its process, so without this the Agent outlived every window that ever
+/// opened it, and a fix never reached the user because the stale process kept
+/// answering.
+static SUPERVISED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// Matched against the process table when reclaiming orphans.
+const AGENT_BINARY_NAME: &str = "loopforge-agent";
+
+/// Whether this app run is the one that started that Agent.
+fn supervised(pid: u32) -> bool {
+    SUPERVISED.lock().map(|pids| pids.contains(&pid)).unwrap_or(false)
+}
+
+/// Ends every Agent serving this project that this run did not start.
+///
+/// Orphans are the app's problem, not the user's. An Agent left by a crashed
+/// or force-quit launch keeps answering on its old port, so the shell talks to
+/// a previous build, a rebuilt sidecar never reaches the user, and the only
+/// recovery is finding and killing a process by hand -- which nobody outside
+/// this repository is going to do.
+///
+/// The recorded address is used to ask politely and then discarded. It is
+/// never waited on and never reused: the replacement gets a fresh port, so a
+/// port that stays held by something else cannot block a working start.
+fn reclaim_agents(root: &Path) {
+    if let Ok(Some(metadata)) = load_runtime(root) {
+        // Politely first, because the Agent stops its Kura daemon on the way
+        // out; killing it outright would leave that daemon running instead.
+        let _ = agent_request(
+            &metadata,
+            "POST",
+            "/v1/shutdown",
+            Some(json!({})),
+            Duration::from_secs(5),
+        );
+        if metadata.pid > 0 && !supervised(metadata.pid) {
+            terminate(metadata.pid);
+        }
+        let _ = fs::remove_file(runtime_path(root));
+    }
+    // And anything the metadata no longer knows about. A file deleted while an
+    // Agent was running leaves a process nothing can name, which is exactly
+    // the case a user cannot recover from.
+    for pid in agent_pids_for(root) {
+        if !supervised(pid) {
+            terminate(pid);
+        }
+    }
+}
+
+/// Agent processes serving this project, by inspecting the process table.
+#[cfg(unix)]
+fn agent_pids_for(root: &Path) -> Vec<u32> {
+    let Ok(output) = Command::new("ps").args(["-axo", "pid=,args="]).output() else {
+        return Vec::new();
+    };
+    let needle = format!("--project {}", root.display());
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| line.contains(AGENT_BINARY_NAME) && line.contains(&needle))
+        .filter_map(|line| line.trim().split_whitespace().next()?.parse().ok())
+        .collect()
+}
+
+#[cfg(not(unix))]
+fn agent_pids_for(_root: &Path) -> Vec<u32> {
+    Vec::new()
+}
+
+/// Ends one process, politely then not.
+fn terminate(pid: u32) {
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+        for _ in 0..30 {
+            thread::sleep(Duration::from_millis(100));
+            if unsafe { libc::kill(pid as i32, 0) } != 0 {
+                return;
+            }
+        }
+        unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    }
+    #[cfg(not(unix))]
+    let _ = pid;
+}
+
+fn supervise(pid: u32) {
+    if let Ok(mut pids) = SUPERVISED.lock() {
+        if !pids.contains(&pid) {
+            pids.push(pid);
+        }
+    }
+}
+
+/// Ends every supervised Agent, and with it the runtime each one started.
+///
+/// `SIGTERM` first and only then `SIGKILL`: the Agent stops its Kura daemon in
+/// a signal handler, so killing it outright would orphan the very process this
+/// is trying to clean up.
+fn stop_supervised() {
+    let pids = SUPERVISED.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default();
+    #[cfg(unix)]
+    for pid in &pids {
+        unsafe { libc::kill(*pid as i32, libc::SIGTERM) };
+    }
+    if pids.is_empty() {
+        return;
+    }
+    // Long enough for the Agent to stop its daemon, short enough that quitting
+    // still feels immediate.
+    for _ in 0..30 {
+        thread::sleep(Duration::from_millis(100));
+        #[cfg(unix)]
+        if pids
+            .iter()
+            .all(|pid| unsafe { libc::kill(*pid as i32, 0) } != 0)
+        {
+            return;
+        }
+    }
+    #[cfg(unix)]
+    for pid in &pids {
+        unsafe { libc::kill(*pid as i32, libc::SIGKILL) };
+    }
 }
 
 fn project_root(path: &str) -> Result<PathBuf, String> {
@@ -266,16 +404,35 @@ async fn select_project_directory(app: AppHandle) -> Result<Option<String>, Stri
 #[tauri::command]
 fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
-    let current = agent_status_for_root(&root)?;
-    if current.get("ready").and_then(Value::as_bool) == Some(true) {
-        return Ok(current);
+    // An Agent this run started is reused; anything else is reclaimed.
+    //
+    // An Agent left by a previous launch runs a previous build, and nothing
+    // from the outside can tell which. Reusing it meant a rebuilt sidecar
+    // never reached the user: the old process kept answering, kept failing the
+    // same way, and restarting the app changed nothing.
+    if let Some(metadata) = load_runtime(&root)? {
+        if metadata.pid > 0 && supervised(metadata.pid) {
+            let current = agent_status_for_root(&root)?;
+            if current.get("ready").and_then(Value::as_bool) == Some(true) {
+                return Ok(current);
+            }
+            // Ours, but its runtime is down, which it can be asked to fix.
+            if agent_request(&metadata, "GET", "/healthz", None, Duration::from_secs(2)).is_ok() {
+                let mut status = agent_request(
+                    &metadata,
+                    "POST",
+                    "/v1/start",
+                    Some(json!({})),
+                    Duration::from_secs(60),
+                )?;
+                if let Some(object) = status.as_object_mut() {
+                    object.insert("managed".to_string(), Value::Bool(true));
+                }
+                return Ok(status);
+            }
+        }
     }
-    if current.get("managed").and_then(Value::as_bool) == Some(true) {
-        return Err(format!(
-            "Loopforge Agent metadata exists but the Agent is unreachable; inspect {} before recovery",
-            runtime_path(&root).display()
-        ));
-    }
+    reclaim_agents(&root);
     let agent_binary = bundled_agent_binary(&app).ok_or_else(|| {
         "Loopforge Agent sidecar is missing; run pnpm build:agent or set LOOPFORGE_AGENT_BIN"
             .to_string()
@@ -290,11 +447,13 @@ fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
         .map_err(|error| error.to_string())?
         .port();
     drop(listener);
-    let metadata = AgentRuntimeMetadata {
+    let mut metadata = AgentRuntimeMetadata {
         schema_version: AGENT_RUNTIME_SCHEMA.to_string(),
         bind_addr: format!("127.0.0.1:{port}"),
         token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
         project_root: root.to_string_lossy().into_owned(),
+        // Filled in once the process exists.
+        pid: 0,
     };
     let path = log_path(&root);
     if let Some(parent) = path.parent() {
@@ -329,6 +488,8 @@ fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
         .stderr(Stdio::from(stderr))
         .spawn()
         .map_err(|error| format!("failed to start Loopforge Agent: {error}"))?;
+    metadata.pid = child.id();
+    supervise(metadata.pid);
     if let Err(error) = save_runtime(&root, &metadata) {
         let _ = child.kill();
         return Err(error);
@@ -364,12 +525,42 @@ fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
         }
         thread::sleep(Duration::from_millis(200));
     }
+    // Why it exited, before anything else. A sidecar killed by the operating
+    // system -- an invalid code signature is the one that actually happens --
+    // writes nothing at all, so reporting only the log leaves the user with an
+    // error that names no cause.
+    let exited = child.try_wait().ok().flatten();
     let _ = child.kill();
     let _ = fs::remove_file(runtime_path(&root));
     let log_tail = fs::read(&path).unwrap_or_default();
+    let detail = command_error(&log_tail);
+    let how = match exited {
+        Some(status) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt;
+                match status.signal() {
+                    Some(9) => " (killed by the system on launch: the sidecar's \
+code signature was rejected; rebuild with pnpm build:agent)"
+                        .to_string(),
+                    Some(signal) => format!(" (killed by signal {signal})"),
+                    None => format!(" (exited with status {})", status.code().unwrap_or(-1)),
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                format!(" (exited with status {})", status.code().unwrap_or(-1))
+            }
+        }
+        None => String::new(),
+    };
     Err(format!(
-        "Loopforge Agent did not become ready: {}",
-        command_error(&log_tail)
+        "Loopforge Agent did not become ready{how}{}",
+        if detail.is_empty() {
+            String::new()
+        } else {
+            format!(": {detail}")
+        }
     ))
 }
 
@@ -1334,8 +1525,21 @@ pub fn run() {
             agent_hypothesis_create,
             agent_project_status
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Loopforge Workbench");
+        .build(tauri::generate_context!())
+        .expect("error while running Loopforge Workbench")
+        .run(|_app, event| {
+            // The Agent -- and the Kura daemon it supervises -- live exactly as
+            // long as the app. Both `Exit` and `ExitRequested` are handled
+            // because a window closed by the user reaches one and a quit
+            // reaches the other, and an Agent that survives either is a process
+            // the user never asked to keep running.
+            if matches!(
+                event,
+                tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+            ) {
+                stop_supervised();
+            }
+        });
 }
 
 #[cfg(test)]
@@ -1358,7 +1562,107 @@ mod tests {
             bind_addr: "127.0.0.1:43210".into(),
             token: "a".repeat(64),
             project_root: root.to_string_lossy().into_owned(),
+            pid: 0,
         }
+    }
+
+    /// A process that looks like an Agent for `root`, without being one.
+    fn fake_agent(root: &Path) -> std::process::Child {
+        Command::new("/bin/sh")
+            .args([
+                "-c",
+                &format!(
+                    "exec -a '{} serve --project {} --host 127.0.0.1' sleep 30",
+                    AGENT_BINARY_NAME,
+                    root.display()
+                ),
+            ])
+            .spawn()
+            .expect("spawned")
+    }
+
+    #[test]
+    fn an_orphan_is_found_by_the_project_it_serves() {
+        // The case a user cannot recover from: an Agent still running with no
+        // metadata naming it. It has to be findable from the process table, or
+        // it stays up forever answering for a build nobody is running.
+        let root = temporary_root("orphan-scan");
+        let child = fake_agent(&root);
+        let pid = child.id();
+        thread::sleep(Duration::from_millis(400));
+
+        let found = agent_pids_for(&root);
+        terminate(pid);
+
+        assert!(found.contains(&pid), "expected {pid} in {found:?}");
+    }
+
+    #[test]
+    fn an_agent_serving_another_project_is_left_alone() {
+        // Reclaiming is scoped to the project being opened. A sweep that also
+        // took a sibling project's Agent would make opening one window close
+        // another's.
+        let mine = temporary_root("scan-mine");
+        let theirs = temporary_root("scan-theirs");
+        let child = fake_agent(&theirs);
+        let pid = child.id();
+        thread::sleep(Duration::from_millis(400));
+
+        let found = agent_pids_for(&mine);
+        terminate(pid);
+
+        assert!(!found.contains(&pid), "swept another project's Agent");
+    }
+
+    #[test]
+    fn a_recorded_agent_survives_a_round_trip_so_a_later_launch_can_end_it() {
+        // The whole point of writing the pid down: an app that crashed leaves
+        // an Agent behind, and the next launch has to be able to find it.
+        let root = temporary_root("pid-round-trip");
+        let mut written = metadata(&root);
+        written.pid = 4321;
+        save_runtime(&root, &written).expect("saved");
+
+        let read = load_runtime(&root).expect("read").expect("present");
+
+        assert_eq!(read.pid, 4321);
+    }
+
+    #[test]
+    fn metadata_written_before_pids_were_recorded_still_loads() {
+        // Older runtime files have no `pid`. Refusing them would strand a
+        // project on an Agent nothing could adopt or replace.
+        let root = temporary_root("pid-absent");
+        let path = runtime_path(&root);
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            format!(
+                r#"{{"schema_version":"{}","bind_addr":"127.0.0.1:43210","token":"{}","project_root":"{}"}}"#,
+                AGENT_RUNTIME_SCHEMA,
+                "a".repeat(64),
+                root.to_string_lossy()
+            ),
+        )
+        .expect("write");
+
+        let read = load_runtime(&root).expect("read").expect("present");
+
+        assert_eq!(read.pid, 0);
+    }
+
+    #[test]
+    fn supervising_the_same_agent_twice_records_it_once() {
+        // `agent_start` adopts on one path and spawns on another; both reach
+        // here, and signalling a pid twice on quit is a race against reuse of
+        // that number by an unrelated process.
+        let before = SUPERVISED.lock().expect("lock").len();
+        supervise(999_001);
+        supervise(999_001);
+
+        let recorded = SUPERVISED.lock().expect("lock");
+        assert_eq!(recorded.iter().filter(|pid| **pid == 999_001).count(), 1);
+        assert_eq!(recorded.len(), before + 1);
     }
 
     #[test]

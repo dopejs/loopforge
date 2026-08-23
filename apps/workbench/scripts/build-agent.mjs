@@ -47,4 +47,23 @@ execFileSync(
 );
 
 if (process.platform !== "win32") chmodSync(binary, 0o755);
+
+// Re-sign on macOS, or the kernel kills the binary on launch.
+//
+// PyInstaller writes its own ad-hoc signature, but rebuilding over the same
+// path leaves macOS holding a stale one: `codesign --verify` reports the file
+// as valid while the kernel refuses to execute it, killing the process with
+// SIGKILL and "Taskgated Invalid Signature" before it can print anything.
+//
+// The failure is silent from the app's side -- the sidecar simply never comes
+// up -- so the shell falls back to whatever agent is still listening from an
+// earlier build, and a fix stops reaching the user entirely. That is worth
+// one signing call per build.
+if (process.platform === "darwin") {
+  execFileSync("codesign", ["--force", "--sign", "-", binary], { stdio: "inherit" });
+  // Verified rather than assumed: a signature that does not actually let the
+  // binary run is the exact failure this exists to prevent.
+  execFileSync(binary, ["--help"], { stdio: "ignore" });
+}
+
 console.log(`Bundled Loopforge Agent: ${binary}`);
