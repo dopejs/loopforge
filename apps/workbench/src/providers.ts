@@ -227,6 +227,14 @@ export function saveProviderSettings(
     model: string;
     display_name?: string;
     protocol?: string;
+    /**
+     * A signed-in account to draw the credential from, instead of a typed key.
+     *
+     * When set, the stored key becomes a cache of the last access token: it is
+     * refreshed before each dispatch rather than asked for again, because an
+     * OAuth token expires in about an hour.
+     */
+    oauth_provider_id?: string;
   }
 ): Promise<ProviderSettings> {
   return invoke<ProviderSettings>("agent_save_provider_settings", {
@@ -235,7 +243,8 @@ export function saveProviderSettings(
     apiKey: input.api_key,
     model: input.model,
     displayName: input.display_name ?? "",
-    protocol: input.protocol ?? ""
+    protocol: input.protocol ?? "",
+    oauthProviderId: input.oauth_provider_id ?? ""
   });
 }
 

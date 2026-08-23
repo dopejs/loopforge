@@ -49,8 +49,12 @@ function settings(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** Signed-in accounts the wizard may offer as a credential. */
+let accounts: unknown[] = [];
+
 function mockAgent(overrides: Record<string, unknown> = {}) {
   invoke.mockImplementation((command: string) => {
+    if (command === "agent_oauth_accounts") return Promise.resolve({ accounts });
     if (command === "agent_provider_settings") return Promise.resolve(settings(overrides));
     if (command === "agent_providers") return Promise.resolve({ providers: [], roles: [] });
     if (command === "agent_provider_auth" || command === "agent_provider_auth_action") {
@@ -93,6 +97,7 @@ function open(): void {
 afterEach(() => {
   cleanup();
   invoke.mockReset();
+  accounts = [];
 });
 
 describe("AddProvider", () => {
@@ -258,6 +263,7 @@ describe("AddProvider", () => {
     invoke.mockImplementation((command: string) => {
       if (command === "agent_provider_settings") return Promise.resolve(settings());
       if (command === "agent_providers") return Promise.resolve({ providers: [], roles: [] });
+      if (command === "agent_oauth_accounts") return Promise.resolve({ accounts: [] });
       if (command === "agent_probe_provider") {
         return Promise.resolve({
           schema_version: "loopforge-provider-probe-v1",
@@ -276,6 +282,61 @@ describe("AddProvider", () => {
     // The two failures need different fixes, so one message for both would
     // send the user to the wrong field.
     expect(await screen.findByText("The endpoint rejected this key.")).toBeTruthy();
+  });
+
+  it("cannot offer an account credential when none is signed in", async () => {
+    mockAgent();
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
+
+    const choose = screen.getByRole("button", { name: "Use a signed-in account" });
+    // Offering it would lead to a picker with nothing in it, so the option is
+    // present but unusable and says where to fix that.
+    expect((choose as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Sign one in under Usage first/)).toBeTruthy();
+  });
+
+  it("takes the credential from a signed-in account instead of a key", async () => {
+    accounts = [
+      { id: "anthropic", name: "Claude", flow: "callback", signed_in: true,
+        account_label: "", plan: "", expires_at: "", grant_deadline: "" }
+    ];
+    mockAgent();
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
+    fireEvent.change(screen.getByPlaceholderText("deepseek-chat"), {
+      target: { value: "deepseek-chat" }
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Use a signed-in account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    await waitFor(() => {
+      const call = invoke.mock.calls.find(
+        ([command]) => command === "agent_save_provider_settings"
+      );
+      expect(call).toBeTruthy();
+      // The binding is what lets the token be refreshed later rather than
+      // asked for again.
+      expect((call as [string, Record<string, unknown>])[1].oauthProviderId).toBe("anthropic");
+    });
+  });
+
+  it("stops asking for a key once an account supplies one", async () => {
+    accounts = [
+      { id: "anthropic", name: "Claude", flow: "callback", signed_in: true,
+        account_label: "", plan: "", expires_at: "", grant_deadline: "" }
+    ];
+    mockAgent();
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use a signed-in account" }));
+
+    // Requiring both would make the one credential that stays current
+    // impossible to choose.
+    expect(screen.queryByPlaceholderText("Paste the key")).toBeNull();
   });
 
   it("advances to the models step after saving", async () => {

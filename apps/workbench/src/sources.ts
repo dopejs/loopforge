@@ -119,6 +119,26 @@ export const SOURCES: readonly Source[] = [
     exampleModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo"
   },
   {
+    // omp reaches these through a "open this page, paste the key" helper
+    // rather than an OAuth flow, which is what this list already is: the
+    // endpoint the user would otherwise have to look up, with a key they
+    // fetch themselves.
+    id: "minimax",
+    name: "MiniMax",
+    kind: "cloud",
+    baseUrl: "https://api.minimax.io/v1",
+    protocol: "openai_compatible",
+    exampleModel: "MiniMax-M3"
+  },
+  {
+    id: "xiaomi",
+    name: "Xiaomi MiMo",
+    kind: "cloud",
+    baseUrl: "https://api.xiaomimimo.com/v1",
+    protocol: "openai_compatible",
+    exampleModel: "mimo-v2.5"
+  },
+  {
     id: "ollama",
     name: "Ollama",
     kind: "local",

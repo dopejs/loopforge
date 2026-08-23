@@ -12,6 +12,8 @@ import {
 import { isConfigured, saveOperator, useOperator } from "../operator";
 import { SHORTCUTS, displayShortcut, isApplePlatform } from "../shortcuts";
 import { ProviderSettings } from "./ProviderSettings";
+import { UsagePanel } from "./UsagePanel";
+import { AccountsPanel } from "./AccountsPanel";
 import type { Provider } from "../providers";
 import { AddProvider } from "./AddProvider";
 import { TOOL_CHIPS } from "../fixtures.providers";
@@ -26,6 +28,7 @@ const GROUPS = [
   "appearance",
   "language",
   "provider",
+  "usage",
   "permissions",
   "shortcuts",
   "about"
@@ -364,6 +367,13 @@ export function Settings({
                   setWizardOpen(true);
                 }}
               />
+            </>
+          )}
+
+          {group === "usage" && (
+            <>
+              <AccountsPanel projectRoot={projectRoot} />
+              <UsagePanel projectRoot={projectRoot} />
             </>
           )}
 

@@ -395,6 +395,117 @@ fn agent_stop(project_path: String) -> Result<Value, String> {
     Ok(result)
 }
 
+/// Opens a URL in the user's own browser.
+///
+/// Restricted to `http` and `https`. The argument reaches the platform opener,
+/// which will happily act on `file:` or a registered custom scheme, so the
+/// scheme is checked here rather than trusted: the only thing this exists to
+/// open is a vendor's sign-in page.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    let parsed = Url::parse(url.trim()).map_err(|error| error.to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!("Refusing to open a {} URL", parsed.scheme()));
+    }
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    Command::new(program)
+        .arg(parsed.as_str())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Could not open a browser: {error}"))
+}
+
+/// Lists the subscription accounts that can be signed into.
+#[tauri::command]
+fn agent_oauth_accounts(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/oauth/accounts",
+        None,
+        Duration::from_secs(15),
+    )
+}
+
+/// Opens a sign-in, returning what the user has to act on: a URL to visit, or
+/// a short code to type on the vendor's own page.
+#[tauri::command]
+fn agent_oauth_begin(project_path: String, provider_id: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/oauth/begin",
+        Some(json!({ "provider_id": provider_id })),
+        Duration::from_secs(30),
+    )
+}
+
+/// Waits for a sign-in to be completed in the browser.
+///
+/// The long timeout is the point: this call is the wait. It has to outlast a
+/// user finding the right account, typing a password and clearing a second
+/// factor, and a shell-side timeout firing first would abandon a sign-in that
+/// was about to succeed.
+#[tauri::command]
+fn agent_oauth_complete(project_path: String, provider_id: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/oauth/complete",
+        Some(json!({ "provider_id": provider_id, "timeout": 300.0 })),
+        Duration::from_secs(330),
+    )
+}
+
+/// Forgets a stored grant. Local only; nothing is revoked at the vendor.
+#[tauri::command]
+fn agent_oauth_sign_out(project_path: String, provider_id: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/oauth/sign-out",
+        Some(json!({ "provider_id": provider_id })),
+        Duration::from_secs(15),
+    )
+}
+
+/// Reads how much of each subscription account has been used.
+///
+/// The figures come from what the borrowed CLIs wrote to disk, not from the
+/// vendor: Loopforge holds no credential for a subscription. Each carries the
+/// moment it was recorded so the surface can say how old it is.
+#[tauri::command]
+fn agent_account_usage(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "GET",
+        "/v1/account-usage",
+        None,
+        Duration::from_secs(15),
+    )
+}
+
 /// Reads the generic provider inventory the Agent projects from Kura. Model
 /// routing and credentials are runtime capabilities, so this is read-only and
 /// the Workbench never reaches Kura directly.
@@ -589,6 +700,7 @@ fn agent_save_provider_settings(
     model: String,
     display_name: String,
     protocol: String,
+    oauth_provider_id: String,
 ) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
@@ -603,6 +715,7 @@ fn agent_save_provider_settings(
             "model": model,
             "display_name": display_name,
             "protocol": protocol,
+            "oauth_provider_id": oauth_provider_id,
         })),
         Duration::from_secs(30),
     )
@@ -1177,6 +1290,12 @@ pub fn run() {
             agent_stop,
             agent_query,
             agent_providers,
+            agent_account_usage,
+            agent_oauth_accounts,
+            open_external,
+            agent_oauth_begin,
+            agent_oauth_complete,
+            agent_oauth_sign_out,
             agent_sessions,
             agent_query_stream,
             agent_runs,

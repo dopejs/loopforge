@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useI18n } from "../i18n";
+import { type Account, useAccounts } from "../accounts";
 import { errorMessage } from "../daemon";
 import { isDesktopRuntime } from "../agent";
 import {
@@ -110,6 +111,9 @@ export function AddProvider({
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [oauthProviderId, setOauthProviderId] = useState("");
+  const { accounts } = useAccounts(projectRoot, true);
+  const signedIn = accounts.filter((candidate) => candidate.signed_in);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -155,7 +159,8 @@ export function AddProvider({
         api_key: apiKey,
         model,
         display_name: displayName,
-        protocol: source.protocol
+        protocol: source.protocol,
+        oauth_provider_id: oauthProviderId
       });
       setApiKey("");
       setSaved(true);
@@ -171,7 +176,13 @@ export function AddProvider({
 
   const hasKey = settings?.has_api_key === true;
   const keyRequired = source ? needsApiKey(source) : true;
-  const canSave = Boolean(baseUrl.trim() && model.trim() && (!keyRequired || apiKey || hasKey));
+  const canSave = Boolean(
+    baseUrl.trim() &&
+      model.trim() &&
+      // An account is a credential: requiring a typed key as well would make
+      // the one option that stays current impossible to choose.
+      (!keyRequired || oauthProviderId || apiKey || hasKey)
+  );
 
   return (
     <div className="modal-scrim" onClick={onClose}>
@@ -226,10 +237,13 @@ export function AddProvider({
               model={model}
               apiKey={apiKey}
               hasKey={hasKey}
+              oauthProviderId={oauthProviderId}
+              signedIn={signedIn}
               onDisplayName={setDisplayName}
               onBaseUrl={setBaseUrl}
               onModel={setModel}
               onApiKey={setApiKey}
+              onOauthProviderId={setOauthProviderId}
             />
           )}
 
@@ -369,10 +383,13 @@ function ConnectionStep({
   model,
   apiKey,
   hasKey,
+  oauthProviderId,
+  signedIn,
   onDisplayName,
   onBaseUrl,
   onModel,
-  onApiKey
+  onApiKey,
+  onOauthProviderId
 }: {
   source: Source;
   projectRoot: string;
@@ -381,10 +398,13 @@ function ConnectionStep({
   model: string;
   apiKey: string;
   hasKey: boolean;
+  oauthProviderId: string;
+  signedIn: readonly Account[];
   onDisplayName: (value: string) => void;
   onBaseUrl: (value: string) => void;
   onModel: (value: string) => void;
   onApiKey: (value: string) => void;
+  onOauthProviderId: (value: string) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   const keyRequired = needsApiKey(source);
@@ -463,19 +483,67 @@ function ConnectionStep({
         something the endpoint can just tell them.
       */}
       {keyRequired && (
-        <label className="field-block">
-          <span className="field-label">
-            {t("settings.provider.apiKey")}
-            {hasKey && <span className="badge ok">{t("settings.provider.keySet")}</span>}
-          </span>
-          <input
-            className="field-input"
-            type="password"
-            value={apiKey}
-            placeholder={hasKey ? t("settings.provider.keyKept") : t("settings.provider.keyNew")}
-            onChange={(event) => onApiKey(event.target.value)}
-          />
-        </label>
+        <fieldset className="field-block">
+          <legend className="field-label">{t("settings.provider.apiKey")}</legend>
+          {/*
+            A signed-in account is offered alongside a typed key rather than
+            instead of it: an OAuth token expires in about an hour, so an
+            account is the only credential that can be kept current without
+            the user retyping one, but plenty of endpoints only take a key.
+          */}
+          <div className="segmented">
+            <button
+              type="button"
+              className={oauthProviderId ? "" : "active"}
+              onClick={() => onOauthProviderId("")}
+            >
+              {t("wizard.useKey")}
+            </button>
+            <button
+              type="button"
+              className={oauthProviderId ? "active" : ""}
+              disabled={signedIn.length === 0}
+              onClick={() => onOauthProviderId(signedIn[0]?.id ?? "")}
+            >
+              {t("wizard.useAccount")}
+            </button>
+          </div>
+
+          {oauthProviderId ? (
+            <>
+              <select
+                className="field-input"
+                value={oauthProviderId}
+                aria-label={t("wizard.useAccount")}
+                onChange={(event) => onOauthProviderId(event.target.value)}
+              >
+                {signedIn.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </option>
+                ))}
+              </select>
+              <small className="field-hint">{t("wizard.accountCredential")}</small>
+            </>
+          ) : (
+            <>
+              <input
+                className="field-input"
+                type="password"
+                value={apiKey}
+                aria-label={t("settings.provider.apiKey")}
+                placeholder={
+                  hasKey ? t("settings.provider.keyKept") : t("settings.provider.keyNew")
+                }
+                onChange={(event) => onApiKey(event.target.value)}
+              />
+              {hasKey && <span className="badge ok">{t("settings.provider.keySet")}</span>}
+              {signedIn.length === 0 && (
+                <small className="field-hint">{t("wizard.noAccounts")}</small>
+              )}
+            </>
+          )}
+        </fieldset>
       )}
 
       <label className="field-block">
