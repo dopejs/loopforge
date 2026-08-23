@@ -16,6 +16,9 @@ from typing import Any
 from loopforge.agent import KuraRuntimeSupervisor
 from loopforge.agent.kura_client import KuraAgentError, KuraClient
 from loopforge.errors import LoopforgeError
+from loopforge.accountusage import account_usage as read_account_usage
+from loopforge import oauth as oauth_flow
+from loopforge.oauth.session import active_grant, grant_as_row
 from loopforge.userstore import UserStore, UserStoreError
 from loopforge.project import (
     HYPOTHESIS_FIELDS,
@@ -45,6 +48,8 @@ SETTINGS_SCHEMA = "loopforge-settings-v1"
 CONFIGURABLE_PROVIDER = "openai_compatible"
 AUTH_SCHEMA = "loopforge-provider-auth-v1"
 PROBE_SCHEMA = "loopforge-provider-probe-v1"
+ACCOUNT_USAGE_SCHEMA = "loopforge-account-usage-v1"
+OAUTH_SCHEMA = "loopforge-oauth-v1"
 #: A model list is small; anything larger is not one, and reading it would only
 #: let a wrong endpoint occupy memory.
 MAX_PROBE_BYTES = 512 * 1024
@@ -116,6 +121,14 @@ class LoopforgeAgent:
         self.runtime = KuraRuntimeSupervisor(self.project, kura_binary)
         self.sessions_store = SessionStore(root)
         self.runs_store = RunStore(root)
+        # Logins waiting on a browser, by provider id. Per instance, not
+        # shared on the class: a dict at class scope is one dict for every
+        # agent ever constructed, so two projects would trade sign-ins.
+        #
+        # In memory rather than persisted: the PKCE verifier is what binds
+        # this process to the code that comes back, and a login abandoned
+        # when the Agent stops should leave nothing behind to resume.
+        self._pending_logins: dict[str, Any] = {}
 
     def status(self) -> dict[str, Any]:
         runtime = self.runtime.status()
@@ -168,6 +181,10 @@ class LoopforgeAgent:
             raise LoopforgeAgentError(
                 "The Loopforge Agent runtime is not ready.", "AGENT_NOT_READY"
             )
+        # An access token that expired since the last dispatch is replaced
+        # here rather than sent: a stale one comes back as a 401 that reads
+        # like a misconfigured endpoint. A no-op when the endpoint uses a key.
+        self.sync_provider_credential()
         context = self.runtime.sync_context()["context"]
         prompt = self._prompt(context, normalized)
         request: dict[str, Any] = {"query": prompt}
@@ -216,6 +233,10 @@ class LoopforgeAgent:
             raise LoopforgeAgentError(
                 "The Loopforge Agent runtime is not ready.", "AGENT_NOT_READY"
             )
+        # Same guard as the non-streaming path: a token that lapsed since the
+        # last dispatch must be replaced before the request, not after it comes
+        # back as a 401 halfway through a stream.
+        self.sync_provider_credential()
         context = self.runtime.sync_context()["context"]
         request: dict[str, Any] = {"query": self._prompt(context, normalized)}
         if thread_id:
@@ -620,6 +641,10 @@ class LoopforgeAgent:
             "protocol": str((record or {}).get("protocol") or CONFIGURABLE_PROVIDER),
             # Whether a credential exists, never what it is.
             "has_api_key": bool((record or {}).get("api_key")),
+            # Which signed-in account supplies it, if any. Reported so the
+            # wizard does not show a stored key the user never typed and ask
+            # them to manage it as though they had.
+            "oauth_provider_id": str((record or {}).get("oauth_provider_id") or ""),
             "configured": bool(
                 record and record.get("base_url") and record.get("model") and record.get("api_key")
             ),
@@ -633,6 +658,7 @@ class LoopforgeAgent:
         model: str,
         display_name: str = "",
         protocol: str = "",
+        oauth_provider_id: str = "",
     ) -> dict[str, Any]:
         """Record the endpoint the user supplied.
 
@@ -662,6 +688,7 @@ class LoopforgeAgent:
             name,
             display_name=str(display_name or "").strip(),
             protocol=str(protocol or "").strip() or CONFIGURABLE_PROVIDER,
+            oauth_provider_id=str(oauth_provider_id or "").strip(),
         )
         result = self.provider_settings()
         # Stated rather than implied: nothing the user just typed is live yet.
@@ -872,6 +899,220 @@ class LoopforgeAgent:
         result["checked"] = True
         result["models"] = self._project_models(payload.get("models") or [])
         return result
+
+    def sync_provider_credential(self) -> dict[str, Any]:
+        """Give Kura the current access token for the account backing the endpoint.
+
+        Only meaningful when the configured endpoint draws its credential from
+        a signed-in account rather than a key the user typed. The token is
+        refreshed first if it is close to expiry, then handed over in place --
+        Kura swaps it without restarting, so a run in flight is not disturbed.
+
+        Failure is reported, never raised: this runs before a dispatch, and a
+        credential that could not be refreshed should surface as the dispatch
+        failing with the vendor's own reason rather than as the Agent
+        collapsing beforehand.
+        """
+        result: dict[str, Any] = {
+            "schema_version": OAUTH_SCHEMA,
+            "synced": False,
+            "reason": "",
+        }
+        try:
+            record = self.user_store.provider(CONFIGURABLE_PROVIDER)
+        except UserStoreError as exc:
+            result["reason"] = str(exc)
+            return result
+        oauth_id = str((record or {}).get("oauth_provider_id") or "").strip()
+        if not oauth_id:
+            # A static key needs nothing done to it, which is not a failure.
+            result["reason"] = "The endpoint uses a key rather than an account."
+            return result
+
+        try:
+            target = oauth_flow.provider(oauth_id)
+            grant = active_grant(self.user_store, target)
+        except (KeyError, oauth_flow.OAuthError) as exc:
+            result["reason"] = str(exc)
+            return result
+        if grant is None or not grant.access_token:
+            result["reason"] = f"The {oauth_id} account is not signed in."
+            return result
+
+        # Cached so a restart has a token to start with, and so the stored
+        # record never falls behind what Kura is using.
+        self.user_store.save_provider(
+            CONFIGURABLE_PROVIDER,
+            str(record.get("base_url") or ""),
+            grant.access_token,
+            str(record.get("model") or ""),
+            display_name=str(record.get("display_name") or ""),
+            protocol=str(record.get("protocol") or CONFIGURABLE_PROVIDER),
+            oauth_provider_id=oauth_id,
+        )
+
+        status = self.runtime.status()
+        if not status.get("healthy") or not status.get("base_url"):
+            result["reason"] = "The runtime is not ready."
+            return result
+        client = KuraClient(
+            str(status["base_url"]),
+            timeout=PROVIDER_TIMEOUT_SECONDS,
+            token=status.get("token"),
+        )
+        try:
+            client.put(
+                f"/v1/providers/{CONFIGURABLE_PROVIDER}/credential",
+                {"apiKey": grant.access_token},
+            )
+        except KuraAgentError as exc:
+            result["reason"] = str(exc)
+            return result
+        result["synced"] = True
+        result["provider_id"] = oauth_id
+        result["expires_at"] = grant.expires_at
+        return result
+
+    # -- subscription sign-in -----------------------------------------------
+
+    def oauth_providers(self) -> dict[str, Any]:
+        """Accounts that can be signed into, and which already are."""
+        try:
+            signed_in = {
+                str(row.get("provider_id") or ""): row for row in self.user_store.oauth_grants()
+            }
+        except UserStoreError:
+            signed_in = {}
+        accounts = []
+        for target in oauth_flow.providers():
+            row = signed_in.get(target.id)
+            accounts.append(
+                {
+                    "id": target.id,
+                    "name": target.name,
+                    "flow": target.flow,
+                    # Some accounts need their client credentials supplied on
+                    # this machine. Offering a sign-in that cannot start is
+                    # worse than saying so.
+                    "configured": target.configured,
+                    "signed_in": bool(row),
+                    "account_label": str((row or {}).get("account_label") or ""),
+                    "plan": str((row or {}).get("plan") or ""),
+                    "expires_at": str((row or {}).get("expires_at") or ""),
+                    # Some vendors kill the whole refresh family a fixed time
+                    # after the interactive login however healthily it has
+                    # rotated, so the deadline is worth showing before it hits.
+                    "grant_deadline": (
+                        oauth_flow.grant_deadline(
+                            target, oauth_flow.Grant(
+                                target.id, "", "", "",
+                                authorized_at=str((row or {}).get("authorized_at") or ""),
+                            )
+                        )
+                        if row
+                        else ""
+                    ),
+                }
+            )
+        return {"schema_version": OAUTH_SCHEMA, "accounts": accounts}
+
+    def oauth_begin(self, provider_id: str) -> dict[str, Any]:
+        """Open a sign-in and hand back what the user has to act on.
+
+        Two shapes, because the vendors differ: a redirect flow returns a URL
+        to visit, and a device flow returns a short code to type on the
+        vendor's own page. The URL is returned rather than opened here -- the
+        browser belongs to the user's session, and an Agent that may be running
+        headless cannot assume it can launch one.
+        """
+        try:
+            target = oauth_flow.provider(str(provider_id or "").strip())
+        except KeyError as exc:
+            raise LoopforgeAgentError(str(exc), "OAUTH_PROVIDER_UNKNOWN") from exc
+
+        # A second attempt supersedes the first; leaving the old listener bound
+        # would hold the fixed port and make this one fail.
+        previous = self._pending_logins.pop(target.id, None)
+        if previous is not None and hasattr(previous, "close"):
+            previous.close()
+
+        try:
+            if target.flow == "device_code":
+                device = oauth_flow.begin_device_login(target)
+                self._pending_logins[target.id] = device
+                return {
+                    "schema_version": OAUTH_SCHEMA,
+                    "provider_id": target.id,
+                    "flow": "device_code",
+                    "url": device.verification_uri,
+                    "user_code": device.user_code,
+                    "expires_in": device.expires_in,
+                }
+            pending = oauth_flow.begin_login(target)
+        except oauth_flow.OAuthError as exc:
+            raise LoopforgeAgentError(str(exc), exc.code) from exc
+        self._pending_logins[target.id] = pending
+        return {
+            "schema_version": OAUTH_SCHEMA,
+            "provider_id": target.id,
+            "flow": "callback",
+            "url": pending.url,
+            "user_code": "",
+            "redirect_uri": pending.redirect_uri,
+        }
+
+    def oauth_complete(self, provider_id: str, timeout: float = 300.0) -> dict[str, Any]:
+        """Wait for the user to finish, exchange, and keep the grant."""
+        identifier = str(provider_id or "").strip()
+        pending = self._pending_logins.pop(identifier, None)
+        if pending is None:
+            raise LoopforgeAgentError(
+                "No sign-in is in progress for this account.", "OAUTH_NOT_STARTED"
+            )
+        try:
+            target = oauth_flow.provider(identifier)
+            if isinstance(pending, oauth_flow.DeviceLogin):
+                grant = oauth_flow.poll_device_login(target, pending, timeout=timeout)
+            else:
+                code = pending.wait(timeout=timeout)
+                grant = oauth_flow.complete_login(pending, code)
+        except oauth_flow.OAuthError as exc:
+            raise LoopforgeAgentError(str(exc), exc.code) from exc
+        except KeyError as exc:
+            raise LoopforgeAgentError(str(exc), "OAUTH_PROVIDER_UNKNOWN") from exc
+        self.user_store.save_oauth_grant(grant_as_row(grant))
+        return self.oauth_providers()
+
+    def oauth_sign_out(self, provider_id: str) -> dict[str, Any]:
+        """Forget a grant locally.
+
+        Local only, and said so: this removes what is stored here and does not
+        revoke anything at the vendor, so a user who wants the session ended
+        everywhere has to do that on the vendor's own account page.
+        """
+        identifier = str(provider_id or "").strip()
+        if not identifier:
+            raise LoopforgeAgentError("A provider id is required.", "OAUTH_PROVIDER_UNKNOWN")
+        self.user_store.forget_oauth_grant(identifier)
+        return self.oauth_providers()
+
+    def account_usage(self) -> dict[str, Any]:
+        """How much of each subscription account has been used.
+
+        A subscription is reached by borrowing a CLI the user has already
+        signed into, so Loopforge holds no credential for it and cannot ask the
+        vendor directly -- that request needs the account's own token. What is
+        reported here is what the CLI itself wrote to disk, which is why every
+        figure carries the moment it was recorded: it can be hours old, and
+        presenting it as current would be the one thing this must not do.
+
+        Accounts with nothing readable are still listed, carrying the reason.
+        Dropping them would read as "no such account" rather than "no figure".
+        """
+        return {
+            "schema_version": ACCOUNT_USAGE_SCHEMA,
+            "accounts": [record.as_dict() for record in read_account_usage()],
+        }
 
     def route_model_role(self, role: str, provider_id: str, model: str = "") -> dict[str, Any]:
         """Point one modality at a provider.

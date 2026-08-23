@@ -58,6 +58,12 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/providers":
             self._execute(self.server.agent.providers)
             return
+        if self.path == "/v1/oauth/accounts":
+            self._execute(self.server.agent.oauth_providers)
+            return
+        if self.path == "/v1/account-usage":
+            self._execute(self.server.agent.account_usage)
+            return
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
@@ -168,7 +174,25 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body.get("model", "")),
                     str(body.get("display_name", "")),
                     str(body.get("protocol", "")),
+                    str(body.get("oauth_provider_id", "")),
                 )
+            )
+        elif self.path == "/v1/oauth/sync-credential":
+            self._execute(self.server.agent.sync_provider_credential)
+        elif self.path == "/v1/oauth/begin":
+            self._execute(
+                lambda: self.server.agent.oauth_begin(str(body.get("provider_id", "")))
+            )
+        elif self.path == "/v1/oauth/complete":
+            self._execute(
+                lambda: self.server.agent.oauth_complete(
+                    str(body.get("provider_id", "")),
+                    float(body.get("timeout") or 300.0),
+                )
+            )
+        elif self.path == "/v1/oauth/sign-out":
+            self._execute(
+                lambda: self.server.agent.oauth_sign_out(str(body.get("provider_id", "")))
             )
         elif self.path == "/v1/settings/provider/probe":
             self._execute(
