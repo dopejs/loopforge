@@ -120,7 +120,7 @@ fn supervised(pid: u32) -> bool {
 /// The recorded address is used to ask politely and then discarded. It is
 /// never waited on and never reused: the replacement gets a fresh port, so a
 /// port that stays held by something else cannot block a working start.
-fn reclaim_agents(root: &Path) {
+async fn reclaim_agents(root: &Path) {
     if let Ok(Some(metadata)) = load_runtime(root) {
         // Politely first, because the Agent stops its Kura daemon on the way
         // out; killing it outright would leave that daemon running instead.
@@ -130,7 +130,7 @@ fn reclaim_agents(root: &Path) {
             "/v1/shutdown",
             Some(json!({})),
             Duration::from_secs(5),
-        );
+        ).await;
         if metadata.pid > 0 && !supervised(metadata.pid) {
             terminate(metadata.pid);
         }
@@ -369,7 +369,32 @@ fn agent_url(metadata: &AgentRuntimeMetadata, path: &str) -> Result<String, Stri
     Ok(base.into())
 }
 
-fn agent_request(
+/// One request to the Agent, off whichever thread asked for it.
+///
+/// The HTTP client is blocking and some of these wait a long time -- a browser
+/// sign-in is allowed five minutes -- so the work is handed to a thread that
+/// exists to be blocked. Run on the async runtime's workers instead, a single
+/// sign-in would hold one for its whole duration and every other command would
+/// queue behind it; run on the main thread, as these were, the window itself
+/// stops responding.
+async fn agent_request(
+    metadata: &AgentRuntimeMetadata,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+    timeout: Duration,
+) -> Result<Value, String> {
+    let metadata = metadata.clone();
+    let method = method.to_string();
+    let path = path.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        agent_request_blocking(&metadata, &method, &path, body, timeout)
+    })
+    .await
+    .map_err(|error| format!("Loopforge Agent request did not finish: {error}"))?
+}
+
+fn agent_request_blocking(
     metadata: &AgentRuntimeMetadata,
     method: &str,
     path: &str,
@@ -390,9 +415,40 @@ fn agent_request(
         _ => return Err("unsupported Agent request method".to_string()),
     };
     response
-        .map_err(|error| format!("Loopforge Agent request failed: {error}"))?
+        .map_err(|error| describe_agent_failure(error))?
         .into_json()
         .map_err(|error| format!("Loopforge Agent returned invalid JSON: {error}"))
+}
+
+/// What the Agent said, not merely that it refused.
+///
+/// `ureq` renders a failed status as "status code 400" and leaves the body
+/// unread. The Agent answers every refusal with a message naming the cause --
+/// which port is held, which account is not signed in, what the vendor
+/// replied -- and dropping it left the user with a number and nowhere to go.
+fn describe_agent_failure(error: ureq::Error) -> String {
+    let ureq::Error::Status(status, response) = error else {
+        return format!("Loopforge Agent request failed: {error}");
+    };
+    let body = response.into_string().unwrap_or_default();
+    let detail = serde_json::from_str::<Value>(&body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .or_else(|| value.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        // A body that is not the Agent's own shape is still better than
+        // nothing, bounded so a stray HTML page cannot fill the surface.
+        .unwrap_or_else(|| body.chars().take(300).collect());
+    if detail.trim().is_empty() {
+        format!("Loopforge Agent refused the request ({status})")
+    } else {
+        detail
+    }
 }
 
 fn command_error(stderr: &[u8]) -> String {
@@ -405,7 +461,7 @@ fn command_error(stderr: &[u8]) -> String {
     }
 }
 
-fn agent_status_for_root(root: &Path) -> Result<Value, String> {
+async fn agent_status_for_root(root: &Path) -> Result<Value, String> {
     let Some(metadata) = load_runtime(root)? else {
         return Ok(json!({
             "schema_version": "loopforge-agent-status-v1",
@@ -413,7 +469,7 @@ fn agent_status_for_root(root: &Path) -> Result<Value, String> {
             "managed": false
         }));
     };
-    match agent_request(&metadata, "GET", "/v1/status", None, Duration::from_secs(2)) {
+    match agent_request(&metadata, "GET", "/v1/status", None, Duration::from_secs(2)).await {
         Ok(mut status) => {
             if let Some(object) = status.as_object_mut() {
                 object.insert("managed".to_string(), Value::Bool(true));
@@ -430,8 +486,8 @@ fn agent_status_for_root(root: &Path) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn agent_status(project_path: String) -> Result<Value, String> {
-    agent_status_for_root(&project_root(&project_path)?)
+async fn agent_status(project_path: String) -> Result<Value, String> {
+    agent_status_for_root(&project_root(&project_path)?).await
 }
 
 #[tauri::command]
@@ -458,7 +514,7 @@ async fn select_project_directory(app: AppHandle) -> Result<Option<String>, Stri
 }
 
 #[tauri::command]
-fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
+async fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     // An Agent this run started is reused; anything else is reclaimed.
     //
@@ -468,19 +524,19 @@ fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
     // same way, and restarting the app changed nothing.
     if let Some(metadata) = load_runtime(&root)? {
         if metadata.pid > 0 && supervised(metadata.pid) {
-            let current = agent_status_for_root(&root)?;
+            let current = agent_status_for_root(&root).await?;
             if current.get("ready").and_then(Value::as_bool) == Some(true) {
                 return Ok(current);
             }
             // Ours, but its runtime is down, which it can be asked to fix.
-            if agent_request(&metadata, "GET", "/healthz", None, Duration::from_secs(2)).is_ok() {
+            if agent_request(&metadata, "GET", "/healthz", None, Duration::from_secs(2)).await.is_ok() {
                 let mut status = agent_request(
                     &metadata,
                     "POST",
                     "/v1/start",
                     Some(json!({})),
                     Duration::from_secs(60),
-                )?;
+                ).await?;
                 if let Some(object) = status.as_object_mut() {
                     object.insert("managed".to_string(), Value::Bool(true));
                 }
@@ -488,7 +544,7 @@ fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
             }
         }
     }
-    reclaim_agents(&root);
+    reclaim_agents(&root).await;
     let agent_binary = bundled_agent_binary(&app).ok_or_else(|| {
         "Loopforge Agent sidecar is missing; run pnpm build:agent or set LOOPFORGE_AGENT_BIN"
             .to_string()
@@ -560,7 +616,7 @@ fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
             "/healthz",
             None,
             Duration::from_millis(500),
-        )
+        ).await
         .is_ok()
         {
             let mut status = agent_request(
@@ -569,7 +625,7 @@ fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
                 "/v1/start",
                 Some(json!({})),
                 Duration::from_secs(15),
-            )?;
+            ).await?;
             if let Some(object) = status.as_object_mut() {
                 object.insert("managed".to_string(), Value::Bool(true));
             }
@@ -624,7 +680,7 @@ code signature was rejected; rebuild with pnpm build:agent)"
 }
 
 #[tauri::command]
-fn agent_stop(project_path: String) -> Result<Value, String> {
+async fn agent_stop(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let Some(metadata) = load_runtime(&root)? else {
         return Ok(json!({
@@ -639,7 +695,7 @@ fn agent_stop(project_path: String) -> Result<Value, String> {
         "/v1/shutdown",
         Some(json!({})),
         Duration::from_secs(15),
-    )?;
+    ).await?;
     fs::remove_file(runtime_path(&root))
         .map_err(|error| format!("Agent stopped but runtime metadata remains: {error}"))?;
     Ok(result)
@@ -652,7 +708,7 @@ fn agent_stop(project_path: String) -> Result<Value, String> {
 /// scheme is checked here rather than trusted: the only thing this exists to
 /// open is a vendor's sign-in page.
 #[tauri::command]
-fn open_external(url: String) -> Result<(), String> {
+async fn open_external(url: String) -> Result<(), String> {
     let parsed = Url::parse(url.trim()).map_err(|error| error.to_string())?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(format!("Refusing to open a {} URL", parsed.scheme()));
@@ -673,7 +729,7 @@ fn open_external(url: String) -> Result<(), String> {
 
 /// Lists the subscription accounts that can be signed into.
 #[tauri::command]
-fn agent_oauth_accounts(project_path: String) -> Result<Value, String> {
+async fn agent_oauth_accounts(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -683,13 +739,13 @@ fn agent_oauth_accounts(project_path: String) -> Result<Value, String> {
         "/v1/oauth/accounts",
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Opens a sign-in, returning what the user has to act on: a URL to visit, or
 /// a short code to type on the vendor's own page.
 #[tauri::command]
-fn agent_oauth_begin(project_path: String, provider_id: String) -> Result<Value, String> {
+async fn agent_oauth_begin(project_path: String, provider_id: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -699,7 +755,7 @@ fn agent_oauth_begin(project_path: String, provider_id: String) -> Result<Value,
         "/v1/oauth/begin",
         Some(json!({ "provider_id": provider_id })),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// Waits for a sign-in to be completed in the browser.
@@ -709,7 +765,7 @@ fn agent_oauth_begin(project_path: String, provider_id: String) -> Result<Value,
 /// factor, and a shell-side timeout firing first would abandon a sign-in that
 /// was about to succeed.
 #[tauri::command]
-fn agent_oauth_complete(project_path: String, provider_id: String) -> Result<Value, String> {
+async fn agent_oauth_complete(project_path: String, provider_id: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -719,12 +775,12 @@ fn agent_oauth_complete(project_path: String, provider_id: String) -> Result<Val
         "/v1/oauth/complete",
         Some(json!({ "provider_id": provider_id, "timeout": 300.0 })),
         Duration::from_secs(330),
-    )
+    ).await
 }
 
 /// Forgets a stored grant. Local only; nothing is revoked at the vendor.
 #[tauri::command]
-fn agent_oauth_sign_out(project_path: String, provider_id: String) -> Result<Value, String> {
+async fn agent_oauth_sign_out(project_path: String, provider_id: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -734,7 +790,7 @@ fn agent_oauth_sign_out(project_path: String, provider_id: String) -> Result<Val
         "/v1/oauth/sign-out",
         Some(json!({ "provider_id": provider_id })),
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Reads how much of each subscription account has been used.
@@ -743,7 +799,7 @@ fn agent_oauth_sign_out(project_path: String, provider_id: String) -> Result<Val
 /// vendor: Loopforge holds no credential for a subscription. Each carries the
 /// moment it was recorded so the surface can say how old it is.
 #[tauri::command]
-fn agent_account_usage(project_path: String) -> Result<Value, String> {
+async fn agent_account_usage(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -753,14 +809,14 @@ fn agent_account_usage(project_path: String) -> Result<Value, String> {
         "/v1/account-usage",
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Reads the generic provider inventory the Agent projects from Kura. Model
 /// routing and credentials are runtime capabilities, so this is read-only and
 /// the Workbench never reaches Kura directly.
 #[tauri::command]
-fn agent_providers(project_path: String) -> Result<Value, String> {
+async fn agent_providers(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -770,12 +826,12 @@ fn agent_providers(project_path: String) -> Result<Value, String> {
         "/v1/providers",
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Reads the Agent's projection of the runtime's chat sessions.
 #[tauri::command]
-fn agent_sessions(project_path: String) -> Result<Value, String> {
+async fn agent_sessions(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -785,7 +841,7 @@ fn agent_sessions(project_path: String) -> Result<Value, String> {
         "/v1/sessions",
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Streams a reply, emitting one Tauri event per chunk.
@@ -873,13 +929,13 @@ fn emit_stream(app: &AppHandle, stream_id: &str, event: &str, data: &str) {
 /// Agent is started per project, so asking one for the list of projects is
 /// circular.
 #[tauri::command]
-fn recent_projects() -> Vec<userstore::RecentProject> {
+async fn recent_projects() -> Vec<userstore::RecentProject> {
     userstore::recent_projects(50)
 }
 
 /// Records that a project was opened.
 #[tauri::command]
-fn remember_project(project_path: String, mode: String) -> bool {
+async fn remember_project(project_path: String, mode: String) -> bool {
     let Ok(root) = project_root(&project_path) else {
         return false;
     };
@@ -888,13 +944,13 @@ fn remember_project(project_path: String, mode: String) -> bool {
 
 /// Removes a project from the recent list. The project itself is untouched.
 #[tauri::command]
-fn forget_project(project_path: String) -> bool {
+async fn forget_project(project_path: String) -> bool {
     userstore::forget_project(&project_path)
 }
 
 /// Who this machine records as the approver.
 #[tauri::command]
-fn agent_operator_settings(project_path: String) -> Result<Value, String> {
+async fn agent_operator_settings(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -904,12 +960,12 @@ fn agent_operator_settings(project_path: String) -> Result<Value, String> {
         "/v1/settings/operator",
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Records the approver's name. The Agent mints and keeps the id.
 #[tauri::command]
-fn agent_save_operator_settings(project_path: String, name: String) -> Result<Value, String> {
+async fn agent_save_operator_settings(project_path: String, name: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -919,12 +975,12 @@ fn agent_save_operator_settings(project_path: String, name: String) -> Result<Va
         "/v1/settings/operator",
         Some(json!({ "name": name })),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// The user-supplied endpoint, without its credential.
 #[tauri::command]
-fn agent_provider_settings(project_path: String) -> Result<Value, String> {
+async fn agent_provider_settings(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -934,7 +990,7 @@ fn agent_provider_settings(project_path: String) -> Result<Value, String> {
         "/v1/settings/provider",
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Records the endpoint. An empty key keeps the stored one.
@@ -943,7 +999,7 @@ fn agent_provider_settings(project_path: String) -> Result<Value, String> {
 /// here: the Workbench has never been the place that keeps it, and the user
 /// store is now the one place on disk that does.
 #[tauri::command]
-fn agent_save_provider_settings(
+async fn agent_save_provider_settings(
     project_path: String,
     base_url: String,
     api_key: String,
@@ -951,6 +1007,7 @@ fn agent_save_provider_settings(
     display_name: String,
     protocol: String,
     oauth_provider_id: String,
+    provider_id: String,
 ) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
@@ -966,17 +1023,20 @@ fn agent_save_provider_settings(
             "display_name": display_name,
             "protocol": protocol,
             "oauth_provider_id": oauth_provider_id,
+            "provider_id": provider_id,
         })),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// Asks an endpoint for its model list, before anything is stored.
 #[tauri::command]
-fn agent_probe_provider(
+async fn agent_probe_provider(
     project_path: String,
     base_url: String,
     api_key: String,
+    protocol: String,
+    oauth_provider_id: String,
 ) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
@@ -988,55 +1048,15 @@ fn agent_probe_provider(
         "/v1/settings/provider/probe",
         Some(json!({ "base_url": base_url, "api_key": api_key })),
         Duration::from_secs(45),
-    )
+    ).await
 }
 
-/// The sign-in state of a managed provider.
-#[tauri::command]
-fn agent_provider_auth(project_path: String, provider_id: String) -> Result<Value, String> {
-    let root = project_root(&project_path)?;
-    let metadata = load_runtime(&root)?
-        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
-    // A path segment, so it is constrained rather than trusted.
-    if provider_id.is_empty()
-        || !provider_id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-    {
-        return Err("Provider id must be alphanumeric".to_string());
-    }
-    agent_request(
-        &metadata,
-        "GET",
-        &format!("/v1/settings/provider/auth/{provider_id}"),
-        None,
-        Duration::from_secs(30),
-    )
-}
 
 /// Moves a managed provider's sign-in along. Nothing is spawned here: the
-/// login runs in the user's own terminal, under their own account.
-#[tauri::command]
-fn agent_provider_auth_action(
-    project_path: String,
-    provider_id: String,
-    action: String,
-) -> Result<Value, String> {
-    let root = project_root(&project_path)?;
-    let metadata = load_runtime(&root)?
-        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
-    agent_request(
-        &metadata,
-        "POST",
-        "/v1/settings/provider/auth",
-        Some(json!({ "provider_id": provider_id, "action": action })),
-        Duration::from_secs(60),
-    )
-}
 
 /// Points one modality at a provider. Routing lives in Kura.
 #[tauri::command]
-fn agent_route_role(
+async fn agent_route_role(
     project_path: String,
     role: String,
     provider_id: String,
@@ -1051,12 +1071,12 @@ fn agent_route_role(
         "/v1/settings/role",
         Some(json!({ "role": role, "provider_id": provider_id, "model": model })),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// Leaves a modality unrouted.
 #[tauri::command]
-fn agent_clear_role(project_path: String, role: String) -> Result<Value, String> {
+async fn agent_clear_role(project_path: String, role: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1066,12 +1086,12 @@ fn agent_clear_role(project_path: String, role: String) -> Result<Value, String>
         "/v1/settings/role/clear",
         Some(json!({ "role": role })),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// Clears the stored endpoint and credential.
 #[tauri::command]
-fn agent_forget_provider_settings(project_path: String) -> Result<Value, String> {
+async fn agent_forget_provider_settings(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1081,12 +1101,12 @@ fn agent_forget_provider_settings(project_path: String) -> Result<Value, String>
         "/v1/settings/provider/forget",
         Some(json!({})),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// State integrity and tool availability.
 #[tauri::command]
-fn agent_project_health(project_path: String) -> Result<Value, String> {
+async fn agent_project_health(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1096,12 +1116,12 @@ fn agent_project_health(project_path: String) -> Result<Value, String> {
         "/v1/project/health",
         None,
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// The committed event log, newest first.
 #[tauri::command]
-fn agent_project_history(project_path: String) -> Result<Value, String> {
+async fn agent_project_history(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1111,12 +1131,12 @@ fn agent_project_history(project_path: String) -> Result<Value, String> {
         "/v1/project/history",
         None,
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// Rebuilds the derived state snapshot. `apply` false previews the work.
 #[tauri::command]
-fn agent_project_reconcile(project_path: String, apply: bool) -> Result<Value, String> {
+async fn agent_project_reconcile(project_path: String, apply: bool) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1126,12 +1146,12 @@ fn agent_project_reconcile(project_path: String, apply: bool) -> Result<Value, S
         "/v1/project/reconcile",
         Some(json!({ "apply": apply })),
         Duration::from_secs(60),
-    )
+    ).await
 }
 
 /// What a prototype decision needs, and whether it can be made yet.
 #[tauri::command]
-fn agent_decision(project_path: String) -> Result<Value, String> {
+async fn agent_decision(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1141,13 +1161,13 @@ fn agent_decision(project_path: String) -> Result<Value, String> {
         "/v1/decision",
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Records the prototype decision. This is what moves the stage out of
 /// PROTOTYPE_DECISION; the core refuses a plain advance from there.
 #[tauri::command]
-fn agent_decide(
+async fn agent_decide(
     project_path: String,
     decision: String,
     evidence_ids: Vec<String>,
@@ -1171,12 +1191,12 @@ fn agent_decide(
         "/v1/decision",
         Some(body),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// Whether the stage allows playtest work, and whether a protocol exists.
 #[tauri::command]
-fn agent_playtest(project_path: String) -> Result<Value, String> {
+async fn agent_playtest(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1186,12 +1206,12 @@ fn agent_playtest(project_path: String) -> Result<Value, String> {
         "/v1/playtest",
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Asks the model for a playtest protocol. Records nothing.
 #[tauri::command]
-fn agent_playtest_draft(project_path: String) -> Result<Value, String> {
+async fn agent_playtest_draft(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1202,12 +1222,12 @@ fn agent_playtest_draft(project_path: String) -> Result<Value, String> {
         "/v1/playtest/protocol/draft",
         Some(json!({})),
         Duration::from_secs(180),
-    )
+    ).await
 }
 
 /// Records a reviewed playtest protocol.
 #[tauri::command]
-fn agent_playtest_protocol(project_path: String, content: String) -> Result<Value, String> {
+async fn agent_playtest_protocol(project_path: String, content: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1217,12 +1237,12 @@ fn agent_playtest_protocol(project_path: String, content: String) -> Result<Valu
         "/v1/playtest/protocol",
         Some(json!({ "content": content })),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// Imports an observed playtest report.
 #[tauri::command]
-fn agent_playtest_report(project_path: String, report: Value) -> Result<Value, String> {
+async fn agent_playtest_report(project_path: String, report: Value) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1232,7 +1252,7 @@ fn agent_playtest_report(project_path: String, report: Value) -> Result<Value, S
         "/v1/playtest/report",
         Some(json!({ "report": report })),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// Picks a screenshot to register as visual evidence.
@@ -1264,7 +1284,7 @@ async fn select_capture_file(app: AppHandle) -> Result<Option<String>, String> {
 
 /// Registers a screenshot as visual evidence. Captures nothing itself.
 #[tauri::command]
-fn agent_capture(project_path: String, path: String) -> Result<Value, String> {
+async fn agent_capture(project_path: String, path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1274,12 +1294,12 @@ fn agent_capture(project_path: String, path: String) -> Result<Value, String> {
         "/v1/capture",
         Some(json!({ "path": path })),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// Registered evidence, newest first.
 #[tauri::command]
-fn agent_evidence(project_path: String) -> Result<Value, String> {
+async fn agent_evidence(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1289,7 +1309,7 @@ fn agent_evidence(project_path: String) -> Result<Value, String> {
         "/v1/evidence",
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Whether a stage transition is allowed, and what is blocking it.
@@ -1298,7 +1318,7 @@ fn agent_evidence(project_path: String) -> Result<Value, String> {
 /// the reason and approver it is given rather than anything recorded, so
 /// checking without them would report requirements the advance would satisfy.
 #[tauri::command]
-fn agent_gate(
+async fn agent_gate(
     project_path: String,
     stage: String,
     reason: Option<String>,
@@ -1320,7 +1340,7 @@ fn agent_gate(
             &format!("/v1/gate/{stage}"),
             None,
             Duration::from_secs(15),
-        );
+        ).await;
     }
     let mut body = json!({ "stage": stage });
     if let Some(value) = reason {
@@ -1335,12 +1355,12 @@ fn agent_gate(
         "/v1/gate",
         Some(body),
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Performs a stage transition. The core refuses a blocked gate.
 #[tauri::command]
-fn agent_advance(
+async fn agent_advance(
     project_path: String,
     stage: String,
     reason: Option<String>,
@@ -1362,12 +1382,12 @@ fn agent_advance(
         "/v1/advance",
         Some(body),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// The active hypothesis, or the absence of one.
 #[tauri::command]
-fn agent_hypothesis(project_path: String) -> Result<Value, String> {
+async fn agent_hypothesis(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1377,12 +1397,12 @@ fn agent_hypothesis(project_path: String) -> Result<Value, String> {
         "/v1/hypothesis",
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Asks the model for a hypothesis draft. Records nothing.
 #[tauri::command]
-fn agent_hypothesis_draft(project_path: String, brief: String) -> Result<Value, String> {
+async fn agent_hypothesis_draft(project_path: String, brief: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1393,7 +1413,7 @@ fn agent_hypothesis_draft(project_path: String, brief: String) -> Result<Value, 
         "/v1/hypothesis/draft",
         Some(json!({ "brief": brief })),
         Duration::from_secs(180),
-    )
+    ).await
 }
 
 /// Records a hypothesis from reviewed fields.
@@ -1401,7 +1421,7 @@ fn agent_hypothesis_draft(project_path: String, brief: String) -> Result<Value, 
 /// Only the rationale is carried. The approver is resolved by the Agent from
 /// the operator it stores, so no surface has to know who is at the machine.
 #[tauri::command]
-fn agent_hypothesis_create(
+async fn agent_hypothesis_create(
     project_path: String,
     fields: Value,
     rationale: Option<String>,
@@ -1419,7 +1439,7 @@ fn agent_hypothesis_create(
         "/v1/hypothesis",
         Some(body),
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// Creates Loopforge project state in this directory.
@@ -1427,7 +1447,7 @@ fn agent_hypothesis_create(
 /// Idempotent in the core, so a repeated call adopts the existing project
 /// rather than failing; the response says which happened.
 #[tauri::command]
-fn agent_project_init(project_path: String) -> Result<Value, String> {
+async fn agent_project_init(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1437,12 +1457,12 @@ fn agent_project_init(project_path: String) -> Result<Value, String> {
         "/v1/project/init",
         None,
         Duration::from_secs(30),
-    )
+    ).await
 }
 
 /// The project's lifecycle stage and derived quality claims.
 #[tauri::command]
-fn agent_project_status(project_path: String) -> Result<Value, String> {
+async fn agent_project_status(project_path: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1452,12 +1472,12 @@ fn agent_project_status(project_path: String) -> Result<Value, String> {
         "/v1/project/status",
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Engine run history. `operation` narrows to `build` or `test`.
 #[tauri::command]
-fn agent_runs(project_path: String, operation: Option<String>) -> Result<Value, String> {
+async fn agent_runs(project_path: String, operation: Option<String>) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1469,12 +1489,12 @@ fn agent_runs(project_path: String, operation: Option<String>) -> Result<Value, 
         Some("test") => "/v1/runs?operation=test",
         Some(other) => return Err(format!("unsupported run operation: {other}")),
     };
-    agent_request(&metadata, "GET", path, None, Duration::from_secs(15))
+    agent_request(&metadata, "GET", path, None, Duration::from_secs(15)).await
 }
 
 /// One run, including its captured output.
 #[tauri::command]
-fn agent_run(project_path: String, run_id: String) -> Result<Value, String> {
+async fn agent_run(project_path: String, run_id: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1491,12 +1511,12 @@ fn agent_run(project_path: String, run_id: String) -> Result<Value, String> {
         &format!("/v1/runs/{run_id}"),
         None,
         Duration::from_secs(15),
-    )
+    ).await
 }
 
 /// Runs a build or test through the deterministic core.
 #[tauri::command]
-fn agent_run_engine(project_path: String, operation: String) -> Result<Value, String> {
+async fn agent_run_engine(project_path: String, operation: String) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1508,11 +1528,11 @@ fn agent_run_engine(project_path: String, operation: String) -> Result<Value, St
         "/v1/engine/run",
         Some(json!({ "operation": operation })),
         Duration::from_secs(300),
-    )
+    ).await
 }
 
 #[tauri::command]
-fn agent_query(
+async fn agent_query(
     project_path: String,
     query: String,
     thread_id: Option<String>,
@@ -1526,7 +1546,7 @@ fn agent_query(
         "/v1/query",
         Some(json!({"query": query, "thread_id": thread_id})),
         Duration::from_secs(120),
-    )
+    ).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1559,8 +1579,6 @@ pub fn run() {
             agent_save_operator_settings,
             agent_provider_settings,
             agent_probe_provider,
-            agent_provider_auth,
-            agent_provider_auth_action,
             agent_route_role,
             agent_clear_role,
             agent_save_provider_settings,
@@ -1638,6 +1656,31 @@ mod tests {
             ])
             .spawn()
             .expect("spawned")
+    }
+
+    #[test]
+    fn no_command_blocks_the_thread_that_draws_the_window() {
+        // Tauri runs a synchronous command on the main thread. These wait on a
+        // blocking HTTP client -- a browser sign-in is allowed five minutes,
+        // an engine run ten -- so one synchronous command freezes the window
+        // for as long as it waits. That is what a completed sign-in did.
+        //
+        // Read from this file rather than asserted on behaviour: the property
+        // is that every command is declared `async`, and a test that called
+        // one could only ever cover the one it called.
+        let source = include_str!("lib.rs");
+        // Assembled rather than written out, or this line is itself a match.
+        let marker = concat!("#[tauri::", "command]");
+        let offenders: Vec<&str> = source
+            .split(marker)
+            .skip(1)
+            .filter_map(|block| {
+                let declaration = block.trim_start().lines().next()?;
+                (!declaration.starts_with("async fn")).then_some(declaration)
+            })
+            .collect();
+
+        assert!(offenders.is_empty(), "synchronous commands: {offenders:?}");
     }
 
     #[test]
