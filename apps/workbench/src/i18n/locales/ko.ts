@@ -687,4 +687,8 @@ export const ko: Messages = {
   "wizard.useKey": "API 키 사용",
   "wizard.accountCredential": "자격 증명은 이 계정에서 가져오며 자동으로 갱신됩니다.",
   "wizard.noAccounts": "로그인된 계정이 없습니다. 먼저 사용량에서 로그인하세요.",
+  "wizard.accountUnavailable": "이 계정은 이 기기에 클라이언트 자격 증명이 필요합니다.",
+  "wizard.save": "저장",
+  "wizard.pickModel": "이 엔드포인트가 사용할 모델을 선택하세요.",
+  "wizard.noModelList": "모델 목록이 반환되지 않았습니다. 모델 이름을 입력하세요.",
 };

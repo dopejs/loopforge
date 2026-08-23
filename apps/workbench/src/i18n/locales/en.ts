@@ -690,6 +690,10 @@ export const en = {
   "wizard.useKey": "Use an API key",
   "wizard.accountCredential": "The credential comes from this account and is refreshed automatically.",
   "wizard.noAccounts": "No accounts are signed in. Sign one in under Usage first.",
+  "wizard.accountUnavailable": "This account needs its client credentials supplied on this machine.",
+  "wizard.save": "Save",
+  "wizard.pickModel": "Choose the model this endpoint will use.",
+  "wizard.noModelList": "The endpoint returned no model list. Type a model name instead.",
 } as const;
 export type MessageKey = keyof typeof en;
 

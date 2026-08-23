@@ -31,6 +31,14 @@ export type Source = {
    * signed into. Everything else is a preset over the one HTTP provider.
    */
   providerId?: string;
+  /**
+   * The subscription account this vendor also offers, where it has one.
+   *
+   * Present only for vendors that genuinely support signing in. The wizard
+   * offers an account as an alternative to a key exactly where this is set,
+   * rather than showing a disabled control on every preset.
+   */
+  oauthProviderId?: string;
 };
 
 export const SOURCES: readonly Source[] = [
@@ -137,6 +145,226 @@ export const SOURCES: readonly Source[] = [
     baseUrl: "https://api.xiaomimimo.com/v1",
     protocol: "openai_compatible",
     exampleModel: "mimo-v2.5"
+  },
+  {
+    id: "anthropic_api",
+    name: "Anthropic (API key)",
+    kind: "cloud",
+    baseUrl: "https://api.anthropic.com/v1",
+    protocol: "openai_compatible",
+    exampleModel: "claude-sonnet-4-5",
+    oauthProviderId: "anthropic"
+  },
+  {
+    id: "xai",
+    name: "xAI",
+    kind: "cloud",
+    baseUrl: "https://api.x.ai/v1",
+    protocol: "openai_compatible",
+    exampleModel: "grok-4",
+    oauthProviderId: "xai"
+  },
+  {
+    id: "zai",
+    name: "Z.ai",
+    kind: "cloud",
+    baseUrl: "https://api.z.ai/api/coding/paas/v4",
+    protocol: "openai_compatible",
+    exampleModel: "glm-4.6",
+    oauthProviderId: "zai"
+  },
+  {
+    id: "cerebras",
+    name: "Cerebras",
+    kind: "cloud",
+    baseUrl: "https://api.cerebras.ai/v1",
+    protocol: "openai_compatible",
+    exampleModel: "llama-3.3-70b"
+  },
+  {
+    id: "fireworks",
+    name: "Fireworks",
+    kind: "cloud",
+    baseUrl: "https://api.fireworks.ai/inference/v1",
+    protocol: "openai_compatible",
+    exampleModel: "accounts/fireworks/models/llama-v3p3-70b-instruct"
+  },
+  {
+    id: "nvidia",
+    name: "NVIDIA NIM",
+    kind: "cloud",
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    protocol: "openai_compatible",
+    exampleModel: "meta/llama-3.3-70b-instruct"
+  },
+  {
+    id: "huggingface",
+    name: "Hugging Face",
+    kind: "cloud",
+    baseUrl: "https://router.huggingface.co/v1",
+    protocol: "openai_compatible",
+    exampleModel: "meta-llama/Llama-3.3-70B-Instruct"
+  },
+  {
+    id: "novita",
+    name: "Novita",
+    kind: "cloud",
+    baseUrl: "https://api.novita.ai/openai/v1",
+    protocol: "openai_compatible",
+    exampleModel: "meta-llama/llama-3.3-70b-instruct"
+  },
+  {
+    id: "siliconflow",
+    name: "SiliconFlow",
+    kind: "cloud",
+    baseUrl: "https://api.siliconflow.com/v1",
+    protocol: "openai_compatible",
+    exampleModel: "Qwen/Qwen2.5-72B-Instruct"
+  },
+  {
+    id: "siliconflow_cn",
+    name: "SiliconFlow (\u4e2d\u56fd)",
+    kind: "cloud",
+    baseUrl: "https://api.siliconflow.cn/v1",
+    protocol: "openai_compatible",
+    exampleModel: "Qwen/Qwen2.5-72B-Instruct"
+  },
+  {
+    id: "qianfan",
+    name: "Qianfan",
+    kind: "cloud",
+    baseUrl: "https://qianfan.baidubce.com/v2",
+    protocol: "openai_compatible",
+    exampleModel: "ernie-4.5-turbo-128k"
+  },
+  {
+    id: "qwen_portal",
+    name: "Qwen Portal",
+    kind: "cloud",
+    baseUrl: "https://portal.qwen.ai/v1",
+    protocol: "openai_compatible",
+    exampleModel: "qwen3-coder-plus"
+  },
+  {
+    id: "alibaba_coding",
+    name: "Alibaba Coding Plan",
+    kind: "cloud",
+    baseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1",
+    protocol: "openai_compatible",
+    exampleModel: "qwen3-coder-plus"
+  },
+  {
+    id: "zhipu_coding",
+    name: "Zhipu Coding Plan",
+    kind: "cloud",
+    baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+    protocol: "openai_compatible",
+    exampleModel: "glm-4.6"
+  },
+  {
+    id: "baseten",
+    name: "Baseten",
+    kind: "cloud",
+    baseUrl: "https://inference.baseten.co/v1",
+    protocol: "openai_compatible",
+    exampleModel: "deepseek-ai/DeepSeek-V3"
+  },
+  {
+    id: "coreweave",
+    name: "CoreWeave",
+    kind: "cloud",
+    baseUrl: "https://api.inference.wandb.ai/v1",
+    protocol: "openai_compatible",
+    exampleModel: "meta-llama/Llama-3.3-70B-Instruct"
+  },
+  {
+    id: "gmi_cloud",
+    name: "GMI Cloud",
+    kind: "cloud",
+    baseUrl: "https://api.gmi-serving.com/v1",
+    protocol: "openai_compatible",
+    exampleModel: "deepseek-ai/DeepSeek-V3"
+  },
+  {
+    id: "nanogpt",
+    name: "NanoGPT",
+    kind: "cloud",
+    baseUrl: "https://nano-gpt.com/api/v1",
+    protocol: "openai_compatible",
+    exampleModel: "deepseek-v3"
+  },
+  {
+    id: "venice",
+    name: "Venice",
+    kind: "cloud",
+    baseUrl: "https://api.venice.ai/api/v1",
+    protocol: "openai_compatible",
+    exampleModel: "llama-3.3-70b"
+  },
+  {
+    id: "sakana",
+    name: "Sakana AI",
+    kind: "cloud",
+    baseUrl: "https://api.sakana.ai/v1",
+    protocol: "openai_compatible",
+    exampleModel: ""
+  },
+  {
+    id: "synthetic",
+    name: "Synthetic",
+    kind: "cloud",
+    baseUrl: "https://api.synthetic.new/openai/v1",
+    protocol: "openai_compatible",
+    exampleModel: ""
+  },
+  {
+    id: "zenmux",
+    name: "ZenMux",
+    kind: "cloud",
+    baseUrl: "https://zenmux.ai/api/v1",
+    protocol: "openai_compatible",
+    exampleModel: ""
+  },
+  {
+    id: "aiand",
+    name: "ai&",
+    kind: "cloud",
+    baseUrl: "https://api.aiand.com/v1",
+    protocol: "openai_compatible",
+    exampleModel: ""
+  },
+  {
+    id: "umans",
+    name: "Umans AI",
+    kind: "cloud",
+    baseUrl: "https://api.code.umans.ai",
+    protocol: "openai_compatible",
+    exampleModel: ""
+  },
+  {
+    id: "kimi",
+    name: "Kimi",
+    kind: "cloud",
+    baseUrl: "https://api.moonshot.cn/v1",
+    protocol: "openai_compatible",
+    exampleModel: "kimi-k2",
+    oauthProviderId: "kimi"
+  },
+  {
+    id: "llamacpp",
+    name: "llama.cpp",
+    kind: "local",
+    baseUrl: "http://127.0.0.1:8080/v1",
+    protocol: "openai_compatible",
+    exampleModel: ""
+  },
+  {
+    id: "vllm",
+    name: "vLLM",
+    kind: "local",
+    baseUrl: "http://127.0.0.1:8000/v1",
+    protocol: "openai_compatible",
+    exampleModel: ""
   },
   {
     id: "ollama",

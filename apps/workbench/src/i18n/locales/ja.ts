@@ -687,4 +687,8 @@ export const ja: Messages = {
   "wizard.useKey": "API キーを使う",
   "wizard.accountCredential": "認証情報はこのアカウントから取得され、自動的に更新されます。",
   "wizard.noAccounts": "サインイン済みのアカウントがありません。まず「使用量」でサインインしてください。",
+  "wizard.accountUnavailable": "このアカウントはこの端末にクライアント認証情報が必要です。",
+  "wizard.save": "保存",
+  "wizard.pickModel": "このエンドポイントで使うモデルを選んでください。",
+  "wizard.noModelList": "モデル一覧が返りませんでした。モデル名を入力してください。",
 };

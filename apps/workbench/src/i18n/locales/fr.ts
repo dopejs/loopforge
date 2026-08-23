@@ -687,4 +687,8 @@ export const fr: Messages = {
   "wizard.useKey": "Utiliser une clé d'API",
   "wizard.accountCredential": "L'identifiant provient de ce compte et est renouvelé automatiquement.",
   "wizard.noAccounts": "Aucun compte connecté. Connectez-en un dans Utilisation d'abord.",
+  "wizard.accountUnavailable": "Ce compte nécessite que ses identifiants client soient fournis sur cette machine.",
+  "wizard.save": "Enregistrer",
+  "wizard.pickModel": "Choisissez le modèle que cet endpoint utilisera.",
+  "wizard.noModelList": "L'endpoint n'a renvoyé aucune liste de modèles. Saisissez un nom de modèle.",
 };

@@ -127,19 +127,21 @@ describe("AddProvider", () => {
     expect(screen.getByText(/No matching source/)).toBeTruthy();
   });
 
-  it("fills in the endpoint from the chosen source", async () => {
+  it("shows a preset's endpoint rather than asking for it", async () => {
     mockAgent();
     open();
 
     fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
 
-    // The whole point of the step: not having to know this by heart.
-    const baseUrl = screen.getByPlaceholderText("https://api.example.com/v1");
-    expect((baseUrl as HTMLInputElement).value).toBe("https://api.deepseek.com/v1");
+    // Choosing a preset is how a user avoids having to know this. Presenting
+    // it as a field to fill in asks for the very thing they just chose.
+    expect(screen.queryByPlaceholderText("https://api.example.com/v1")).toBeNull();
+    expect(screen.getByText("https://api.deepseek.com/v1")).toBeTruthy();
     expect((screen.getByPlaceholderText("DeepSeek") as HTMLInputElement).value).toBe(
       "DeepSeek"
     );
   });
+
 
   it("does not ask a local source for a key", async () => {
     mockAgent();
@@ -167,13 +169,14 @@ describe("AddProvider", () => {
     open();
 
     fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
-    fireEvent.change(screen.getByPlaceholderText("deepseek-chat"), {
-      target: { value: "deepseek-chat" }
-    });
     fireEvent.change(screen.getByPlaceholderText("Paste the key"), {
       target: { value: "sk-secret" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.change(await screen.findByPlaceholderText("deepseek-chat"), {
+      target: { value: "deepseek-chat" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       const call = invoke.mock.calls.find(
@@ -182,11 +185,11 @@ describe("AddProvider", () => {
       expect(call).toBeTruthy();
       const payload = (call as [string, Record<string, unknown>])[1];
       expect(payload.baseUrl).toBe("https://api.deepseek.com/v1");
-      // Recorded so the wizard can show what was chosen rather than a bare URL.
       expect(payload.displayName).toBe("DeepSeek");
       expect(payload.protocol).toBe("openai_compatible");
     });
   });
+
 
   it("reopens on the connection step for an endpoint already configured", async () => {
     mockAgent({
@@ -200,10 +203,10 @@ describe("AddProvider", () => {
 
     // Revisiting is editing, not starting over, and the stored key is kept
     // rather than demanded again.
-    const baseUrl = await screen.findByPlaceholderText("https://api.example.com/v1");
-    expect((baseUrl as HTMLInputElement).value).toBe("https://api.deepseek.com/v1");
-    expect(screen.getByPlaceholderText(/Leave blank to keep/)).toBeTruthy();
+    expect(await screen.findByPlaceholderText(/Leave blank to keep/)).toBeTruthy();
+    expect(screen.getByText("https://api.deepseek.com/v1")).toBeTruthy();
   });
+
 
   it("offers subscription accounts as sources", async () => {
     mockAgent();
@@ -240,7 +243,7 @@ describe("AddProvider", () => {
     expect(screen.getByText(/does not run it for you/)).toBeTruthy();
   });
 
-  it("fetches the model list so the user need not know one", async () => {
+  it("asks the endpoint for its catalogue on the way to the model step", async () => {
     mockAgent();
     open();
 
@@ -248,18 +251,17 @@ describe("AddProvider", () => {
     fireEvent.change(screen.getByPlaceholderText("Paste the key"), {
       target: { value: "sk-secret" }
     });
-    fireEvent.click(screen.getByRole("button", { name: "Fetch from the API" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
-    // The endpoint knows its own catalogue; asking the user to type a model
-    // name from memory was the part worth removing.
-    expect(await screen.findByText("Synced 2")).toBeTruthy();
-    await waitFor(() => {
-      const call = invoke.mock.calls.find(([command]) => command === "agent_probe_provider");
-      expect((call as [string, Record<string, unknown>])[1].apiKey).toBe("sk-secret");
-    });
+    // The step is named for the model, so the list has to be there when the
+    // user arrives -- not something they press a button for.
+    expect(await screen.findByText(/Choose the model/)).toBeTruthy();
+    const call = invoke.mock.calls.find(([command]) => command === "agent_probe_provider");
+    expect((call as [string, Record<string, unknown>])[1].apiKey).toBe("sk-secret");
   });
 
-  it("tells a wrong key apart from a wrong endpoint", async () => {
+
+  it("stops on a rejected key instead of moving on", async () => {
     invoke.mockImplementation((command: string) => {
       if (command === "agent_provider_settings") return Promise.resolve(settings());
       if (command === "agent_providers") return Promise.resolve({ providers: [], roles: [] });
@@ -277,69 +279,74 @@ describe("AddProvider", () => {
     open();
 
     fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Fetch from the API" }));
+    fireEvent.change(screen.getByPlaceholderText("Paste the key"), {
+      target: { value: "sk-wrong" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
-    // The two failures need different fixes, so one message for both would
-    // send the user to the wrong field.
+    // Advancing would hide the one thing the user has to fix.
     expect(await screen.findByText("The endpoint rejected this key.")).toBeTruthy();
+    expect(screen.queryByText(/Choose the model/)).toBeNull();
   });
 
-  it("cannot offer an account credential when none is signed in", async () => {
+
+  it("offers no account for a vendor that has none", async () => {
     mockAgent();
     open();
 
     fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
 
-    const choose = screen.getByRole("button", { name: "Use a signed-in account" });
-    // Offering it would lead to a picker with nothing in it, so the option is
-    // present but unusable and says where to fix that.
-    expect((choose as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/Sign one in under Usage first/)).toBeTruthy();
+    // DeepSeek has no subscription sign-in. A disabled toggle here told the
+    // user an account might exist for an endpoint that has none.
+    expect(screen.queryByRole("button", { name: "Use a signed-in account" })).toBeNull();
+    expect(screen.getByPlaceholderText("Paste the key")).toBeTruthy();
   });
 
-  it("takes the credential from a signed-in account instead of a key", async () => {
+
+  it("takes the credential from the vendor's own account", async () => {
     accounts = [
-      { id: "anthropic", name: "Claude", flow: "callback", signed_in: true,
-        account_label: "", plan: "", expires_at: "", grant_deadline: "" }
+      { id: "xai", name: "xAI", flow: "device_code", signed_in: true,
+        account_label: "", plan: "", expires_at: "", grant_deadline: "", configured: true }
     ];
     mockAgent();
     open();
 
-    fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
-    fireEvent.change(screen.getByPlaceholderText("deepseek-chat"), {
-      target: { value: "deepseek-chat" }
-    });
+    fireEvent.click(await screen.findByRole("button", { name: /^xAI/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Use a signed-in account" }));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.change(await screen.findByPlaceholderText("grok-4"), {
+      target: { value: "grok-4" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       const call = invoke.mock.calls.find(
         ([command]) => command === "agent_save_provider_settings"
       );
-      expect(call).toBeTruthy();
-      // The binding is what lets the token be refreshed later rather than
-      // asked for again.
-      expect((call as [string, Record<string, unknown>])[1].oauthProviderId).toBe("anthropic");
+      expect((call as [string, Record<string, unknown>])[1].oauthProviderId).toBe("xai");
     });
   });
 
-  it("stops asking for a key once an account supplies one", async () => {
+
+  it("signs the account in from here rather than sending the user away", async () => {
     accounts = [
-      { id: "anthropic", name: "Claude", flow: "callback", signed_in: true,
-        account_label: "", plan: "", expires_at: "", grant_deadline: "" }
+      { id: "xai", name: "xAI", flow: "device_code", signed_in: false,
+        account_label: "", plan: "", expires_at: "", grant_deadline: "", configured: true }
     ];
     mockAgent();
     open();
 
-    fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^xAI/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Use a signed-in account" }));
 
-    // Requiring both would make the one credential that stays current
-    // impossible to choose.
+    // The account is a credential for this endpoint, so it is established
+    // here. Sending the user to the usage panel and back inverted that.
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
     expect(screen.queryByPlaceholderText("Paste the key")).toBeNull();
   });
 
-  it("advances to the models step after saving", async () => {
+
+  it("reaches the model step without having asked for a model first", async () => {
     mockAgent();
     open();
 
@@ -347,16 +354,15 @@ describe("AddProvider", () => {
     fireEvent.change(screen.getByPlaceholderText("https://api.example.com/v1"), {
       target: { value: "https://api.example.test/v1" }
     });
-    fireEvent.change(screen.getByPlaceholderText("model-name"), {
-      target: { value: "some-model" }
-    });
     fireEvent.change(screen.getByPlaceholderText("Paste the key"), {
       target: { value: "sk-1" }
     });
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
-    // And says the endpoint is not live yet, which is why its model list
-    // cannot be fetched here.
-    expect(await screen.findByText(/Restart the agent/)).toBeTruthy();
+    // Step two asked only for the credential; naming a model belongs to the
+    // step named for it.
+    expect(screen.queryByPlaceholderText("model-name")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByPlaceholderText("model-name")).toBeTruthy();
   });
+
 });

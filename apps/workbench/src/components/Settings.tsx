@@ -13,7 +13,6 @@ import { isConfigured, saveOperator, useOperator } from "../operator";
 import { SHORTCUTS, displayShortcut, isApplePlatform } from "../shortcuts";
 import { ProviderSettings } from "./ProviderSettings";
 import { UsagePanel } from "./UsagePanel";
-import { AccountsPanel } from "./AccountsPanel";
 import type { Provider } from "../providers";
 import { AddProvider } from "./AddProvider";
 import { TOOL_CHIPS } from "../fixtures.providers";
@@ -370,12 +369,14 @@ export function Settings({
             </>
           )}
 
-          {group === "usage" && (
-            <>
-              <AccountsPanel projectRoot={projectRoot} />
-              <UsagePanel projectRoot={projectRoot} />
-            </>
-          )}
+          {/*
+            Usage shows what accounts have spent. Signing one in belongs to
+            the provider wizard, where the account is chosen as an endpoint's
+            credential -- offering it here as well made the same account
+            reachable from two places and reversed the order: you had to come
+            here to sign in before you could finish adding a provider.
+          */}
+          {group === "usage" && <UsagePanel projectRoot={projectRoot} />}
 
           {group === "permissions" && (
             <>

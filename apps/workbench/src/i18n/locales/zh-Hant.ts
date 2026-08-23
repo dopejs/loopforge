@@ -687,4 +687,8 @@ export const zhHant: Messages = {
   "wizard.useKey": "使用 API key",
   "wizard.accountCredential": "憑證取自該帳號，並會自動更新。",
   "wizard.noAccounts": "還沒有已登入的帳號。請先到「用量」中登入。",
+  "wizard.accountUnavailable": "該帳號需要在本機提供用戶端憑證。",
+  "wizard.save": "儲存",
+  "wizard.pickModel": "選擇該 endpoint 要使用的模型。",
+  "wizard.noModelList": "該 endpoint 沒有回傳模型清單，請手動填寫模型名稱。",
 };

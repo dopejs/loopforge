@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useI18n } from "../i18n";
-import { type Account, useAccounts } from "../accounts";
+import {
+  type Account,
+  beginSignIn,
+  completeSignIn,
+  openExternal,
+  useAccounts
+} from "../accounts";
 import { errorMessage } from "../daemon";
 import { isDesktopRuntime } from "../agent";
 import {
@@ -112,8 +118,14 @@ export function AddProvider({
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [oauthProviderId, setOauthProviderId] = useState("");
-  const { accounts } = useAccounts(projectRoot, true);
-  const signedIn = accounts.filter((candidate) => candidate.signed_in);
+  // The catalogue the endpoint reported, lifted here because it is fetched
+  // with the credential in step two and chosen from in step three.
+  const [models, setModels] = useState<readonly string[]>([]);
+  const { accounts, reload: reloadAccounts } = useAccounts(projectRoot, true);
+  // The account belonging to the chosen vendor, or none. A preset without one
+  // simply has no sign-in to offer.
+  const vendorAccount =
+    accounts.find((candidate) => candidate.id === source?.oauthProviderId) ?? null;
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -149,6 +161,32 @@ export function AddProvider({
     setFailure(undefined);
   };
 
+  /**
+   * Leave the connection step, asking the endpoint what it serves on the way.
+   *
+   * A failure here is not fatal: the catalogue is a convenience, and a vendor
+   * that does not list its models still works if the user names one. So the
+   * step advances either way and the next one says which happened.
+   */
+  const advance = async (): Promise<void> => {
+    if (busy || !source || !isDesktopRuntime()) return;
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      const found = await probeProvider(projectRoot, baseUrl, apiKey);
+      setModels(found.reachable ? found.models : []);
+      if (!found.reachable && found.status === 401) {
+        setFailure(t("wizard.probeBadKey"));
+        return;
+      }
+    } catch {
+      setModels([]);
+    } finally {
+      setBusy(false);
+    }
+    setStep("models");
+  };
+
   const save = async (): Promise<void> => {
     if (busy || !source || !isDesktopRuntime()) return;
     setBusy(true);
@@ -166,7 +204,6 @@ export function AddProvider({
       setSaved(true);
       reload();
       onSaved?.();
-      setStep("models");
     } catch (error: unknown) {
       setFailure(errorMessage(error, t("settings.provider.saveFailed")));
     } finally {
@@ -176,6 +213,10 @@ export function AddProvider({
 
   const hasKey = settings?.has_api_key === true;
   const keyRequired = source ? needsApiKey(source) : true;
+  /** A credential of some kind: a key, a stored key, or a signed-in account. */
+  const hasCredential = Boolean(
+    !keyRequired || oauthProviderId || apiKey || hasKey
+  );
   const canSave = Boolean(
     baseUrl.trim() &&
       model.trim() &&
@@ -238,7 +279,8 @@ export function AddProvider({
               apiKey={apiKey}
               hasKey={hasKey}
               oauthProviderId={oauthProviderId}
-              signedIn={signedIn}
+              vendorAccount={vendorAccount}
+              onAccountsChanged={reloadAccounts}
               onDisplayName={setDisplayName}
               onBaseUrl={setBaseUrl}
               onModel={setModel}
@@ -248,7 +290,15 @@ export function AddProvider({
           )}
 
           {step === "models" && (
-            <ModelsStep projectRoot={projectRoot} providers={providers} saved={saved} />
+            <ModelsStep
+              projectRoot={projectRoot}
+              providers={providers}
+              saved={saved}
+              models={models}
+              model={model}
+              exampleModel={source?.exampleModel ?? ""}
+              onModel={setModel}
+            />
           )}
 
           {failure && <p className="wizard-note tone-bad">{failure}</p>}
@@ -304,12 +354,25 @@ export function AddProvider({
               <button
                 type="button"
                 className="primary-button"
+                // Advances rather than saves: the model has not been chosen
+                // yet, and saving before it would write a configuration the
+                // next step is about to complete.
+                onClick={() => void advance()}
+                disabled={busy || !hasCredential}
+              >
+                {busy ? t("wizard.probing") : t("wizard.next")}
+              </button>
+            )}
+            {step === "models" && (
+              <button
+                type="button"
+                className="primary-button"
                 onClick={() => void save()}
                 // Not disabled on validity alone: the Agent decides whether an
                 // endpoint is acceptable, and its refusal names the reason.
                 disabled={busy || !canSave}
               >
-                {busy ? t("settings.provider.saving") : t("wizard.next")}
+                {busy ? t("settings.provider.saving") : t("wizard.save")}
               </button>
             )}
           </div>
@@ -375,6 +438,89 @@ function SourceStep({
 }
 
 /** Step two: how to reach it. */
+/**
+ * Signing a vendor's subscription in from inside the wizard.
+ *
+ * The account is a credential for the endpoint being configured, so it is
+ * established here. Making the user leave for the usage panel and come back
+ * inverted the relationship: usage is where you go to see what an account has
+ * spent, not where you go to create one.
+ */
+function AccountCredential({
+  account,
+  projectRoot,
+  onSignedIn
+}: {
+  account: Account;
+  projectRoot: string;
+  onSignedIn: () => void;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const [pending, setPending] = useState<{ url: string; user_code: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState("");
+
+  if (account.signed_in) {
+    return (
+      <>
+        <p className="field-static">
+          <span className="badge ok">{t("account.signedIn")}</span>{" "}
+          {account.account_label || account.name}
+        </p>
+        <small className="field-hint">{t("wizard.accountCredential")}</small>
+      </>
+    );
+  }
+
+  async function start(): Promise<void> {
+    setFailure("");
+    setBusy(true);
+    try {
+      const started = await beginSignIn(projectRoot, account.id);
+      setPending({ url: started.url, user_code: started.user_code });
+      void openExternal(started.url).catch(() => {});
+      await completeSignIn(projectRoot, account.id);
+      setPending(null);
+      onSignedIn();
+    } catch (error: unknown) {
+      setFailure(errorMessage(error, t("account.failed")));
+      setPending(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      {account.configured === false ? (
+        <small className="field-hint">{t("wizard.accountUnavailable")}</small>
+      ) : (
+        <button
+          type="button"
+          className="primary-button small"
+          disabled={busy}
+          onClick={start}
+        >
+          {t("account.signIn")}
+        </button>
+      )}
+      {pending && (
+        <div className="account-pending">
+          {pending.user_code ? (
+            <>
+              <span>{t("account.enterCode")}</span>
+              <code className="device-code">{pending.user_code}</code>
+            </>
+          ) : (
+            <span>{t("account.waiting")}</span>
+          )}
+        </div>
+      )}
+      {failure && <p className="settings-note issue-line">{failure}</p>}
+    </>
+  );
+}
+
 function ConnectionStep({
   source,
   projectRoot,
@@ -384,7 +530,8 @@ function ConnectionStep({
   apiKey,
   hasKey,
   oauthProviderId,
-  signedIn,
+  vendorAccount,
+  onAccountsChanged,
   onDisplayName,
   onBaseUrl,
   onModel,
@@ -399,7 +546,9 @@ function ConnectionStep({
   apiKey: string;
   hasKey: boolean;
   oauthProviderId: string;
-  signedIn: readonly Account[];
+  /** The account this vendor offers, if it offers one at all. */
+  vendorAccount: Account | null;
+  onAccountsChanged: () => void;
   onDisplayName: (value: string) => void;
   onBaseUrl: (value: string) => void;
   onModel: (value: string) => void;
@@ -467,14 +616,24 @@ function ConnectionStep({
         </select>
       </label>
 
+      {/*
+        A chosen preset already carries its endpoint. Presenting it as a field
+        to fill in asks the user for something they picked the preset to avoid
+        having to know; it is shown so they can see where their key is going,
+        and only a custom source has anything to type.
+      */}
       <label className="field-block">
         <span className="field-label">{t("settings.provider.baseUrl")}</span>
-        <input
-          className="field-input"
-          value={baseUrl}
-          placeholder="https://api.example.com/v1"
-          onChange={(event) => onBaseUrl(event.target.value)}
-        />
+        {source.kind === "custom" ? (
+          <input
+            className="field-input"
+            value={baseUrl}
+            placeholder="https://api.example.com/v1"
+            onChange={(event) => onBaseUrl(event.target.value)}
+          />
+        ) : (
+          <output className="field-static mono">{baseUrl}</output>
+        )}
       </label>
 
       {/*
@@ -491,40 +650,43 @@ function ConnectionStep({
             account is the only credential that can be kept current without
             the user retyping one, but plenty of endpoints only take a key.
           */}
-          <div className="segmented">
-            <button
-              type="button"
-              className={oauthProviderId ? "" : "active"}
-              onClick={() => onOauthProviderId("")}
-            >
-              {t("wizard.useKey")}
-            </button>
-            <button
-              type="button"
-              className={oauthProviderId ? "active" : ""}
-              disabled={signedIn.length === 0}
-              onClick={() => onOauthProviderId(signedIn[0]?.id ?? "")}
-            >
-              {t("wizard.useAccount")}
-            </button>
-          </div>
-
-          {oauthProviderId ? (
-            <>
-              <select
-                className="field-input"
-                value={oauthProviderId}
-                aria-label={t("wizard.useAccount")}
-                onChange={(event) => onOauthProviderId(event.target.value)}
+          {/*
+            Only vendors that actually offer a subscription sign-in get this
+            choice. A disabled toggle on every preset told the user that an
+            account might exist for endpoints that have none, which is noise
+            at best and misleading at worst.
+          */}
+          {vendorAccount && (
+            <div className="segmented">
+              <button
+                type="button"
+                className={oauthProviderId ? "" : "active"}
+                onClick={() => onOauthProviderId("")}
               >
-                {signedIn.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                  </option>
-                ))}
-              </select>
-              <small className="field-hint">{t("wizard.accountCredential")}</small>
-            </>
+                {t("wizard.useKey")}
+              </button>
+              <button
+                type="button"
+                className={oauthProviderId ? "active" : ""}
+                onClick={() => onOauthProviderId(vendorAccount.id)}
+              >
+                {t("wizard.useAccount")}
+              </button>
+            </div>
+          )}
+
+          {oauthProviderId && vendorAccount ? (
+            /*
+              Signed in here, not somewhere else. Sending the user to the usage
+              panel to sign in and then back again to finish configuring is the
+              wrong way round: the account is a credential for this endpoint,
+              and usage is where you go to see what it has spent.
+            */
+            <AccountCredential
+              account={vendorAccount}
+              projectRoot={projectRoot}
+              onSignedIn={onAccountsChanged}
+            />
           ) : (
             <>
               <input
@@ -538,59 +700,18 @@ function ConnectionStep({
                 onChange={(event) => onApiKey(event.target.value)}
               />
               {hasKey && <span className="badge ok">{t("settings.provider.keySet")}</span>}
-              {signedIn.length === 0 && (
-                <small className="field-hint">{t("wizard.noAccounts")}</small>
-              )}
+
             </>
           )}
         </fieldset>
       )}
 
-      <label className="field-block">
-        <span className="field-label">
-          {t("settings.provider.model")}
-          {probe?.reachable && (
-            <span className="badge ok">
-              {t("wizard.fetched", { count: probe.models.length })}
-            </span>
-          )}
-        </span>
-        {/*
-          A list and a text field at once: the endpoint knows its catalogue,
-          but a vendor can serve a model it does not list, so typing one stays
-          possible.
-        */}
-        <input
-          className="field-input"
-          value={model}
-          list="provider-models"
-          placeholder={source.exampleModel || "model-name"}
-          onChange={(event) => onModel(event.target.value)}
-        />
-        <datalist id="provider-models">
-          {(probe?.models ?? []).map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
-      </label>
-
-      <div className="card-actions">
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={() => void fetchModels()}
-          disabled={probing || !baseUrl.trim()}
-        >
-          {probing ? t("wizard.probing") : t("wizard.fetch")}
-        </button>
-      </div>
-      {probe && !probe.reachable && (
-        <p className="wizard-note tone-bad">{failureHint()}</p>
-      )}
-      {probe?.reachable && probe.models.length === 0 && (
-        <p className="wizard-note">{t("wizard.fetchHintManual")}</p>
-      )}
-
+      {/*
+        The model is chosen in step three, not here. Asking for it alongside
+        the credential meant asking the user to name a model before anything
+        had been able to ask the endpoint what it serves -- and the wizard
+        already has a step whose whole purpose is that choice.
+      */}
     </>
   );
 }
@@ -599,11 +720,19 @@ function ConnectionStep({
 function ModelsStep({
   projectRoot,
   providers,
-  saved
+  saved,
+  models,
+  model,
+  exampleModel,
+  onModel
 }: {
   projectRoot: string;
   providers: readonly Provider[];
   saved: boolean;
+  models: readonly string[];
+  model: string;
+  exampleModel: string;
+  onModel: (value: string) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   const { roles, reload } = useProviders(projectRoot, true);
@@ -635,8 +764,32 @@ function ModelsStep({
         model list cannot be fetched. Pretending otherwise would mean an empty
         list that looks like a broken endpoint.
       */}
+      {/*
+        The choice this step is named for. The catalogue was fetched with the
+        credential in the previous step, so by here it either exists or the
+        endpoint does not publish one -- and typing a name stays possible
+        either way, because a vendor can serve a model it does not list.
+      */}
+      <label className="field-block">
+        <span className="field-label">{t("settings.provider.model")}</span>
+        <input
+          className="field-input"
+          value={model}
+          list="provider-models"
+          placeholder={exampleModel || "model-name"}
+          onChange={(event) => onModel(event.target.value)}
+        />
+        <datalist id="provider-models">
+          {models.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+        <small className="field-hint">
+          {models.length > 0 ? t("wizard.pickModel") : t("wizard.noModelList")}
+        </small>
+      </label>
+
       {saved && <p className="wizard-note tone-ok">{t("settings.provider.restart")}</p>}
-      {!live && <p className="wizard-note">{t("wizard.fetchHintManual")}</p>}
 
       <span className="field-label dialog-section">{t("wizard.roleRouting")}</span>
       <p className="wizard-note">{t("wizard.roleHint")}</p>

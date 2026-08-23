@@ -687,4 +687,8 @@ export const zhHans: Messages = {
   "wizard.useKey": "使用 API key",
   "wizard.accountCredential": "凭证取自该账号，并会自动刷新。",
   "wizard.noAccounts": "还没有已登录的账号。请先到「用量」中登录。",
+  "wizard.accountUnavailable": "该账号需要在本机提供客户端凭证。",
+  "wizard.save": "保存",
+  "wizard.pickModel": "选择该 endpoint 要使用的模型。",
+  "wizard.noModelList": "该 endpoint 没有返回模型列表，请手动填写模型名。",
 };
