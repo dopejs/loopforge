@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 
 #: Overridable so tests never touch a developer's real store.
 HOME_VARIABLE = "LOOPFORGE_HOME"
@@ -96,6 +96,45 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "ALTER TABLE providers ADD COLUMN display_name TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE providers ADD COLUMN protocol TEXT NOT NULL DEFAULT "
         "'openai_compatible'",
+    ),
+    (
+        # OAuth grants, one row per account rather than per provider: the same
+        # vendor can hold several subscriptions (a personal plan and a team
+        # one), and collapsing them onto the provider id would make signing
+        # into the second silently evict the first.
+        #
+        # `authorized_at` is separate from `obtained_at` on purpose. Anthropic
+        # expires the whole refresh-token family about thirty days after the
+        # interactive login no matter how often it has rotated since, so the
+        # moment that matters for warning a user is the original login, and a
+        # refresh must not overwrite it.
+        """
+        CREATE TABLE oauth_credentials (
+            provider_id   TEXT NOT NULL,
+            account_key   TEXT NOT NULL DEFAULT '',
+            access_token  TEXT NOT NULL DEFAULT '',
+            refresh_token TEXT NOT NULL DEFAULT '',
+            expires_at    TEXT NOT NULL DEFAULT '',
+            scope         TEXT NOT NULL DEFAULT '',
+            account_label TEXT NOT NULL DEFAULT '',
+            account_id    TEXT NOT NULL DEFAULT '',
+            org_id        TEXT NOT NULL DEFAULT '',
+            plan          TEXT NOT NULL DEFAULT '',
+            api_endpoint  TEXT NOT NULL DEFAULT '',
+            authorized_at TEXT NOT NULL DEFAULT '',
+            obtained_at   TEXT NOT NULL,
+            PRIMARY KEY (provider_id, account_key)
+        )
+        """,
+    ),
+    (
+        # Which signed-in account supplies this endpoint's credential.
+        #
+        # Empty for an endpoint configured with a static API key, which is
+        # still the common case. When set, the stored `api_key` is a cache of
+        # the last access token rather than something the user typed, and it
+        # is refreshed rather than asked for again.
+        "ALTER TABLE providers ADD COLUMN oauth_provider_id TEXT NOT NULL DEFAULT ''",
     ),
 )
 
@@ -185,6 +224,7 @@ class UserStore:
         model: str,
         display_name: str = "",
         protocol: str = "openai_compatible",
+        oauth_provider_id: str = "",
     ) -> dict[str, Any]:
         """Record a provider's configuration.
 
@@ -204,14 +244,15 @@ class UserStore:
                 """
                 INSERT INTO providers
                     (provider_id, base_url, api_key, model, display_name, protocol,
-                     updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                     oauth_provider_id, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(provider_id) DO UPDATE SET
                     base_url = excluded.base_url,
                     api_key = excluded.api_key,
                     model = excluded.model,
                     display_name = excluded.display_name,
                     protocol = excluded.protocol,
+                    oauth_provider_id = excluded.oauth_provider_id,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -221,6 +262,7 @@ class UserStore:
                     model.strip(),
                     display_name.strip(),
                     protocol.strip() or "openai_compatible",
+                    oauth_provider_id.strip(),
                     _utc_now(),
                 ),
             )
@@ -292,6 +334,75 @@ class UserStore:
         return cursor.rowcount > 0
 
     # -- preferences --------------------------------------------------------
+
+    # -- OAuth grants -------------------------------------------------------
+
+    def oauth_grants(self) -> list[dict[str, Any]]:
+        """Every signed-in account, newest first."""
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM oauth_credentials ORDER BY obtained_at DESC"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def oauth_grant(self, provider_id: str, account_key: str = "") -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM oauth_credentials WHERE provider_id = ? AND account_key = ?",
+                (provider_id.strip(), account_key.strip()),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def save_oauth_grant(self, grant: dict[str, Any], account_key: str = "") -> dict[str, Any]:
+        """Record a grant, replacing the one for that account.
+
+        Keyed by account rather than by provider: one vendor can hold several
+        subscriptions, and collapsing them onto the provider id would make
+        signing into the second silently evict the first.
+        """
+        identifier = str(grant.get("provider_id") or "").strip()
+        if not identifier:
+            raise UserStoreError("A provider id is required.", "PROVIDER_ID_INVALID")
+        row = {
+            "provider_id": identifier,
+            "account_key": account_key.strip(),
+            "access_token": str(grant.get("access_token") or ""),
+            "refresh_token": str(grant.get("refresh_token") or ""),
+            "expires_at": str(grant.get("expires_at") or ""),
+            "scope": str(grant.get("scope") or ""),
+            "account_label": str(grant.get("account_label") or ""),
+            "account_id": str(grant.get("account_id") or ""),
+            "org_id": str(grant.get("org_id") or ""),
+            "plan": str(grant.get("plan") or ""),
+            "api_endpoint": str(grant.get("api_endpoint") or ""),
+            "authorized_at": str(grant.get("authorized_at") or ""),
+            "obtained_at": _utc_now(),
+        }
+        columns = ", ".join(row)
+        placeholders = ", ".join("?" for _ in row)
+        updates = ", ".join(
+            f"{name} = excluded.{name}"
+            for name in row
+            if name not in ("provider_id", "account_key")
+        )
+        with self.connect() as connection:
+            connection.execute(
+                f"INSERT INTO oauth_credentials ({columns}) VALUES ({placeholders}) "
+                f"ON CONFLICT(provider_id, account_key) DO UPDATE SET {updates}",
+                tuple(row.values()),
+            )
+            connection.commit()
+        return row
+
+    def forget_oauth_grant(self, provider_id: str, account_key: str = "") -> bool:
+        """Sign an account out locally. True when there was one to remove."""
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM oauth_credentials WHERE provider_id = ? AND account_key = ?",
+                (provider_id.strip(), account_key.strip()),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
 
     def preferences(self) -> dict[str, str]:
         with self.connect() as connection:
