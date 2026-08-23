@@ -5,7 +5,9 @@ import json
 import re
 import tempfile
 import uuid
+import urllib.error
 import urllib.parse
+import urllib.request
 from importlib import resources
 from pathlib import Path
 from collections.abc import Iterator
@@ -42,6 +44,12 @@ SETTINGS_SCHEMA = "loopforge-settings-v1"
 #: that does not exist.
 CONFIGURABLE_PROVIDER = "openai_compatible"
 AUTH_SCHEMA = "loopforge-provider-auth-v1"
+PROBE_SCHEMA = "loopforge-provider-probe-v1"
+#: A model list is small; anything larger is not one, and reading it would only
+#: let a wrong endpoint occupy memory.
+MAX_PROBE_BYTES = 512 * 1024
+MAX_PROBE_MODELS = 500
+PROBE_TIMEOUT_SECONDS = 20.0
 #: What the runtime accepts. `start` marks a login as pending and returns the
 #: command to run; `complete` re-detects afterwards. Neither runs anything --
 #: the login happens in the user's own terminal, under their own account.
@@ -703,6 +711,89 @@ class LoopforgeAgent:
             "logout_command": [str(part) for part in state.get("logoutCommand") or []],
             "last_error": str(state.get("lastError") or ""),
         }
+
+    def probe_provider(self, base_url: str, api_key: str) -> dict[str, Any]:
+        """Ask an endpoint what models it serves, before anything is stored.
+
+        Kura reads provider configuration at startup and its model list is
+        whatever it already knows, so it cannot answer this for an endpoint the
+        user is still typing. Going direct is what makes "paste a key, see the
+        models" possible at all -- and it doubles as the connection check,
+        turning a wrong key from a chat failure after a restart into an answer
+        while the field is still open.
+
+        Nothing is stored and nothing is dispatched: this reads a catalogue.
+        Dispatch remains Kura's.
+        """
+        url = str(base_url or "").strip().rstrip("/")
+        if not url:
+            raise LoopforgeAgentError("A base URL is required.", "PROBE_URL_INVALID")
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise LoopforgeAgentError(
+                "The base URL must be an HTTP or HTTPS address.", "PROBE_URL_INVALID"
+            )
+        request = urllib.request.Request(
+            f"{url}/models",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        if api_key:
+            request.add_header("Authorization", f"Bearer {api_key}")
+        try:
+            with urllib.request.urlopen(request, timeout=PROBE_TIMEOUT_SECONDS) as response:
+                payload = json.loads(response.read(MAX_PROBE_BYTES).decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            # The status is what tells a user which field is wrong, so it is
+            # reported rather than flattened into "could not connect".
+            return {
+                "schema_version": PROBE_SCHEMA,
+                "reachable": False,
+                "status": exc.code,
+                "models": [],
+                "error": f"HTTP {exc.code}",
+            }
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            return {
+                "schema_version": PROBE_SCHEMA,
+                "reachable": False,
+                "models": [],
+                "error": str(getattr(exc, "reason", None) or exc),
+            }
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # Reached something, but not a model catalogue -- usually a base URL
+            # missing its version segment.
+            return {
+                "schema_version": PROBE_SCHEMA,
+                "reachable": False,
+                "models": [],
+                "error": "The endpoint did not return a model list.",
+            }
+        return {
+            "schema_version": PROBE_SCHEMA,
+            "reachable": True,
+            "models": self._probe_models(payload),
+        }
+
+    @staticmethod
+    def _probe_models(payload: Any) -> list[str]:
+        """Model ids from an OpenAI-compatible listing.
+
+        Only ids: the rest of each entry differs per vendor and nothing here
+        needs it. Sorted so the same endpoint lists the same way twice.
+        """
+        entries = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(entries, list):
+            entries = payload if isinstance(payload, list) else []
+        identifiers = []
+        for entry in entries[:MAX_PROBE_MODELS]:
+            if isinstance(entry, dict):
+                value = str(entry.get("id") or "").strip()
+            else:
+                value = str(entry).strip()
+            if value:
+                identifiers.append(value)
+        return sorted(set(identifiers))
 
     def provider_auth(self, provider_id: str) -> dict[str, Any]:
         """The sign-in state of a managed provider."""

@@ -318,3 +318,33 @@ export function providerAuthAction(
     action
   });
 }
+
+/** Mirrors `loopforge-provider-probe-v1`. */
+export type ProviderProbe = {
+  schema_version: "loopforge-provider-probe-v1";
+  reachable: boolean;
+  models: readonly string[];
+  /** Present when the endpoint answered; absent when it was never reached. */
+  status?: number;
+  error?: string;
+};
+
+/**
+ * Asks an endpoint what models it serves, before anything is stored.
+ *
+ * Goes straight out rather than through Kura, which reads its provider
+ * configuration at startup and so cannot answer for an endpoint still being
+ * typed. It doubles as the connection check: a wrong key answers 401 here
+ * instead of failing a conversation after a restart.
+ */
+export function probeProvider(
+  projectRoot: string,
+  baseUrl: string,
+  apiKey: string
+): Promise<ProviderProbe> {
+  return invoke<ProviderProbe>("agent_probe_provider", {
+    projectPath: projectRoot,
+    baseUrl,
+    apiKey
+  });
+}

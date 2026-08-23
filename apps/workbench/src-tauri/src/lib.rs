@@ -608,6 +608,26 @@ fn agent_save_provider_settings(
     )
 }
 
+/// Asks an endpoint for its model list, before anything is stored.
+#[tauri::command]
+fn agent_probe_provider(
+    project_path: String,
+    base_url: String,
+    api_key: String,
+) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    // Longer than a local call: this reaches a vendor over the network.
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/settings/provider/probe",
+        Some(json!({ "base_url": base_url, "api_key": api_key })),
+        Duration::from_secs(45),
+    )
+}
+
 /// The sign-in state of a managed provider.
 #[tauri::command]
 fn agent_provider_auth(project_path: String, provider_id: String) -> Result<Value, String> {
@@ -1169,6 +1189,7 @@ pub fn run() {
             agent_operator_settings,
             agent_save_operator_settings,
             agent_provider_settings,
+            agent_probe_provider,
             agent_provider_auth,
             agent_provider_auth_action,
             agent_route_role,

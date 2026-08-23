@@ -70,6 +70,13 @@ function mockAgent(overrides: Record<string, unknown> = {}) {
         models: []
       });
     }
+    if (command === "agent_probe_provider") {
+      return Promise.resolve({
+        schema_version: "loopforge-provider-probe-v1",
+        reachable: true,
+        models: ["deepseek-chat", "deepseek-reasoner"]
+      });
+    }
     if (command === "agent_save_provider_settings") {
       return Promise.resolve(settings({ ...overrides, configured: true, has_api_key: true }));
     }
@@ -226,6 +233,49 @@ describe("AddProvider", () => {
     // is the command, not a button that opens nothing.
     expect(await screen.findByText("claude login")).toBeTruthy();
     expect(screen.getByText(/does not run it for you/)).toBeTruthy();
+  });
+
+  it("fetches the model list so the user need not know one", async () => {
+    mockAgent();
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
+    fireEvent.change(screen.getByPlaceholderText("Paste the key"), {
+      target: { value: "sk-secret" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Fetch from the API" }));
+
+    // The endpoint knows its own catalogue; asking the user to type a model
+    // name from memory was the part worth removing.
+    expect(await screen.findByText("Synced 2")).toBeTruthy();
+    await waitFor(() => {
+      const call = invoke.mock.calls.find(([command]) => command === "agent_probe_provider");
+      expect((call as [string, Record<string, unknown>])[1].apiKey).toBe("sk-secret");
+    });
+  });
+
+  it("tells a wrong key apart from a wrong endpoint", async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === "agent_provider_settings") return Promise.resolve(settings());
+      if (command === "agent_providers") return Promise.resolve({ providers: [], roles: [] });
+      if (command === "agent_probe_provider") {
+        return Promise.resolve({
+          schema_version: "loopforge-provider-probe-v1",
+          reachable: false,
+          status: 401,
+          models: []
+        });
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Fetch from the API" }));
+
+    // The two failures need different fixes, so one message for both would
+    // send the user to the wrong field.
+    expect(await screen.findByText("The endpoint rejected this key.")).toBeTruthy();
   });
 
   it("advances to the models step after saving", async () => {

@@ -6,6 +6,8 @@ import {
   type Provider,
   type ProviderAuth,
   clearModelRole,
+  type ProviderProbe,
+  probeProvider,
   providerAuth,
   providerAuthAction,
   forgetProviderSettings,
@@ -218,6 +220,7 @@ export function AddProvider({
           {step === "connection" && source && !isAccountSource(source) && (
             <ConnectionStep
               source={source}
+              projectRoot={projectRoot}
               displayName={displayName}
               baseUrl={baseUrl}
               model={model}
@@ -360,6 +363,7 @@ function SourceStep({
 /** Step two: how to reach it. */
 function ConnectionStep({
   source,
+  projectRoot,
   displayName,
   baseUrl,
   model,
@@ -371,6 +375,7 @@ function ConnectionStep({
   onApiKey
 }: {
   source: Source;
+  projectRoot: string;
   displayName: string;
   baseUrl: string;
   model: string;
@@ -383,6 +388,34 @@ function ConnectionStep({
 }): React.JSX.Element {
   const { t } = useI18n();
   const keyRequired = needsApiKey(source);
+  const [probe, setProbe] = useState<ProviderProbe | null>(null);
+  const [probing, setProbing] = useState(false);
+
+  const fetchModels = async (): Promise<void> => {
+    if (probing || !baseUrl.trim() || !isDesktopRuntime()) return;
+    setProbing(true);
+    setProbe(null);
+    try {
+      setProbe(await probeProvider(projectRoot, baseUrl, apiKey));
+    } catch (error: unknown) {
+      setProbe({
+        schema_version: "loopforge-provider-probe-v1",
+        reachable: false,
+        models: [],
+        error: errorMessage(error, t("wizard.probeFailed"))
+      });
+    } finally {
+      setProbing(false);
+    }
+  };
+
+  /** A 401 means the key; anything else reached means the endpoint. */
+  const failureHint = (): string => {
+    if (!probe || probe.reachable) return "";
+    if (probe.status === 401 || probe.status === 403) return t("wizard.probeBadKey");
+    if (probe.status) return t("wizard.probeBadUrl", { status: probe.status });
+    return probe.error || t("wizard.probeFailed");
+  };
   return (
     <>
       <p className="wizard-note">{t(KIND_HINT[source.kind])}</p>
@@ -424,16 +457,11 @@ function ConnectionStep({
         />
       </label>
 
-      <label className="field-block">
-        <span className="field-label">{t("settings.provider.model")}</span>
-        <input
-          className="field-input"
-          value={model}
-          placeholder={source.exampleModel || "model-name"}
-          onChange={(event) => onModel(event.target.value)}
-        />
-      </label>
-
+      {/*
+        The key sits above the model because fetching the list needs it, and a
+        form that asked for the model first would be asking the user to know
+        something the endpoint can just tell them.
+      */}
       {keyRequired && (
         <label className="field-block">
           <span className="field-label">
@@ -449,6 +477,52 @@ function ConnectionStep({
           />
         </label>
       )}
+
+      <label className="field-block">
+        <span className="field-label">
+          {t("settings.provider.model")}
+          {probe?.reachable && (
+            <span className="badge ok">
+              {t("wizard.fetched", { count: probe.models.length })}
+            </span>
+          )}
+        </span>
+        {/*
+          A list and a text field at once: the endpoint knows its catalogue,
+          but a vendor can serve a model it does not list, so typing one stays
+          possible.
+        */}
+        <input
+          className="field-input"
+          value={model}
+          list="provider-models"
+          placeholder={source.exampleModel || "model-name"}
+          onChange={(event) => onModel(event.target.value)}
+        />
+        <datalist id="provider-models">
+          {(probe?.models ?? []).map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+      </label>
+
+      <div className="card-actions">
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => void fetchModels()}
+          disabled={probing || !baseUrl.trim()}
+        >
+          {probing ? t("wizard.probing") : t("wizard.fetch")}
+        </button>
+      </div>
+      {probe && !probe.reachable && (
+        <p className="wizard-note tone-bad">{failureHint()}</p>
+      )}
+      {probe?.reachable && probe.models.length === 0 && (
+        <p className="wizard-note">{t("wizard.fetchHintManual")}</p>
+      )}
+
     </>
   );
 }

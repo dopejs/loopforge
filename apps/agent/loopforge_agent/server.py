@@ -170,6 +170,12 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body.get("protocol", "")),
                 )
             )
+        elif self.path == "/v1/settings/provider/probe":
+            self._execute(
+                lambda: self.server.agent.probe_provider(
+                    str(body.get("base_url", "")), str(body.get("api_key", ""))
+                )
+            )
         elif self.path == "/v1/settings/provider/auth":
             self._execute(
                 lambda: self.server.agent.provider_auth_action(

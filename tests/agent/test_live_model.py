@@ -220,5 +220,55 @@ class ConfiguredProviderReachesTheRuntimeTests(unittest.TestCase):
             supervisor.stop()
 
 
+@requires_live_provider
+class LiveProbeTests(unittest.TestCase):
+    """Probing the endpoint the developer actually configured.
+
+    No daemon: the probe goes straight out, which is the whole reason it can
+    answer while a field is still being typed. What it needs proving against a
+    real vendor is that a catalogue comes back at all and that a wrong key is
+    distinguishable from a wrong URL.
+    """
+
+    def _agent(self):
+        from loopforge_agent.application import LoopforgeAgent
+
+        return object.__new__(LoopforgeAgent)
+
+    def test_a_real_endpoint_returns_its_catalogue(self) -> None:
+        from tests.support.kura_daemon import live_provider
+
+        provider = live_provider()
+        assert provider is not None
+
+        result = self._agent().probe_provider(
+            provider["LOOPFORGE_TEST_LLM_BASE_URL"],
+            provider["LOOPFORGE_TEST_LLM_API_KEY"],
+        )
+
+        self.assertTrue(result["reachable"], result.get("error"))
+        self.assertTrue(result["models"], "an endpoint with no models is not usable")
+        # The configured model should be among what the endpoint offers; if it
+        # is not, the list is of something else.
+        self.assertIn(provider["LOOPFORGE_TEST_LLM_MODEL"], result["models"])
+
+    def test_a_wrong_key_is_distinguishable_from_a_wrong_url(self) -> None:
+        """The two failures need different fixes, so they must not collapse
+        into one message."""
+        from tests.support.kura_daemon import live_provider
+
+        provider = live_provider()
+        assert provider is not None
+        agent = self._agent()
+
+        bad_key = agent.probe_provider(provider["LOOPFORGE_TEST_LLM_BASE_URL"], "sk-not-a-key")
+        self.assertFalse(bad_key["reachable"])
+        self.assertIn(bad_key.get("status"), (401, 403))
+
+        bad_host = agent.probe_provider("https://no-such-host.invalid/v1", "k")
+        self.assertFalse(bad_host["reachable"])
+        self.assertIsNone(bad_host.get("status"), "a host that does not resolve has no status")
+
+
 if __name__ == "__main__":
     unittest.main()
