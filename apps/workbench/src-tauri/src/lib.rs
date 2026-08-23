@@ -4,7 +4,7 @@ use std::fs::{self, OpenOptions};
 use std::io;
 use std::io::{BufRead, BufReader};
 use std::net::{SocketAddr, TcpListener};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -34,6 +34,62 @@ struct AgentRuntimeMetadata {
     /// instead of leaving a process the user never asked for running forever.
     #[serde(default)]
     pid: u32,
+}
+
+/// The `PATH` a terminal on this machine would have.
+///
+/// A desktop app launched from Finder inherits a minimal `PATH` -- typically
+/// `/usr/bin:/bin:/usr/sbin:/sbin` -- and not the one the user's shell builds
+/// from its profile. Everything the Agent shells out to is therefore invisible
+/// to it: this was first noticed as Kura reporting "provider CLI is not
+/// available" for a `claude` that was installed and signed in, at
+/// `~/.local/bin/claude`, and it applies equally to the engine binaries and to
+/// git.
+///
+/// Resolved once, by asking the login shell. Interactive as well as login,
+/// because `PATH` is as often set in `.zshrc` as in `.zprofile`.
+#[cfg(unix)]
+fn login_shell_path() -> Option<String> {
+    static RESOLVED: OnceLock<Option<String>> = OnceLock::new();
+    RESOLVED
+        .get_or_init(|| {
+            let shell = std::env::var("SHELL").ok().filter(|value| !value.trim().is_empty())?;
+            let output = Command::new(shell)
+                .args(["-ilc", "printf %s \"$PATH\""])
+                .stdin(Stdio::null())
+                .output()
+                .ok()?;
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            (!path.is_empty()).then_some(path)
+        })
+        .clone()
+}
+
+/// The inherited `PATH` with anything the login shell knows about appended.
+///
+/// Appended rather than substituted: the inherited value can carry entries a
+/// packaged app relies on, and dropping them to gain the user's would trade
+/// one set of missing tools for another.
+#[cfg(unix)]
+fn enriched_path() -> String {
+    let inherited = std::env::var("PATH").unwrap_or_default();
+    let Some(from_shell) = login_shell_path() else {
+        return inherited;
+    };
+    // Both sides are deduplicated. The inherited value routinely lists the
+    // same directory twice on its own, and this string is handed to every
+    // child process and searched on every lookup.
+    let mut entries: Vec<&str> = Vec::new();
+    for entry in inherited
+        .split(':')
+        .chain(from_shell.split(':'))
+        .filter(|part| !part.is_empty())
+    {
+        if !entries.contains(&entry) {
+            entries.push(entry);
+        }
+    }
+    entries.join(":")
 }
 
 /// Agent processes this app is responsible for ending.
@@ -483,6 +539,9 @@ fn agent_start(app: AppHandle, project_path: String) -> Result<Value, String> {
             &kura_binary,
         ])
         .current_dir(&root)
+        // So the Agent, and the Kura daemon it starts, can find the tools a
+        // terminal on this machine would find.
+        .env("PATH", enriched_path())
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
@@ -1579,6 +1638,37 @@ mod tests {
             ])
             .spawn()
             .expect("spawned")
+    }
+
+    #[test]
+    fn the_shell_path_reaches_tools_a_terminal_would_find() {
+        // A desktop app launched from Finder gets a minimal PATH, so a CLI the
+        // user installed under their home directory is invisible to it. That
+        // is what made Kura report an installed, signed-in `claude` as
+        // unavailable.
+        let enriched = enriched_path();
+        let inherited = std::env::var("PATH").unwrap_or_default();
+
+        for entry in inherited.split(':').filter(|part| !part.is_empty()) {
+            assert!(enriched.split(':').any(|part| part == entry), "dropped {entry}");
+        }
+        if let Some(from_shell) = login_shell_path() {
+            for entry in from_shell.split(':').filter(|part| !part.is_empty()) {
+                assert!(enriched.split(':').any(|part| part == entry), "missing {entry}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_path_carries_no_duplicates() {
+        // It is passed to every child process and read on every lookup; the
+        // same directory appearing twice is a lookup cost for nothing.
+        let enriched = enriched_path();
+        let mut seen = std::collections::HashSet::new();
+
+        for entry in enriched.split(':').filter(|part| !part.is_empty()) {
+            assert!(seen.insert(entry), "duplicate {entry}");
+        }
     }
 
     #[test]
