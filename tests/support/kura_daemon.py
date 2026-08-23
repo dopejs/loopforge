@@ -161,6 +161,12 @@ class KuraDaemon:
             "KURA_ENV": "embedded",
             "KURA_DATA_DIR": str(self.data_dir),
             "KURA_BIND_ADDR": self.bind_addr,
+            # Asked for by name, because the daemon no longer ships providers
+            # nobody configured. Echo answers deterministically without
+            # reaching anything, which is what lets these tests exercise
+            # dispatch, routing and streaming with no real endpoint. A live
+            # run replaces it below.
+            "KURA_LLM_DEFAULT_PROVIDER": "echo",
         }
         if live:
             provider = live_provider()
