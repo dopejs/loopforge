@@ -67,10 +67,6 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
-        if self.path.startswith("/v1/settings/provider/auth/"):
-            provider_id = self.path[len("/v1/settings/provider/auth/") :]
-            self._execute(lambda: self.server.agent.provider_auth(provider_id))
-            return
         if self.path == "/v1/settings/operator":
             self._execute(self.server.agent.operator_settings)
             return
@@ -175,6 +171,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     str(body.get("display_name", "")),
                     str(body.get("protocol", "")),
                     str(body.get("oauth_provider_id", "")),
+                    str(body.get("provider_id", "")),
                 )
             )
         elif self.path == "/v1/oauth/sync-credential":
@@ -197,13 +194,10 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         elif self.path == "/v1/settings/provider/probe":
             self._execute(
                 lambda: self.server.agent.probe_provider(
-                    str(body.get("base_url", "")), str(body.get("api_key", ""))
-                )
-            )
-        elif self.path == "/v1/settings/provider/auth":
-            self._execute(
-                lambda: self.server.agent.provider_auth_action(
-                    str(body.get("provider_id", "")), str(body.get("action", ""))
+                    str(body.get("base_url", "")),
+                    str(body.get("api_key", "")),
+                    str(body.get("protocol", "")) or "openai_compatible",
+                    str(body.get("oauth_provider_id", "")),
                 )
             )
         elif self.path == "/v1/settings/role":

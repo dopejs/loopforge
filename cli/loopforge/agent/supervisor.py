@@ -27,20 +27,15 @@ RUNTIME_SCHEMA = "kura-runtime-v1"
 #: rename, blocked a start for seven minutes with no output.
 DAEMON_COMMAND_TIMEOUT_SECONDS = 60.0
 
-#: Kura reads these as overrides. Passing the credential in the environment
-#: rather than writing Kura's config file keeps it in exactly one place on
-#: disk -- the user-level store -- instead of copying it into every project.
-PROVIDER_ENVIRONMENT = {
-    "base_url": "KURA_LLM_OPENAI_COMPATIBLE_BASE_URL",
-    "api_key": "KURA_LLM_OPENAI_COMPATIBLE_API_KEY",
-    "model": "KURA_LLM_OPENAI_COMPATIBLE_MODEL",
-}
 #: A drafted hypothesis is eleven sections; the default half minute is short.
+#: Applied to every provider rather than to one named slot.
+#:
+#: These were keyed to `KURA_LLM_OPENAI_COMPATIBLE_*`, which stopped reaching
+#: anything once providers were registered under their own ids -- leaving a
+#: drafting request, which is eleven sections, on the daemon's thirty-second
+#: default.
 PROVIDER_TIMEOUTS = {
-    "KURA_LLM_OPENAI_COMPATIBLE_TIMEOUT_MS": "180000",
-    "KURA_LLM_OPENAI_COMPATIBLE_STREAM_FIRST_CHUNK_TIMEOUT_MS": "120000",
-    "KURA_LLM_OPENAI_COMPATIBLE_STREAM_IDLE_TIMEOUT_MS": "120000",
-    "KURA_LLM_OPENAI_COMPATIBLE_STREAM_MAX_DURATION_MS": "300000",
+    "KURA_LLM_DEFAULT_TIMEOUT_MS": "180000",
 }
 
 
@@ -213,7 +208,12 @@ class KuraRuntimeSupervisor:
                 "KURA_BIND_ADDR": bind_addr,
             }
         )
-        environment.update(self._provider_environment())
+        # Providers are passed as accounts, each under its own id. The single
+        # `KURA_LLM_OPENAI_COMPATIBLE_*` slot is not used for them: it produces
+        # a second profile with a fixed id and title, which collided with the
+        # registered one and won -- so an endpoint the user had named came back
+        # as "OpenAI-Compatible" with no models.
+        environment.update(self._account_environment())
         try:
             completed = subprocess.run(
                 [binary, "daemon", "start"],
@@ -286,28 +286,87 @@ class KuraRuntimeSupervisor:
             )
         return result
 
-    def _provider_environment(self) -> dict[str, str]:
-        """Configuration for the OpenAI-compatible provider, if any.
+    def _account_environment(self) -> dict[str, str]:
+        """Every signed-in subscription, as providers Kura can dispatch at.
 
-        Returns nothing when it is unconfigured, so Kura leaves the endpoint
-        unregistered rather than registering one that fails every dispatch --
-        an unconfigured daemon should read as unconfigured, not broken.
+        One entry per account rather than a slot per vendor: a person holds
+        whichever subscriptions they signed into, and most of those vendors
+        speak the OpenAI-compatible shape, so the set costs nothing beyond the
+        two wires Anthropic and Codex each need.
+
+        Accounts whose dispatch endpoint is not established are left out. They
+        can still be signed in and read for usage; they are simply not somewhere
+        a request is routed at a guess.
+
+        The token here is only what the daemon starts with -- it is replaced in
+        place as it is refreshed, because an access token lasts about an hour.
         """
         try:
-            record = self.user_store.provider("openai_compatible")
+            from ..oauth.registry import provider as oauth_provider
+
+            grants = self.user_store.oauth_grants()
         except Exception:
-            # A user store this build cannot read must not stop a daemon that
-            # would otherwise run on its built-in provider.
+            # A store this build cannot read must not stop a daemon that would
+            # otherwise run on a configured endpoint.
             return {}
-        if not record or not record.get("base_url") or not record.get("model"):
+
+        accounts: list[dict[str, str]] = []
+        # Everything the user configured, whatever it was added from. A
+        # provider registered while the daemon runs lives only in its memory,
+        # so without this a restart loses it and the endpoint reappears under
+        # the built-in slot's name -- which is what made an Anthropic endpoint
+        # come back called `openai_compatible` with no models.
+        try:
+            configured = self.user_store.providers()
+        except Exception:
+            configured = []
+        for record in configured:
+            base_url = str(record.get("base_url") or "").strip()
+            model = str(record.get("model") or "").strip()
+            if not base_url or not model:
+                continue
+            accounts.append(
+                {
+                    "id": str(record.get("provider_id") or ""),
+                    "title": str(record.get("display_name") or record.get("provider_id") or ""),
+                    "protocol": str(record.get("protocol") or "openai_compatible"),
+                    "baseURL": base_url,
+                    "model": model,
+                    "accessToken": str(record.get("api_key") or ""),
+                }
+            )
+
+        known = {account["id"] for account in accounts}
+        for row in grants:
+            try:
+                target = oauth_provider(str(row.get("provider_id") or ""))
+            except KeyError:
+                continue
+            if not target.api_base_url:
+                continue
+            token = str(row.get("access_token") or "")
+            if not token or target.id in known:
+                continue
+            accounts.append(
+                {
+                    "id": target.id,
+                    "title": target.name,
+                    "protocol": target.protocol,
+                    "baseURL": target.api_base_url,
+                    "model": target.default_model,
+                    "accessToken": token,
+                }
+            )
+        if not accounts:
             return {}
-        values = {
-            variable: str(record.get(field) or "")
-            for field, variable in PROVIDER_ENVIRONMENT.items()
+        return {
+            "KURA_LLM_ACCOUNTS": json.dumps(accounts),
+            # Something has to answer when a request names no provider, and
+            # the first one configured is the only defensible choice: the
+            # daemon ships none of its own to fall back to.
+            "KURA_LLM_DEFAULT_PROVIDER": accounts[0]["id"],
+            **PROVIDER_TIMEOUTS,
         }
-        values["KURA_LLM_DEFAULT_PROVIDER"] = "openai_compatible"
-        values.update(PROVIDER_TIMEOUTS)
-        return values
 
     def stop(self) -> dict[str, Any]:
         metadata = self._metadata()

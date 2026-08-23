@@ -9,8 +9,10 @@ yet.
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from loopforge.userstore import UserStore
@@ -22,13 +24,19 @@ class ProviderSettingsTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.agent = object.__new__(LoopforgeAgent)
         self.agent._user_store = UserStore(Path(self.temporary.name) / "home")
+        # Saving an endpoint registers it with the runtime rather than
+        # restarting into it, so these need something to register against.
+        self.agent.runtime = mock.Mock()
+        self.agent.runtime.status.return_value = {"healthy": False}
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
     def test_an_unconfigured_endpoint_reports_itself_as_such(self) -> None:
         result = self.agent.provider_settings()
-        self.assertEqual(result["provider_id"], "openai_compatible")
+        # No id, because there is no provider. It used to answer with the name
+        # of the single slot whether or not anything was in it.
+        self.assertEqual(result["provider_id"], "")
         self.assertFalse(result["configured"])
         self.assertFalse(result["has_api_key"])
         self.assertEqual(result["base_url"], "")
@@ -45,14 +53,16 @@ class ProviderSettingsTests(unittest.TestCase):
         self.assertNotIn("api_key", result)
         self.assertNotIn("sk-secret", str(result))
 
-    def test_saving_says_it_is_not_live_yet(self) -> None:
-        """Kura reads its provider configuration at boot. Without this the user
-        saves an endpoint and cannot tell why nothing answers."""
+    def test_saving_registers_rather_than_restarting_into_it(self) -> None:
+        """Reaching for another provider is something a person does during a
+        task, so the endpoint takes effect on the next request instead of
+        costing the current one."""
         result = self.agent.save_provider_settings(
-            "https://api.example.test/v1", "sk-secret", "some-model"
+            "https://api.example.test/v1", "sk-1", "a-model"
         )
-        self.assertTrue(result["restart_required"])
-        self.assertTrue(result["configured"])
+
+        self.assertIn("live", result)
+        self.agent.runtime.stop.assert_not_called()
 
     def test_an_empty_key_keeps_the_stored_one(self) -> None:
         self.agent.save_provider_settings("https://a.test/v1", "sk-secret", "m1")
@@ -98,6 +108,10 @@ class ProviderIdentityTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.agent = object.__new__(LoopforgeAgent)
         self.agent._user_store = UserStore(Path(self.temporary.name) / "home")
+        # Saving an endpoint registers it with the runtime rather than
+        # restarting into it, so these need something to register against.
+        self.agent.runtime = mock.Mock()
+        self.agent.runtime.status.return_value = {"healthy": False}
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -167,6 +181,10 @@ class OperatorSettingsTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.agent = object.__new__(LoopforgeAgent)
         self.agent._user_store = UserStore(Path(self.temporary.name) / "home")
+        # Saving an endpoint registers it with the runtime rather than
+        # restarting into it, so these need something to register against.
+        self.agent.runtime = mock.Mock()
+        self.agent.runtime.status.return_value = {"healthy": False}
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -268,7 +286,14 @@ class ApproverFallbackTests(unittest.TestCase):
 
 
 class SupervisorInjectionTests(unittest.TestCase):
-    """What the configuration actually does: reach Kura at startup."""
+    """What the configuration actually does: reach Kura at startup.
+
+    Through the accounts list, one entry per provider. There used to be a
+    single `KURA_LLM_OPENAI_COMPATIBLE_*` slot, which is why every endpoint a
+    user added came back named after it however they had named it -- and why
+    the daemon produced a second profile under that id that overwrote the
+    registered one.
+    """
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -288,48 +313,60 @@ class SupervisorInjectionTests(unittest.TestCase):
             user_store=self.store,
         )
 
+    def _accounts(self) -> list[dict]:
+        environment = self._supervisor()._account_environment()
+        return json.loads(environment["KURA_LLM_ACCOUNTS"]) if environment else []
+
     def test_an_unconfigured_store_injects_nothing(self) -> None:
-        """Kura then leaves the endpoint unregistered, so an unconfigured
-        daemon reads as unconfigured rather than broken."""
-        self.assertEqual(self._supervisor()._provider_environment(), {})
+        """Kura then registers no provider, so an unconfigured daemon reads as
+        unconfigured rather than broken."""
+        self.assertEqual(self._supervisor()._account_environment(), {})
 
     def test_a_partial_configuration_injects_nothing(self) -> None:
         """Half a provider would register an endpoint that fails every
         dispatch."""
-        self.store.save_provider("openai_compatible", "https://a.test/v1", "k", "")
-        self.assertEqual(self._supervisor()._provider_environment(), {})
+        self.store.save_provider("deepseek", "https://a.test/v1", "k", "")
+        self.assertEqual(self._supervisor()._account_environment(), {})
 
-    def test_a_configured_provider_reaches_the_daemon(self) -> None:
+    def test_a_configured_provider_reaches_the_daemon_under_its_own_name(self) -> None:
         self.store.save_provider(
-            "openai_compatible", "https://api.example.test/v1", "sk-secret", "some-model"
+            "deepseek",
+            "https://api.deepseek.com/v1",
+            "sk-secret",
+            "deepseek-chat",
+            display_name="DeepSeek",
         )
 
-        environment = self._supervisor()._provider_environment()
+        [account] = self._accounts()
 
-        self.assertEqual(
-            environment["KURA_LLM_OPENAI_COMPATIBLE_BASE_URL"],
-            "https://api.example.test/v1",
-        )
-        self.assertEqual(environment["KURA_LLM_OPENAI_COMPATIBLE_API_KEY"], "sk-secret")
-        self.assertEqual(environment["KURA_LLM_OPENAI_COMPATIBLE_MODEL"], "some-model")
-        # Configuring an endpoint is also choosing it; otherwise chat still
-        # answers from the built-in echo provider and looks broken.
-        self.assertEqual(environment["KURA_LLM_DEFAULT_PROVIDER"], "openai_compatible")
+        self.assertEqual(account["id"], "deepseek")
+        self.assertEqual(account["title"], "DeepSeek")
+        self.assertEqual(account["baseURL"], "https://api.deepseek.com/v1")
+        self.assertEqual(account["accessToken"], "sk-secret")
+
+    def test_configuring_an_endpoint_is_also_choosing_it(self) -> None:
+        """Otherwise a request that names no provider has nothing to reach --
+        the daemon ships none of its own to fall back to."""
+        self.store.save_provider("deepseek", "https://a.test/v1", "k", "m")
+
+        environment = self._supervisor()._account_environment()
+
+        self.assertEqual(environment["KURA_LLM_DEFAULT_PROVIDER"], "deepseek")
         # A drafted hypothesis is eleven sections; the default timeout is short.
-        self.assertEqual(environment["KURA_LLM_OPENAI_COMPATIBLE_TIMEOUT_MS"], "180000")
+        self.assertEqual(environment["KURA_LLM_DEFAULT_TIMEOUT_MS"], "180000")
 
     def test_an_unreadable_store_does_not_stop_the_daemon(self) -> None:
         """A store this build cannot read must not prevent a daemon that would
-        otherwise run on its built-in provider."""
+        otherwise start."""
         import sqlite3
 
         from loopforge.userstore import SCHEMA_VERSION
 
-        self.store.save_provider("openai_compatible", "https://a.test/v1", "k", "m")
+        self.store.save_provider("deepseek", "https://a.test/v1", "k", "m")
         with sqlite3.connect(self.store.path) as connection:
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
 
-        self.assertEqual(self._supervisor()._provider_environment(), {})
+        self.assertEqual(self._supervisor()._account_environment(), {})
 
 
 if __name__ == "__main__":

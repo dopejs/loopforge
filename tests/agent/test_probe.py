@@ -126,6 +126,44 @@ class ProbeTests(unittest.TestCase):
                 self.agent.probe_provider(value, "k")
             self.assertEqual(caught.exception.code, "PROBE_URL_INVALID")
 
+    def test_anthropic_is_asked_where_it_actually_lists(self) -> None:
+        """It lists under `/v1` and wants its own version header. Asking the
+        OpenAI path instead returns nothing, which is why the step named for
+        models used to arrive with no list at all."""
+        seen: dict[str, object] = {}
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                seen["path"] = self.path
+                seen["version"] = self.headers.get("anthropic-version", "")
+                seen["auth"] = self.headers.get("Authorization", "")
+                payload = json.dumps({"data": [{"id": "claude-sonnet-4-5"}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        base = f"http://127.0.0.1:{server.server_port}"
+
+        result = self.agent.probe_provider(base, "a-token", "anthropic_messages")
+
+        self.assertEqual(result["models"], ["claude-sonnet-4-5"])
+        self.assertEqual(seen["path"], "/v1/models")
+        self.assertEqual(seen["version"], "2023-06-01")
+        self.assertEqual(seen["auth"], "Bearer a-token")
+
+    def test_the_openai_shape_is_still_asked_at_its_own_path(self) -> None:
+        base = self._serve(200, json.dumps({"data": [{"id": "m"}]}).encode())
+
+        self.assertEqual(self.agent.probe_provider(base, "k")["models"], ["m"])
+
     def test_the_model_count_is_bounded(self) -> None:
         """A wrong endpoint should not be able to fill the list with whatever
         it happens to return."""

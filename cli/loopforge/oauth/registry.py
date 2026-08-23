@@ -86,6 +86,17 @@ class OAuthProvider:
     grant_ttl_days: int = 0
     #: Where usage is queried, when this account can report it.
     usage_url: str = ""
+    #: Where model requests go, when this account can serve them.
+    #:
+    #: Empty for accounts whose dispatch endpoint is not established. Signing
+    #: one in still reads its usage; it simply is not somewhere a request can
+    #: be routed, which is better than routing at a guess.
+    api_base_url: str = ""
+    #: Which wire that endpoint speaks. Most vendors are OpenAI-compatible and
+    #: need no protocol of their own.
+    protocol: str = "openai_compatible"
+    #: The model requested when the user has not chosen one.
+    default_model: str = ""
 
     @property
     def resolved_client_id(self) -> str:
@@ -132,6 +143,9 @@ ANTHROPIC = OAuthProvider(
     # thing to warn about rather than an edge case.
     grant_ttl_days=30,
     usage_url="https://api.anthropic.com/api/oauth/usage",
+    api_base_url="https://api.anthropic.com",
+    protocol="anthropic_messages",
+    default_model="claude-sonnet-4-5",
 )
 
 #: OpenAI, via the client Codex uses.
@@ -150,6 +164,9 @@ OPENAI_CODEX = OAuthProvider(
     # The account endpoint lives on the ChatGPT origin, not on the `/responses`
     # surface a proxy would forward -- pointing it at one 404s.
     usage_url="https://chatgpt.com/backend-api/wham/usage",
+    api_base_url="https://chatgpt.com/backend-api/codex",
+    protocol="openai_responses",
+    default_model="gpt-5-codex",
 )
 
 #: Google, via the client the Gemini CLI ships.
@@ -197,6 +214,9 @@ KIMI = OAuthProvider(
     scopes="",
     flow="device_code",
     usage_url="https://api.kimi.com/coding/v1/usages",
+    api_base_url="https://api.kimi.com/coding/v1",
+    protocol="openai_compatible",
+    default_model="kimi-k2",
 )
 
 XAI = OAuthProvider(
@@ -209,6 +229,9 @@ XAI = OAuthProvider(
     scopes="openid profile email offline_access grok-cli:access api:access",
     flow="device_code",
     usage_url="https://cli-chat-proxy.grok.com/v1/billing",
+    api_base_url="https://api.x.ai/v1",
+    protocol="openai_compatible",
+    default_model="grok-4",
 )
 
 #: Z.ai. Its token endpoint takes a shape of its own: the account is named in
@@ -226,6 +249,9 @@ ZAI = OAuthProvider(
     token_omit_params=("client_id", "code_verifier"),
     use_pkce=False,
     usage_url="https://api.z.ai/api/monitor/usage/quota/limit",
+    api_base_url="https://api.z.ai/api/coding/paas/v4",
+    protocol="openai_compatible",
+    default_model="glm-4.6",
 )
 
 #: Google Antigravity, a second Google client with its own registration.

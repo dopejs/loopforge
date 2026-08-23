@@ -45,6 +45,13 @@ SETTINGS_SCHEMA = "loopforge-settings-v1"
 #: The only provider whose endpoint the user supplies. The rest are built in or
 #: managed by Kura, and offering to configure them would be offering a choice
 #: that does not exist.
+#: The id a provider gets when nothing better is available.
+#:
+#: There used to be exactly one configurable provider, and it was this. Every
+#: endpoint a user added -- Anthropic, DeepSeek, whichever -- was written into
+#: that one slot and came back named `openai_compatible`, because that is what
+#: the slot was called. Providers are now identified by the source they were
+#: added from, and this is only the fallback for a custom endpoint.
 CONFIGURABLE_PROVIDER = "openai_compatible"
 AUTH_SCHEMA = "loopforge-provider-auth-v1"
 PROBE_SCHEMA = "loopforge-provider-probe-v1"
@@ -614,15 +621,21 @@ class LoopforgeAgent:
             return str(record["id"]), str(record["name"])
         return approver_id, approver_name
 
-    def provider_settings(self) -> dict[str, Any]:
+    def provider_settings(self, provider_id: str = "") -> dict[str, Any]:
         """What the user has configured, without the credential.
 
         The key is never returned. A surface only needs to know whether one is
         set, and reading it back would put it in a response body, a log and a
         renderer for no purpose the user has.
+
+        Without an id this answers for the most recently configured provider,
+        which is what a wizard that just saved one wants to show.
         """
         try:
-            record = self.user_store.provider(CONFIGURABLE_PROVIDER)
+            record = self.user_store.provider(provider_id) if provider_id else None
+            if record is None and not provider_id:
+                configured = self.user_store.providers()
+                record = configured[0] if configured else None
         except UserStoreError as exc:
             return {
                 "schema_version": SETTINGS_SCHEMA,
@@ -632,7 +645,7 @@ class LoopforgeAgent:
             }
         return {
             "schema_version": SETTINGS_SCHEMA,
-            "provider_id": CONFIGURABLE_PROVIDER,
+            "provider_id": str((record or {}).get("provider_id") or provider_id or ""),
             "base_url": str((record or {}).get("base_url") or ""),
             "model": str((record or {}).get("model") or ""),
             # Which source the user picked, so the wizard can show it again
@@ -659,6 +672,7 @@ class LoopforgeAgent:
         display_name: str = "",
         protocol: str = "",
         oauth_provider_id: str = "",
+        provider_id: str = "",
     ) -> dict[str, Any]:
         """Record the endpoint the user supplied.
 
@@ -681,8 +695,16 @@ class LoopforgeAgent:
                 "The base URL must be an HTTP or HTTPS address.",
                 "PROVIDER_SETTINGS_INVALID",
             )
+        # Its own id, so adding a second provider adds one rather than
+        # overwriting the first, and so a provider is called what the user
+        # chose rather than what the slot was called.
+        identifier = (
+            str(provider_id or "").strip()
+            or str(oauth_provider_id or "").strip()
+            or CONFIGURABLE_PROVIDER
+        )
         self.user_store.save_provider(
-            CONFIGURABLE_PROVIDER,
+            identifier,
             url,
             str(api_key or ""),
             name,
@@ -690,10 +712,73 @@ class LoopforgeAgent:
             protocol=str(protocol or "").strip() or CONFIGURABLE_PROVIDER,
             oauth_provider_id=str(oauth_provider_id or "").strip(),
         )
-        result = self.provider_settings()
-        # Stated rather than implied: nothing the user just typed is live yet.
-        result["restart_required"] = True
+        result = self.provider_settings(identifier)
+        # Registered in place rather than by restarting. Reaching for another
+        # provider is something a person does during a task, and a restart
+        # ends whatever run is in flight -- so the endpoint takes effect on the
+        # next request instead of costing the current one.
+        result["live"] = self._register_endpoint(
+            identifier,
+            url,
+            name,
+            str(display_name or "").strip(),
+            str(oauth_provider_id or "").strip(),
+        )
         return result
+
+    def _register_endpoint(
+        self,
+        provider_id: str,
+        base_url: str,
+        model: str,
+        title: str,
+        oauth_provider_id: str,
+    ) -> bool:
+        """Hand the runtime a provider it can dispatch at immediately.
+
+        Failure is reported, not raised: the endpoint was saved either way, and
+        losing that because the runtime was momentarily unreachable would be a
+        worse outcome than saying it is not live yet.
+        """
+        protocol = "openai_compatible"
+        token = ""
+        if oauth_provider_id:
+            try:
+                from loopforge.oauth.registry import provider as oauth_provider
+
+                target = oauth_provider(oauth_provider_id)
+                protocol = target.protocol
+                grant = active_grant(self.user_store, target)
+                if grant is not None:
+                    token = grant.access_token
+            except Exception:
+                return False
+        else:
+            record = self.user_store.provider(provider_id) or {}
+            token = str(record.get("api_key") or "")
+
+        status = self.runtime.status()
+        if not status.get("healthy") or not status.get("base_url"):
+            return False
+        client = KuraClient(
+            str(status["base_url"]),
+            timeout=PROVIDER_TIMEOUT_SECONDS,
+            token=status.get("token"),
+        )
+        try:
+            client.put(
+                f"/v1/providers/{urllib.parse.quote(provider_id, safe='')}/account",
+                {
+                    "title": title or provider_id,
+                    "protocol": protocol,
+                    "baseURL": base_url,
+                    "model": model,
+                    "accessToken": token,
+                },
+            )
+        except KuraAgentError:
+            return False
+        return True
 
     def forget_provider_settings(self) -> dict[str, Any]:
         self.user_store.forget_provider(CONFIGURABLE_PROVIDER)
@@ -739,7 +824,13 @@ class LoopforgeAgent:
             "last_error": str(state.get("lastError") or ""),
         }
 
-    def probe_provider(self, base_url: str, api_key: str) -> dict[str, Any]:
+    def probe_provider(
+        self,
+        base_url: str,
+        api_key: str,
+        protocol: str = "openai_compatible",
+        oauth_provider_id: str = "",
+    ) -> dict[str, Any]:
         """Ask an endpoint what models it serves, before anything is stored.
 
         Kura reads provider configuration at startup and its model list is
@@ -755,16 +846,38 @@ class LoopforgeAgent:
         url = str(base_url or "").strip().rstrip("/")
         if not url:
             raise LoopforgeAgentError("A base URL is required.", "PROBE_URL_INVALID")
+        # An account's own token, where one supplies the credential. Asking
+        # the user for a key they never typed produced a 401 about a key that
+        # does not exist.
+        if oauth_provider_id and not api_key:
+            try:
+                from loopforge.oauth.registry import provider as oauth_provider
+
+                grant = active_grant(self.user_store, oauth_provider(oauth_provider_id))
+                if grant is not None:
+                    api_key = grant.access_token
+            except Exception:
+                # A probe is a convenience; failing to resolve a token leaves
+                # the endpoint to answer for itself.
+                pass
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise LoopforgeAgentError(
                 "The base URL must be an HTTP or HTTPS address.", "PROBE_URL_INVALID"
             )
+        # Anthropic lists its models under `/v1` and wants its own version
+        # header; the OpenAI shape lists under the base URL it was given.
+        # Skipping the probe for it instead -- which is what this did -- meant
+        # the one step named for models never had a list to choose from.
+        anthropic = str(protocol or "").strip() == "anthropic_messages"
         request = urllib.request.Request(
-            f"{url}/models",
+            f"{url}/v1/models" if anthropic else f"{url}/models",
             headers={"Accept": "application/json"},
             method="GET",
         )
+        if anthropic:
+            request.add_header("anthropic-version", "2023-06-01")
+            request.add_header("anthropic-beta", "oauth-2025-04-20")
         if api_key:
             request.add_header("Authorization", f"Bearer {api_key}")
         try:
@@ -821,84 +934,6 @@ class LoopforgeAgent:
             if value:
                 identifiers.append(value)
         return sorted(set(identifiers))
-
-    def provider_auth(self, provider_id: str) -> dict[str, Any]:
-        """The sign-in state of a managed provider."""
-        identifier = str(provider_id or "").strip()
-        if not identifier:
-            raise LoopforgeAgentError("A provider id is required.", "PROVIDER_ID_INVALID")
-        client = self._runtime_client()
-        try:
-            payload = client.get(f"/v1/providers/{urllib.parse.quote(identifier, safe='')}/auth")
-        except KuraAgentError as exc:
-            # The runtime answers 404 for two different things: a provider
-            # that does not exist, and one whose auth state nothing has
-            # checked yet. Only the second is a state to render, so the
-            # inventory decides which this is -- otherwise a typo in a
-            # provider id would show up as a tidy "not signed in".
-            if "404" in str(exc) and self._provider_exists(client, identifier):
-                return {
-                    "schema_version": AUTH_SCHEMA,
-                    "provider_id": identifier,
-                    "status": "unknown",
-                    "checked": False,
-                    "auth_mode": "",
-                    "cli_available": False,
-                    "cli_path": "",
-                    "account_label": "",
-                    "plan": "",
-                    "login_command": [],
-                    "logout_command": [],
-                    "last_error": "",
-                    "models": [],
-                }
-            raise LoopforgeAgentError(str(exc), "PROVIDER_AUTH_UNAVAILABLE") from exc
-        result = self._project_auth(payload)
-        result["schema_version"] = AUTH_SCHEMA
-        result["checked"] = True
-        result["models"] = self._project_models(payload.get("models") or [])
-        return result
-
-    @staticmethod
-    def _provider_exists(client: KuraClient, provider_id: str) -> bool:
-        try:
-            listing = client.get("/v1/providers")
-        except KuraAgentError:
-            return False
-        return any(
-            str(item.get("providerId") or "") == provider_id
-            for item in listing.get("items") or []
-            if isinstance(item, dict)
-        )
-
-    def provider_auth_action(self, provider_id: str, action: str) -> dict[str, Any]:
-        """Move a managed provider's sign-in along.
-
-        `start` records that a login is pending and hands back the command; the
-        user runs it themselves. `complete` re-checks afterwards. Nothing here
-        spawns a process on their behalf -- a credential belongs to the account
-        they sign in with, not to this application.
-        """
-        identifier = str(provider_id or "").strip()
-        step = str(action or "").strip()
-        if not identifier:
-            raise LoopforgeAgentError("A provider id is required.", "PROVIDER_ID_INVALID")
-        if step not in AUTH_ACTIONS:
-            raise LoopforgeAgentError(
-                f"Unsupported auth action: {action}", "PROVIDER_AUTH_ACTION_INVALID"
-            )
-        client = self._runtime_client()
-        try:
-            payload = client.post(
-                f"/v1/providers/{urllib.parse.quote(identifier, safe='')}/auth/{step}", {}
-            )
-        except KuraAgentError as exc:
-            raise LoopforgeAgentError(str(exc), "PROVIDER_AUTH_FAILED") from exc
-        result = self._project_auth(payload)
-        result["schema_version"] = AUTH_SCHEMA
-        result["checked"] = True
-        result["models"] = self._project_models(payload.get("models") or [])
-        return result
 
     def sync_provider_credential(self) -> dict[str, Any]:
         """Give Kura the current access token for the account backing the endpoint.
@@ -991,6 +1026,14 @@ class LoopforgeAgent:
                     "id": target.id,
                     "name": target.name,
                     "flow": target.flow,
+                    # Where this account's requests go, and in what shape. The
+                    # endpoint belongs to the account rather than to whichever
+                    # preset the user picked it from: a vendor's API-key URL
+                    # and its subscription URL are not always the same, and
+                    # two of these speak a wire of their own.
+                    "api_base_url": target.api_base_url,
+                    "protocol": target.protocol,
+                    "default_model": target.default_model,
                     # Some accounts need their client credentials supplied on
                     # this machine. Offering a sign-in that cannot start is
                     # worse than saying so.
