@@ -443,3 +443,74 @@ building a git capability first. See §7.
 
 **Hypothesis drafting.** Owned by the `prototype-gameplay` skill's `Discovery`
 section, not a bespoke Agent endpoint. See §9.
+**Subscription authorization.** Loopforge signs into subscription accounts
+itself, as each vendor's own first-party client, and holds the resulting OAuth
+grant in `~/.loopforge`. It does not borrow another application's stored
+credential, and the CLI bridge is no longer the only route to a subscription.
+
+This is a deliberate posture, decided rather than defaulted into: presenting as
+the vendor's client is what makes a subscription usable without requiring that
+vendor's CLI to be installed and signed in, and what makes a balance readable
+from the vendor rather than scavenged from whatever a CLI left on disk. The
+terms under which each vendor permits this are not uniformly stated.
+
+Consequences the implementation must keep:
+
+* The redirect port is fixed per provider. An exchange whose `redirect_uri`
+  differs at all is refused, so a held port is reported rather than rebound.
+* `state` is checked on the callback, or any page the user visits could drive
+  an authorization code into the listener.
+* A refresh preserves what the response omits, including the moment of the
+  original interactive login: Anthropic ends the whole refresh family about
+  thirty days after it regardless of rotation, so that timestamp is what a
+  re-login warning is computed from.
+* An access token is replaced in the runtime in place rather than by restarting
+  it. Tokens last about an hour and the daemon far longer; a restart would drop
+  whatever run is in flight.
+
+**Which accounts are reachable, and how.** The vendors omp supports do not
+all use the same mechanism, and treating them as one list would mean building
+an OAuth flow for something that never had one.
+
+* *Authorization code with a redirect* -- Claude, Codex, Gemini, Antigravity,
+  Z.ai, GitLab Duo. Each registers an exact redirect URI, so the port is fixed
+  and a held one is reported rather than rebound.
+* *Device code* -- GitHub Copilot, Kimi, xAI. No redirect: the user is shown a
+  short code to type on the vendor's own page.
+* *A key the user fetches themselves* -- MiniMax, Xiaomi MiMo, OpenCode,
+  Wafer. omp's "auth URL" for these is a console page, not an authorization
+  endpoint. They belong in the endpoint presets alongside the other
+  OpenAI-compatible vendors, which is where they are.
+* *Bespoke* -- Cursor polls a login it opened, Devin exchanges a CLI token of
+  its own, Perplexity presents itself as that vendor's native desktop app.
+  None fits a generic flow, and the last is the same impersonation question as
+  attestation below.
+
+**Where this stops: client attestation.** Running *inference* on an Anthropic
+or OpenAI subscription requires more than the OAuth grant. Both vendors expect
+a per-request attestation -- Anthropic a hash injected into the first system
+block, OpenAI an `x-oai-attestation` header -- computed so their servers can
+tell their own client from an impersonator.
+
+Loopforge does not produce those. Using a public client id in a flow the user
+explicitly authorises is one thing; forging a signal whose only purpose is to
+prove a request came from someone else's binary is another, and the distinction
+is the reason the mechanism exists. Subscription inference therefore keeps
+running through the CLI bridge, where the vendor's own client does the work and
+attests for itself.
+
+The account endpoints have no such requirement, so a signed-in account's usage
+and balance are read directly.
+
+**Subscription usage.** Reported for every account that can be asked, and
+dated. Five vendors answer directly today -- Claude, Codex, Kimi, xAI, Z.ai --
+and an account signed in here appears whether or not the runtime reaches it
+through a borrowed CLI. An account with no readable figure is listed with the
+reason rather than omitted, and one with no endpoint at all is not given a row
+that could never be filled.
+
+Where an account is signed in the vendor is asked, so the figure is current;
+otherwise it is read from what a local CLI recorded, which can be hours old.
+Which route answered is carried on the record, because the two differ in how
+much they can be trusted. Codex records limit windows in its session rollouts
+and so needs no credential at all; Claude records none. See §7.
