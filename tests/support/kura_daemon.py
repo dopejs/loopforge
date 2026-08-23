@@ -47,19 +47,18 @@ def kura_binary() -> str | None:
     if override and Path(override).is_file():
         return override
     repository_root = Path(__file__).resolve().parents[2]
-    built = (
-        repository_root
-        / "apps"
-        / "workbench"
-        / "vendor"
-        / "kura"
-        / "crates"
-        / "target"
-        / "release"
-        / "kura"
-    )
-    if built.is_file():
-        return str(built)
+    workbench = repository_root / "apps" / "workbench"
+    # The bundled copy first, because it is the one `pnpm build:kura` leaves
+    # behind: that script deletes the Cargo target directory once it has
+    # copied the binary out. Looking only in the target meant every
+    # integration test skipped itself after a normal build, and a suite that
+    # skips reads exactly like a suite that passes.
+    for candidate in (
+        workbench / "resources" / "kura",
+        workbench / "vendor" / "kura" / "crates" / "target" / "release" / "kura",
+    ):
+        if candidate.is_file():
+            return str(candidate)
     return shutil.which("kura")
 
 
