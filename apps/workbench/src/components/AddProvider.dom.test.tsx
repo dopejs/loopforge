@@ -89,9 +89,7 @@ function mockAgent(overrides: Record<string, unknown> = {}) {
 }
 
 function open(): void {
-  render(
-    <AddProvider providers={[]} projectRoot="/p" onClose={() => {}} onSaved={() => {}} />
-  );
+  render(<AddProvider projectRoot="/p" onClose={() => {}} onSaved={() => {}} />);
 }
 
 afterEach(() => {
@@ -195,7 +193,12 @@ describe("AddProvider", () => {
   });
 
 
-  it("reopens on the connection step for an endpoint already configured", async () => {
+  it("still starts on the source list when a provider is already configured", async () => {
+    // It used to read one global settings record and jump straight to step two
+    // on whatever that record held. With more than one provider there is no
+    // "the" configured one, so opening the wizard again presented the previous
+    // provider's endpoint and an API-key field -- for a vendor the user had
+    // signed into, and without ever showing them the list they came for.
     mockAgent({
       base_url: "https://api.deepseek.com/v1",
       model: "deepseek-chat",
@@ -205,10 +208,8 @@ describe("AddProvider", () => {
     });
     open();
 
-    // Revisiting is editing, not starting over, and the stored key is kept
-    // rather than demanded again.
-    expect(await screen.findByPlaceholderText(/Leave blank to keep/)).toBeTruthy();
-    expect(screen.getByText("https://api.deepseek.com/v1")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /DeepSeek/ })).toBeTruthy();
+    expect(screen.queryByPlaceholderText(/Leave blank to keep/)).toBeNull();
   });
 
 
@@ -487,6 +488,102 @@ describe("AddProvider", () => {
     expect(screen.queryByPlaceholderText("model-name")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByPlaceholderText("model-name")).toBeTruthy();
+  });
+
+
+  it("uses a subscription already signed into, without being told to", async () => {
+    accounts = [
+      { id: "anthropic", name: "Claude", flow: "callback", signed_in: true,
+        account_label: "john@example.test", plan: "", expires_at: "", grant_deadline: "",
+        configured: true, api_base_url: "https://api.anthropic.com",
+        protocol: "anthropic_messages", default_model: "claude-sonnet-4-5" }
+    ];
+    mockAgent();
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Anthropic/ }));
+
+    // Someone holding this subscription was shown an API-key field and a
+    // segmented control they had to find first, on a preset that exists
+    // because they hold the subscription.
+    expect(await screen.findByText("john@example.test")).toBeTruthy();
+    expect(screen.queryByPlaceholderText("Paste the key")).toBeNull();
+  });
+
+  it("points a role at the provider being added, not at a fixed slot", async () => {
+    // Both the readiness check and the routing call named the literal string
+    // `openai_compatible`. So every "use this provider" button was disabled --
+    // it was asking whether a provider the user had not chosen was ready --
+    // and had one been clickable it would have pointed the modality at that
+    // other provider.
+    invoke.mockImplementation((command: string) => {
+      if (command === "agent_oauth_accounts") return Promise.resolve({ accounts: [] });
+      if (command === "agent_provider_settings") return Promise.resolve(settings());
+      if (command === "agent_providers") {
+        return Promise.resolve({
+          providers: [
+            { id: "deepseek", title: "DeepSeek", family: "openai_compatible",
+              health: "ready", ready: true, capabilities: [], models: [] }
+          ],
+          roles: [
+            { role: "primary", provider_id: "", model: "", routed: false, source: "unrouted" }
+          ]
+        });
+      }
+      if (command === "agent_probe_provider") {
+        return Promise.resolve({
+          schema_version: "loopforge-provider-probe-v1",
+          reachable: true,
+          models: ["deepseek-chat"]
+        });
+      }
+      if (command === "agent_save_provider_settings") {
+        return Promise.resolve(settings({ configured: true, has_api_key: true }));
+      }
+      if (command === "agent_route_role") return Promise.resolve({ providers: [], roles: [] });
+      throw new Error(`unexpected command: ${command}`);
+    });
+    open();
+
+    fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
+    fireEvent.change(screen.getByPlaceholderText("Paste the key"), {
+      target: { value: "sk-secret" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    const use = await screen.findByRole("button", { name: "Use this provider" });
+    expect(use.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(use);
+
+    await waitFor(() => {
+      const call = invoke.mock.calls.find(([command]) => command === "agent_route_role");
+      expect(call).toBeTruthy();
+      expect((call as [string, Record<string, unknown>])[1].providerId).toBe("deepseek");
+    });
+  });
+
+  it("tells the list behind it that something was saved, and then finishes", async () => {
+    // Saving used to leave the dialog open with a "saved" line and a Save
+    // button that would save the same thing again -- and nothing asked the
+    // provider list behind the dialog to re-read, so closing it showed the
+    // same empty list the user started from.
+    const saved = vi.fn();
+    mockAgent();
+    render(<AddProvider projectRoot="/p" onClose={() => {}} onSaved={saved} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /DeepSeek/ }));
+    fireEvent.change(screen.getByPlaceholderText("Paste the key"), {
+      target: { value: "sk-secret" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.change(await screen.findByPlaceholderText("deepseek-chat"), {
+      target: { value: "deepseek-chat" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("button", { name: "Done" })).toBeTruthy();
+    expect(saved).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 
 });

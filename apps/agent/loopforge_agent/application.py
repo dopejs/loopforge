@@ -740,7 +740,13 @@ class LoopforgeAgent:
         losing that because the runtime was momentarily unreachable would be a
         worse outcome than saying it is not live yet.
         """
-        protocol = "openai_compatible"
+        # The wire it speaks, from what was stored. Hardcoding the
+        # OpenAI-compatible shape here meant an Anthropic endpoint configured
+        # with an API key was registered as though it served
+        # `/chat/completions` -- it would take the credential and then fail
+        # every request, with the vendor's 404 as the only clue.
+        record = self.user_store.provider(provider_id) or {}
+        protocol = str(record.get("protocol") or "").strip() or "openai_compatible"
         token = ""
         if oauth_provider_id:
             try:
@@ -754,7 +760,6 @@ class LoopforgeAgent:
             except Exception:
                 return False
         else:
-            record = self.user_store.provider(provider_id) or {}
             token = str(record.get("api_key") or "")
 
         status = self.runtime.status()
@@ -780,10 +785,33 @@ class LoopforgeAgent:
             return False
         return True
 
-    def forget_provider_settings(self) -> dict[str, Any]:
-        self.user_store.forget_provider(CONFIGURABLE_PROVIDER)
+    def forget_provider_settings(self, provider_id: str = "") -> dict[str, Any]:
+        """Remove one provider, from the store and from the running runtime.
+
+        Takes the id because there is more than one. It used to delete a fixed
+        `openai_compatible` row, which meant a provider the user had added
+        under its own name could not be removed at all -- and the one row it
+        did delete came back on the next start, because forgetting it on disk
+        left it registered in the daemon.
+        """
+        identifier = str(provider_id or "").strip() or CONFIGURABLE_PROVIDER
+        self.user_store.forget_provider(identifier)
+        # Best-effort: the record is gone either way, and a runtime that is
+        # down has nothing registered to forget.
+        status = self.runtime.status()
+        if status.get("healthy") and status.get("base_url"):
+            try:
+                KuraClient(
+                    str(status["base_url"]),
+                    timeout=PROVIDER_TIMEOUT_SECONDS,
+                    token=status.get("token"),
+                ).delete(
+                    f"/v1/providers/{urllib.parse.quote(identifier, safe='')}/account"
+                )
+            except KuraAgentError:
+                pass
         result = self.provider_settings()
-        result["restart_required"] = True
+        result["removed"] = identifier
         return result
 
     def _runtime_client(self) -> KuraClient:

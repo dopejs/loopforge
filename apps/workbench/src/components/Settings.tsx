@@ -13,8 +13,6 @@ import { isConfigured, saveOperator, useOperator } from "../operator";
 import { SHORTCUTS, displayShortcut, isApplePlatform } from "../shortcuts";
 import { ProviderSettings } from "./ProviderSettings";
 import { UsagePanel } from "./UsagePanel";
-import type { Provider } from "../providers";
-import { AddProvider } from "./AddProvider";
 import { TOOL_CHIPS } from "../fixtures.providers";
 import { PreviewBanner } from "./primitives";
 import darkWordmark from "../assets/loopforge-horizontal-dark.svg";
@@ -158,8 +156,6 @@ export function Settings({
   React.useEffect(() => {
     if (operator) setOperatorName(operator.name);
   }, [operator]);
-  const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardProviders, setWizardProviders] = useState<readonly Provider[]>([]);
   const apple = isApplePlatform(
     typeof navigator === "undefined" ? "" : navigator.platform || navigator.userAgent
   );
@@ -359,13 +355,14 @@ export function Settings({
           {group === "provider" && (
             <>
               <p className="settings-note">{t("settings.provider.empty")}</p>
-              <ProviderSettings
-                projectRoot={projectRoot}
-                onAdd={(available) => {
-                  setWizardProviders(available);
-                  setWizardOpen(true);
-                }}
-              />
+              {/*
+                The wizard belongs to the panel that lists providers, so
+                saving one can refresh that list. Owned up here it could not:
+                the list held its own inventory and nothing could ask it to
+                re-read, which is why a saved provider said "saved" and then
+                did not appear.
+              */}
+              <ProviderSettings projectRoot={projectRoot} />
             </>
           )}
 
@@ -472,13 +469,6 @@ export function Settings({
         </div>
       </div>
 
-      {wizardOpen && (
-        <AddProvider
-          providers={wizardProviders}
-          projectRoot={projectRoot}
-          onClose={() => setWizardOpen(false)}
-        />
-      )}
     </section>
   );
 }

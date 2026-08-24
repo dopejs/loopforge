@@ -25,7 +25,6 @@ import {
   type Source,
   matchSources,
   needsApiKey,
-  sourceForBaseUrl,
   SOURCES
 } from "../sources";
 import type { MessageKey } from "../i18n/locales/en";
@@ -92,18 +91,19 @@ const AUTH_BADGE: Record<string, MessageKey> = {
  * the form shows whether a key is set, not what it is.
  */
 export function AddProvider({
-  providers,
   projectRoot,
   onClose,
   onSaved
 }: {
-  providers: readonly Provider[];
   projectRoot: string;
   onClose: () => void;
   onSaved?: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
-  const { settings, reload } = useProviderSettings(projectRoot, true);
+  // The live inventory, not a snapshot taken when the dialog opened. It is
+  // what says whether the provider being configured already has a credential,
+  // and after a save it is what says the save took.
+  const { providers, reload: reloadProviders } = useProviders(projectRoot, true);
 
   const [step, setStep] = useState<Step>("source");
   const [query, setQuery] = useState("");
@@ -125,17 +125,16 @@ export function AddProvider({
   const [saved, setSaved] = useState(false);
   const [failure, setFailure] = useState<string>();
 
-  // An endpoint already configured reopens on its own source, so revisiting
-  // the wizard is editing rather than starting over.
-  useEffect(() => {
-    if (!settings?.base_url || source) return;
-    const known = sourceForBaseUrl(settings.base_url) ?? SOURCES[SOURCES.length - 1];
-    setSource(known);
-    setBaseUrl(settings.base_url);
-    setModel(settings.model ?? "");
-    setDisplayName(settings.display_name || known.name);
-    setStep("connection");
-  }, [settings, source]);
+  /*
+   * The wizard starts where it says it starts.
+   *
+   * It used to read one global "provider settings" record and, if anything had
+   * ever been configured, jump straight to step two on that record's source --
+   * so opening "Add Provider" a second time skipped the list of sources
+   * entirely and presented the previous provider's endpoint with an API-key
+   * field, whatever the user had actually picked. There is more than one
+   * provider now; there is no "the" configured one to reopen on.
+   */
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -151,7 +150,15 @@ export function AddProvider({
     setSource(picked);
     setBaseUrl(picked.baseUrl);
     setDisplayName(picked.name);
-    if (!model && picked.exampleModel) setModel(picked.exampleModel);
+    setModel(picked.exampleModel ?? "");
+    setApiKey("");
+    // Already signed into this vendor: use that, rather than presenting an
+    // API-key field to someone who has a subscription and asking them to pick
+    // the account out of a segmented control they have to notice first.
+    const signedIn = accounts.find(
+      (candidate) => candidate.id === picked.oauthProviderId && candidate.signed_in
+    );
+    setOauthProviderId(signedIn ? signedIn.id : "");
     setStep("connection");
     setFailure(undefined);
   };
@@ -217,7 +224,11 @@ export function AddProvider({
       });
       setApiKey("");
       setSaved(true);
-      reload();
+      // Both inventories: the one this dialog reads to enable role routing,
+      // and the one the settings page behind it lists. Saying "saved" while
+      // the list behind the dialog still showed nothing is what made a
+      // successful save look like it had done nothing at all.
+      reloadProviders();
       onSaved?.();
     } catch (error: unknown) {
       setFailure(errorMessage(error, t("settings.provider.saveFailed")));
@@ -226,7 +237,13 @@ export function AddProvider({
     }
   };
 
-  const hasKey = settings?.has_api_key === true;
+  /** The provider this run of the wizard is configuring, once it exists. */
+  const providerId = oauthProviderId || source?.id || "";
+  const existing = providers.find((candidate) => candidate.id === providerId) ?? null;
+  // Whether *this* provider already holds a credential -- not whether any
+  // provider anywhere does, which is what the single settings record answered
+  // and why an untouched vendor could show "key set".
+  const hasKey = existing?.secret_configured === true;
   const keyRequired = source ? needsApiKey(source) : true;
   /** A credential of some kind: a key, a stored key, or a signed-in account. */
   const hasCredential = Boolean(
@@ -303,7 +320,7 @@ export function AddProvider({
           {step === "models" && (
             <ModelsStep
               projectRoot={projectRoot}
-              providers={providers}
+              providerId={providerId}
               saved={saved}
               models={models}
               model={model}
@@ -333,13 +350,14 @@ export function AddProvider({
                 {t("wizard.back")}
               </button>
             )}
-            {step === "connection" && hasKey && (
+            {step === "connection" && hasKey && providerId && (
               <button
                 type="button"
                 className="secondary-button"
                 onClick={() => {
-                  void forgetProviderSettings(projectRoot).then(() => {
-                    reload();
+                  void forgetProviderSettings(projectRoot, providerId).then(() => {
+                    reloadProviders();
+                    onSaved?.();
                     setStep("source");
                     setSource(null);
                   });
@@ -365,7 +383,7 @@ export function AddProvider({
                 {busy ? t("wizard.probing") : t("wizard.next")}
               </button>
             )}
-            {step === "models" && (
+            {step === "models" && !saved && (
               <button
                 type="button"
                 className="primary-button"
@@ -375,6 +393,18 @@ export function AddProvider({
                 disabled={busy || !canSave}
               >
                 {busy ? t("settings.provider.saving") : t("wizard.save")}
+              </button>
+            )}
+            {/*
+              A saved provider is done. The dialog used to stay open with a
+              "saved" line and a Save button that saved the same thing again,
+              leaving the user to guess whether anything had happened -- the
+              provider list is behind this dialog, so the only way to find out
+              was to close it.
+            */}
+            {step === "models" && saved && (
+              <button type="button" className="primary-button" onClick={onClose}>
+                {t("wizard.done")}
               </button>
             )}
           </div>
@@ -741,7 +771,7 @@ function ConnectionStep({
 /** Step three: what the runtime does with it. */
 function ModelsStep({
   projectRoot,
-  providers,
+  providerId,
   saved,
   models,
   model,
@@ -749,7 +779,8 @@ function ModelsStep({
   onModel
 }: {
   projectRoot: string;
-  providers: readonly Provider[];
+  /** The provider being configured, which is what these roles point at. */
+  providerId: string;
   saved: boolean;
   models: readonly string[];
   model: string;
@@ -757,19 +788,36 @@ function ModelsStep({
   onModel: (value: string) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
-  const { roles, reload } = useProviders(projectRoot, true);
+  const { providers, roles, reload } = useProviders(projectRoot, true);
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<string>();
 
-  const configured = providers.find((provider) => provider.id === "openai_compatible");
+  // Re-read once the save lands: until then this provider is not in the
+  // inventory, so nothing can be routed at it.
+  useEffect(() => {
+    if (saved) reload();
+  }, [saved, reload]);
+
+  /*
+   * The provider this wizard is adding -- by its own id.
+   *
+   * Both of these were the literal string `openai_compatible`: the readiness
+   * check looked up a provider the user had not chosen, so every "use this
+   * provider" button stayed disabled, and routing sent the role to that same
+   * fixed id, which would have pointed a modality at the wrong endpoint had
+   * the button ever been clickable.
+   */
+  const configured = providers.find((provider) => provider.id === providerId);
   const live = configured?.ready === true;
 
-  const route = async (role: string, providerId: string): Promise<void> => {
+  const route = async (role: string, target: string): Promise<void> => {
     if (busy) return;
     setBusy(role);
     setFailure(undefined);
     try {
-      await (providerId ? routeModelRole(projectRoot, role, providerId) : clearModelRole(projectRoot, role));
+      await (target
+        ? routeModelRole(projectRoot, role, target, model.trim())
+        : clearModelRole(projectRoot, role));
       reload();
     } catch (error: unknown) {
       setFailure(errorMessage(error, t("wizard.routeFailed")));
@@ -825,6 +873,23 @@ function ModelsStep({
               <small>{role.provider_id || t("wizard.roleUnrouted")}</small>
             </div>
             <div className="card-actions">
+              {/*
+                A role already pointed somewhere else offers the swap as well
+                as the clear. Only "clear" was offered, so changing which
+                provider answered a modality meant unrouting it, closing the
+                dialog, and coming back -- and with a single slot it was not
+                even a different provider to swap to.
+              */}
+              {role.routed && role.provider_id !== providerId && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void route(role.role, providerId)}
+                  disabled={busy !== null || !live}
+                >
+                  {busy === role.role ? t("wizard.routing") : t("wizard.roleUse")}
+                </button>
+              )}
               {role.routed ? (
                 <button
                   type="button"
@@ -838,7 +903,7 @@ function ModelsStep({
                 <button
                   type="button"
                   className="secondary-button"
-                  onClick={() => void route(role.role, "openai_compatible")}
+                  onClick={() => void route(role.role, providerId)}
                   disabled={busy !== null || !live}
                 >
                   {busy === role.role ? t("wizard.routing") : t("wizard.roleUse")}

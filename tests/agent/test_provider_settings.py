@@ -90,15 +90,71 @@ class ProviderSettingsTests(unittest.TestCase):
                 self.agent.save_provider_settings(url, "k", "m")
             self.assertEqual(caught.exception.code, "PROVIDER_SETTINGS_INVALID")
 
-    def test_forgetting_clears_it_and_also_needs_a_restart(self) -> None:
-        self.agent.save_provider_settings("https://a.test/v1", "sk-secret", "m")
+    def test_forgetting_removes_the_one_it_was_asked_about(self) -> None:
+        """Not a fixed row.
 
-        result = self.agent.forget_provider_settings()
+        This deleted `openai_compatible` whatever the caller named, so a
+        provider stored under its own id could not be removed at all -- and
+        the wizard's only delete button removed something else.
+        """
+        self.agent.save_provider_settings(
+            "https://a.test/v1", "sk-secret", "m", provider_id="deepseek"
+        )
+        self.agent.save_provider_settings(
+            "https://b.test/v1", "sk-other", "m", provider_id="zhipu"
+        )
 
-        self.assertFalse(result["configured"])
-        self.assertFalse(result["has_api_key"])
-        self.assertTrue(result["restart_required"])
-        self.assertIsNone(self.agent.user_store.provider("openai_compatible"))
+        result = self.agent.forget_provider_settings("deepseek")
+
+        self.assertEqual(result["removed"], "deepseek")
+        self.assertIsNone(self.agent.user_store.provider("deepseek"))
+        # The other one is untouched.
+        self.assertIsNotNone(self.agent.user_store.provider("zhipu"))
+
+    def test_the_registered_provider_speaks_the_protocol_it_was_saved_with(self) -> None:
+        """The wire was hardcoded to the OpenAI shape.
+
+        So an Anthropic endpoint configured with an API key was registered as
+        though it served `/chat/completions`. It took the credential and then
+        failed every request, with the vendor's 404 as the only clue.
+        """
+        self.agent.runtime.status.return_value = {
+            "healthy": True,
+            "base_url": "http://127.0.0.1:19199",
+            "token": "",
+        }
+        with mock.patch("loopforge_agent.application.KuraClient") as client:
+            self.agent.save_provider_settings(
+                "https://api.anthropic.com",
+                "sk-secret",
+                "claude-sonnet-4-5",
+                display_name="Anthropic",
+                protocol="anthropic_messages",
+                provider_id="anthropic",
+            )
+
+        path, body = client.return_value.put.call_args[0]
+        self.assertEqual(path, "/v1/providers/anthropic/account")
+        self.assertEqual(body["protocol"], "anthropic_messages")
+        self.assertEqual(body["title"], "Anthropic")
+
+    def test_forgetting_also_unregisters_it_from_the_running_runtime(self) -> None:
+        """Forgetting it on disk alone left it dispatchable until a restart,
+        and a restart brought it back under the built-in slot's name."""
+        self.agent.save_provider_settings(
+            "https://a.test/v1", "sk-secret", "m", provider_id="deepseek"
+        )
+        self.agent.runtime.status.return_value = {
+            "healthy": True,
+            "base_url": "http://127.0.0.1:19199",
+            "token": "",
+        }
+        with mock.patch("loopforge_agent.application.KuraClient") as client:
+            self.agent.forget_provider_settings("deepseek")
+
+        client.return_value.delete.assert_called_once_with(
+            "/v1/providers/deepseek/account"
+        )
 
 
 class ProviderIdentityTests(unittest.TestCase):
@@ -316,6 +372,54 @@ class SupervisorInjectionTests(unittest.TestCase):
     def _accounts(self) -> list[dict]:
         environment = self._supervisor()._account_environment()
         return json.loads(environment["KURA_LLM_ACCOUNTS"]) if environment else []
+
+    def test_the_default_is_the_one_configured_most_recently(self) -> None:
+        """Not the alphabetically first.
+
+        The default was `accounts[0]`, and the accounts come out of the store
+        ordered by id. So a stale row named `openai_compatible` -- left behind
+        by an older build that wrote every provider into one slot -- sorted
+        after `anthropic` and yet still won on a fresh store, and a user who
+        had just added a provider found a name they did not recognise answering
+        their requests.
+        """
+        self.store.save_provider(
+            "openai_compatible", "https://old.test/v1", "k", "m", display_name="Old"
+        )
+        self.store.save_provider(
+            "anthropic", "https://api.anthropic.com", "k", "m", display_name="Anthropic"
+        )
+        # `updated_at` has one-second resolution, so the ordering has to be
+        # established rather than assumed from the order of the two calls.
+        self.store.save_provider(
+            "anthropic", "https://api.anthropic.com", "", "m2", display_name="Anthropic"
+        )
+        with mock.patch.object(
+            type(self.store), "providers", autospec=True
+        ) as providers:
+            providers.return_value = [
+                {
+                    "provider_id": "openai_compatible",
+                    "base_url": "https://old.test/v1",
+                    "model": "m",
+                    "api_key": "k",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "display_name": "Old",
+                    "protocol": "openai_compatible",
+                },
+                {
+                    "provider_id": "anthropic",
+                    "base_url": "https://api.anthropic.com",
+                    "model": "m2",
+                    "api_key": "k",
+                    "updated_at": "2026-08-24T09:00:00Z",
+                    "display_name": "Anthropic",
+                    "protocol": "anthropic_messages",
+                },
+            ]
+            environment = self._supervisor()._account_environment()
+
+        self.assertEqual(environment["KURA_LLM_DEFAULT_PROVIDER"], "anthropic")
 
     def test_an_unconfigured_store_injects_nothing(self) -> None:
         """Kura then registers no provider, so an unconfigured daemon reads as

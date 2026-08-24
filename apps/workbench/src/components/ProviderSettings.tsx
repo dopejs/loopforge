@@ -2,18 +2,52 @@ import React, { useState } from "react";
 import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { useKey } from "./primitives";
-import { type ModelRole, type Provider, useProviders } from "../providers";
+import { errorMessage } from "../daemon";
+import {
+  forgetProviderSettings,
+  type ModelRole,
+  type Provider,
+  useProviders
+} from "../providers";
+import { AddProvider } from "./AddProvider";
 import type { MessageKey } from "../i18n/locales/en";
 
 function ProviderDetail({
   provider,
-  onBack
+  projectRoot,
+  onBack,
+  onRemoved
 }: {
   provider: Provider;
+  projectRoot: string;
   onBack: () => void;
+  onRemoved: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   const key = useKey();
+  const [removing, setRemoving] = useState(false);
+  const [failure, setFailure] = useState<string>();
+
+  /*
+   * Removing one. There was no way to: the only delete deleted a fixed
+   * `openai_compatible` row whatever the user was looking at, so a provider
+   * added under its own name could not be taken away again -- and a stale one
+   * stayed in the list and in the routing table indefinitely.
+   */
+  const remove = async (): Promise<void> => {
+    if (removing) return;
+    setRemoving(true);
+    setFailure(undefined);
+    try {
+      await forgetProviderSettings(projectRoot, provider.id);
+      onRemoved();
+      onBack();
+    } catch (error: unknown) {
+      setFailure(errorMessage(error, t("provider.removeFailed")));
+    } finally {
+      setRemoving(false);
+    }
+  };
 
   /*
    * Only fields `loopforge-provider-v1` actually carries are rendered. Budgets,
@@ -127,6 +161,27 @@ function ProviderDetail({
           <p className="settings-empty">{t("provider.noModels")}</p>
         )}
       </div>
+
+      <div className="settings-section">
+        <span className="section-title">{t("provider.remove")}</span>
+      </div>
+      <div className="settings-card">
+        <div className="settings-row">
+          <div className="row-label">
+            <span>{t("provider.remove")}</span>
+            <small>{t("provider.removeHint")}</small>
+          </div>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={removing}
+            onClick={() => void remove()}
+          >
+            {removing ? t("provider.removing") : t("provider.remove")}
+          </button>
+        </div>
+        {failure && <p className="issue-line">{failure}</p>}
+      </div>
     </>
   );
 }
@@ -160,20 +215,26 @@ const ROLE_HINT: Record<string, MessageKey> = {
 };
 
 export function ProviderSettings({
-  projectRoot,
-  onAdd
+  projectRoot
 }: {
   projectRoot: string;
-  onAdd: (providers: readonly Provider[]) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   const key = useKey();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { providers, roles, reason, loading } = useProviders(projectRoot, true);
+  const [adding, setAdding] = useState(false);
+  const { providers, roles, reason, loading, reload } = useProviders(projectRoot, true);
 
   const selected = providers.find((candidate) => candidate.id === selectedId) ?? null;
   if (selected) {
-    return <ProviderDetail provider={selected} onBack={() => setSelectedId(null)} />;
+    return (
+      <ProviderDetail
+        provider={selected}
+        projectRoot={projectRoot}
+        onBack={() => setSelectedId(null)}
+        onRemoved={reload}
+      />
+    );
   }
 
   return (
@@ -182,7 +243,7 @@ export function ProviderSettings({
         <span className="section-title">
           {t("provider.count", { count: providers.length })}
         </span>
-        <button type="button" className="primary-button small" onClick={() => onAdd(providers)}>
+        <button type="button" className="primary-button small" onClick={() => setAdding(true)}>
           {t("provider.add")}
         </button>
       </div>
@@ -256,6 +317,15 @@ export function ProviderSettings({
             </div>
           ))}
         </div>
+      )}
+
+      {/* Owned here so a save can refresh the list it just changed. */}
+      {adding && (
+        <AddProvider
+          projectRoot={projectRoot}
+          onClose={() => setAdding(false)}
+          onSaved={reload}
+        />
       )}
     </>
   );

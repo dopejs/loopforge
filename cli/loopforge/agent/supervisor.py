@@ -362,11 +362,33 @@ class KuraRuntimeSupervisor:
         return {
             "KURA_LLM_ACCOUNTS": json.dumps(accounts),
             # Something has to answer when a request names no provider, and
-            # the first one configured is the only defensible choice: the
-            # daemon ships none of its own to fall back to.
-            "KURA_LLM_DEFAULT_PROVIDER": accounts[0]["id"],
+            # the daemon ships none of its own to fall back to.
+            #
+            # The most recently configured one, not the alphabetically first.
+            # A user who has just added a provider means that one; picking by
+            # name meant a provider they had set up long before -- or a stale
+            # row they had never chosen at all -- answered instead, under a
+            # name they did not recognise.
+            "KURA_LLM_DEFAULT_PROVIDER": self._default_account_id(accounts, configured),
             **PROVIDER_TIMEOUTS,
         }
+
+    @staticmethod
+    def _default_account_id(
+        accounts: list[dict[str, str]], configured: list[dict[str, Any]]
+    ) -> str:
+        """The provider a request that names none should reach."""
+        recency = {
+            str(record.get("provider_id") or ""): str(record.get("updated_at") or "")
+            for record in configured
+        }
+        return max(
+            accounts,
+            # Accounts that came from an OAuth grant rather than a configured
+            # row have no timestamp; they rank below anything configured, which
+            # is right -- signing in is not the same as choosing to use it.
+            key=lambda account: (recency.get(account["id"], ""), account["id"]),
+        )["id"]
 
     def stop(self) -> dict[str, Any]:
         metadata = self._metadata()

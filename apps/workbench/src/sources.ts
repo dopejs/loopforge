@@ -20,7 +20,15 @@ export type Source = {
   kind: SourceKind;
   /** Empty for `custom`, where the user supplies it, and for `account`. */
   baseUrl: string;
-  protocol: "openai_compatible" | "local_cli_bridge";
+  /**
+   * The wire this endpoint speaks.
+   *
+   * Not every vendor serves the OpenAI shape. Anthropic was listed as though
+   * it did, at a `/v1` suffix it does not use, so choosing that preset and
+   * pasting a key configured a provider that could not answer -- the account
+   * path happened to work only because the signed-in account overrode both.
+   */
+  protocol: "openai_compatible" | "anthropic_messages" | "openai_responses";
   /** Shown as a hint, not a list to choose from: a key can reach any of them. */
   exampleModel: string;
   /**
@@ -122,25 +130,17 @@ export const SOURCES: readonly Source[] = [
     id: "anthropic",
     name: "Anthropic",
     kind: "cloud",
-    baseUrl: "https://api.anthropic.com/v1",
-    protocol: "openai_compatible",
+    baseUrl: "https://api.anthropic.com",
+    protocol: "anthropic_messages",
     exampleModel: "claude-sonnet-4-5",
     oauthProviderId: "anthropic"
-  },
-  {
-    id: "openai",
-    name: "OpenAI",
-    kind: "cloud",
-    baseUrl: "https://api.openai.com/v1",
-    protocol: "openai_compatible",
-    exampleModel: "gpt-4o-mini"
   },
   {
     id: "codex",
     name: "Codex",
     kind: "cloud",
     baseUrl: "https://chatgpt.com/backend-api/codex",
-    protocol: "openai_compatible",
+    protocol: "openai_responses",
     exampleModel: "gpt-5-codex",
     oauthProviderId: "openai_codex"
   },
@@ -391,15 +391,6 @@ export function matchSources(query: string): readonly Source[] {
       source.kind === "custom" ||
       source.name.toLowerCase().includes(needle) ||
       source.baseUrl.toLowerCase().includes(needle)
-  );
-}
-
-/** The source a stored endpoint came from, by URL. */
-export function sourceForBaseUrl(baseUrl: string): Source | undefined {
-  const normalized = baseUrl.trim().replace(/\/+$/, "").toLowerCase();
-  if (!normalized) return undefined;
-  return SOURCES.find(
-    (source) => source.baseUrl && source.baseUrl.toLowerCase() === normalized
   );
 }
 

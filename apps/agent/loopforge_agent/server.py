@@ -213,7 +213,11 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 lambda: self.server.agent.clear_model_role(str(body.get("role", "")))
             )
         elif self.path == "/v1/settings/provider/forget":
-            self._execute(self.server.agent.forget_provider_settings)
+            self._execute(
+                lambda: self.server.agent.forget_provider_settings(
+                    str(body.get("provider_id", ""))
+                )
+            )
         elif self.path == "/v1/project/reconcile":
             self._execute(
                 lambda: self.server.agent.reconcile(body.get("apply") is True)

@@ -285,9 +285,14 @@ export function clearModelRole(
   return invoke<ProviderInventory>("agent_clear_role", { projectPath: projectRoot, role });
 }
 
-export function forgetProviderSettings(projectRoot: string): Promise<ProviderSettings> {
+/** Removes one provider by id, on disk and in the running runtime. */
+export function forgetProviderSettings(
+  projectRoot: string,
+  providerId: string
+): Promise<ProviderSettings> {
   return invoke<ProviderSettings>("agent_forget_provider_settings", {
-    projectPath: projectRoot
+    projectPath: projectRoot,
+    providerId
   });
 }
 

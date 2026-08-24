@@ -1042,11 +1042,23 @@ async fn agent_probe_provider(
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
     // Longer than a local call: this reaches a vendor over the network.
+    //
+    // Every parameter is forwarded. `protocol` and `oauth_provider_id` were
+    // accepted here and then left out of the body, so the Agent fell back to
+    // its defaults: it asked every endpoint for `/models` in the OpenAI shape
+    // with no credential. Against Anthropic that is a 404, which the wizard
+    // reported as "this endpoint published no model list" -- on the step whose
+    // entire purpose is that list, for a vendor that does publish one.
     agent_request(
         &metadata,
         "POST",
         "/v1/settings/provider/probe",
-        Some(json!({ "base_url": base_url, "api_key": api_key })),
+        Some(json!({
+            "base_url": base_url,
+            "api_key": api_key,
+            "protocol": protocol,
+            "oauth_provider_id": oauth_provider_id,
+        })),
         Duration::from_secs(45),
     ).await
 }
@@ -1089,9 +1101,13 @@ async fn agent_clear_role(project_path: String, role: String) -> Result<Value, S
     ).await
 }
 
-/// Clears the stored endpoint and credential.
+/// Removes one provider: its stored endpoint, its credential, and its
+/// registration in the running runtime.
 #[tauri::command]
-async fn agent_forget_provider_settings(project_path: String) -> Result<Value, String> {
+async fn agent_forget_provider_settings(
+    project_path: String,
+    provider_id: String,
+) -> Result<Value, String> {
     let root = project_root(&project_path)?;
     let metadata = load_runtime(&root)?
         .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
@@ -1099,7 +1115,7 @@ async fn agent_forget_provider_settings(project_path: String) -> Result<Value, S
         &metadata,
         "POST",
         "/v1/settings/provider/forget",
-        Some(json!({})),
+        Some(json!({ "provider_id": provider_id })),
         Duration::from_secs(30),
     ).await
 }
@@ -1681,6 +1697,70 @@ mod tests {
             .collect();
 
         assert!(offenders.is_empty(), "synchronous commands: {offenders:?}");
+    }
+
+    #[test]
+    fn every_command_uses_every_argument_it_accepts() {
+        // A command that takes a parameter and never mentions it again is a
+        // silent data loss: the front end sends a value, the signature accepts
+        // it, and the Agent is handed a request without it and falls back to a
+        // default.
+        //
+        // `agent_probe_provider` did exactly this with `protocol` and
+        // `oauth_provider_id`. Every endpoint was asked for `/models` in the
+        // OpenAI shape with no credential, so a subscription vendor answered
+        // 404 and the wizard reported that it published no models. Nothing on
+        // either side could see it: the front-end tests mock the boundary this
+        // sits behind, and the Agent tests call the Agent directly.
+        //
+        // Read from this file for the same reason the test above is: the
+        // property holds over every command, and calling one covers one.
+        let source = include_str!("lib.rs");
+        let marker = concat!("#[tauri::", "command]");
+        let mut offenders: Vec<String> = Vec::new();
+        for block in source.split(marker).skip(1) {
+            let Some((signature, rest)) = block.split_once(") -> ") else { continue };
+            let Some((name, arguments)) = signature.split_once('(') else { continue };
+            let name = name.trim().trim_start_matches("async fn").trim();
+            // The body only: a parameter naming itself in its own declaration
+            // is not a use of it.
+            let Some(body) = rest.split_once('{').map(|(_, body)| body) else { continue };
+            let body = match body.find("\n}\n") {
+                Some(end) => &body[..end],
+                None => body,
+            };
+            // Comments do not use anything. Matching against them is how the
+            // first version of this test passed on the very defect it was
+            // written for: the comment explaining the fix named both dropped
+            // parameters, which was enough to satisfy the search.
+            let body: String = body
+                .lines()
+                .map(|line| line.split("//").next().unwrap_or(""))
+                .collect::<Vec<_>>()
+                .join("\n");
+            for argument in arguments.split(',') {
+                let Some((parameter, _)) = argument.split_once(':') else { continue };
+                let parameter = parameter.trim();
+                if parameter.is_empty() || parameter.starts_with('#') || parameter == "app" {
+                    continue;
+                }
+                // Word-boundary match, so `api_key` is not satisfied by
+                // `api_key_env` and `protocol` not by `protocols`.
+                let used = body.match_indices(parameter).any(|(at, _)| {
+                    let before = body[..at].chars().next_back();
+                    let after = body[at + parameter.len()..].chars().next();
+                    let boundary = |c: Option<char>| {
+                        !matches!(c, Some(c) if c.is_alphanumeric() || c == '_')
+                    };
+                    boundary(before) && boundary(after)
+                });
+                if !used {
+                    offenders.push(format!("{name}({parameter})"));
+                }
+            }
+        }
+
+        assert!(offenders.is_empty(), "arguments accepted and dropped: {offenders:?}");
     }
 
     #[test]

@@ -148,7 +148,9 @@ requires_live_provider = unittest.skipUnless(
 class KuraDaemon:
     """A running daemon plus an authenticated client for it."""
 
-    def __init__(self, live: bool = False) -> None:
+    def __init__(
+        self, live: bool = False, environment: dict[str, str] | None = None
+    ) -> None:
         self.binary = kura_binary()
         if self.binary is None:
             raise unittest.SkipTest("no Kura binary available")
@@ -194,6 +196,9 @@ class KuraDaemon:
                     "KURA_LLM_OPENAI_COMPATIBLE_STREAM_MAX_DURATION_MS": "300000",
                 }
             )
+        # Last, so a caller configuring accounts can replace the echo default.
+        if environment:
+            self._environment.update(environment)
 
     # -- lifecycle ----------------------------------------------------------
 
