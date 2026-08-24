@@ -332,7 +332,7 @@ class KuraRuntimeSupervisor:
                     "protocol": str(record.get("protocol") or "openai_compatible"),
                     "baseURL": base_url,
                     "model": model,
-                    "accessToken": str(record.get("api_key") or ""),
+                    "accessToken": self._record_token(record),
                 }
             )
 
@@ -372,6 +372,33 @@ class KuraRuntimeSupervisor:
             "KURA_LLM_DEFAULT_PROVIDER": self._default_account_id(accounts, configured),
             **PROVIDER_TIMEOUTS,
         }
+
+    def _record_token(self, record: dict[str, Any]) -> str:
+        """The credential a configured provider dispatches with.
+
+        A provider backed by a signed-in account stores no key -- the account
+        supplies one, and it is refreshed rather than retyped. Reading
+        `api_key` alone therefore sent an empty token for exactly the providers
+        that had a working credential, and because the configured row already
+        claimed the id, the grant that did hold the token was skipped as a
+        duplicate. The daemon listed the provider as not signed in and refused
+        every request with a credential sitting in the store the whole time.
+        """
+        stored = str(record.get("api_key") or "")
+        account_id = str(record.get("oauth_provider_id") or "").strip()
+        if not account_id:
+            return stored
+        try:
+            from ..oauth.registry import provider as oauth_provider
+            from ..oauth.session import active_grant
+
+            grant = active_grant(self.user_store, oauth_provider(account_id))
+        except Exception:
+            # A grant that cannot be read or renewed leaves the stored value,
+            # which is empty for an account-backed provider. Kura then reports
+            # it as not signed in, which is what it is.
+            return stored
+        return grant.access_token if grant is not None else stored
 
     @staticmethod
     def _default_account_id(

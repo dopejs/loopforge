@@ -373,6 +373,74 @@ class SupervisorInjectionTests(unittest.TestCase):
         environment = self._supervisor()._account_environment()
         return json.loads(environment["KURA_LLM_ACCOUNTS"]) if environment else []
 
+    def _sign_in(self, provider_id: str, token: str) -> None:
+        """A grant that is current, so nothing tries to renew it."""
+        from datetime import datetime, timedelta, timezone
+
+        later = datetime.now(timezone.utc) + timedelta(hours=6)
+        self.store.save_oauth_grant(
+            {
+                "provider_id": provider_id,
+                "access_token": token,
+                "refresh_token": "refresh",
+                "expires_at": later.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "scope": "",
+                "account_label": "",
+                "account_id": "",
+                "org_id": "",
+                "plan": "",
+                "api_endpoint": "",
+                "authorized_at": "",
+            }
+        )
+
+    def test_a_provider_backed_by_an_account_carries_that_account_s_token(self) -> None:
+        """It carried nothing.
+
+        A provider added from a signed-in subscription stores no key -- the
+        account supplies one, and it is refreshed rather than retyped. Reading
+        the stored key alone therefore sent an empty token for exactly the
+        providers that had a working credential; and because the configured row
+        already claimed the id, the grant that did hold the token was skipped
+        below as a duplicate. The daemon listed the provider as not signed in
+        and refused every request, with the credential in the store the whole
+        time.
+        """
+        self._sign_in("anthropic", "oat-token")
+        self.store.save_provider(
+            "anthropic",
+            "https://api.anthropic.com",
+            "",  # no typed key: the account is the credential
+            "claude-sonnet-4-5",
+            display_name="Anthropic",
+            protocol="anthropic_messages",
+            oauth_provider_id="anthropic",
+        )
+
+        accounts = self._accounts()
+
+        self.assertEqual(len(accounts), 1)
+        self.assertEqual(accounts[0]["id"], "anthropic")
+        self.assertEqual(accounts[0]["accessToken"], "oat-token")
+        self.assertEqual(accounts[0]["protocol"], "anthropic_messages")
+
+    def test_a_typed_key_is_left_alone(self) -> None:
+        """Only an account-backed provider draws from a grant; a provider the
+        user typed a key for keeps that key even if the same vendor is also
+        signed into."""
+        self._sign_in("anthropic", "oat-token")
+        self.store.save_provider(
+            "deepseek",
+            "https://api.deepseek.test/v1",
+            "sk-typed",
+            "deepseek-chat",
+            display_name="DeepSeek",
+        )
+
+        typed = next(a for a in self._accounts() if a["id"] == "deepseek")
+
+        self.assertEqual(typed["accessToken"], "sk-typed")
+
     def test_the_default_is_the_one_configured_most_recently(self) -> None:
         """Not the alphabetically first.
 

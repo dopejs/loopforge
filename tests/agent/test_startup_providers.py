@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from loopforge.userstore import UserStore
@@ -48,6 +49,34 @@ class StartupProviderInventoryTests(unittest.TestCase):
             "glm-4",
             display_name="Zhipu GLM",
             protocol="openai_compatible",
+        )
+        # One of them is backed by a signed-in subscription rather than a
+        # typed key, which is the shape that reached the daemon with an empty
+        # credential and was listed as not signed in.
+        later = datetime.now(timezone.utc) + timedelta(hours=6)
+        store.save_oauth_grant(
+            {
+                "provider_id": "anthropic",
+                "access_token": "oat-token",
+                "refresh_token": "refresh",
+                "expires_at": later.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "scope": "",
+                "account_label": "",
+                "account_id": "",
+                "org_id": "",
+                "plan": "",
+                "api_endpoint": "",
+                "authorized_at": "",
+            }
+        )
+        store.save_provider(
+            "anthropic",
+            "https://api.anthropic.test",
+            "",  # no typed key: the account is the credential
+            "claude-sonnet-4-5",
+            display_name="Anthropic",
+            protocol="anthropic_messages",
+            oauth_provider_id="anthropic",
         )
 
         from loopforge.agent.supervisor import KuraRuntimeSupervisor
@@ -89,6 +118,24 @@ class StartupProviderInventoryTests(unittest.TestCase):
         # surface puts beside the provider's name.
         self.assertEqual(by_id["anthropic"]["family"], "anthropic_messages")
         self.assertEqual(by_id["zhipu"]["family"], "openai_compatible")
+
+    def test_a_subscription_backed_provider_arrives_signed_in(self) -> None:
+        """Its credential comes from the grant, not from a key it never had.
+
+        Reported as `not signed in` and refused every request, because the
+        configured row stored no key and also blocked the grant that held the
+        token from being sent at all.
+        """
+        accounts = {
+            account["id"]: account
+            for account in json.loads(self.environment["KURA_LLM_ACCOUNTS"])
+        }
+        self.assertEqual(accounts["anthropic"]["accessToken"], "oat-token")
+
+        items = self.daemon.client().get("/v1/providers").get("items") or []
+        by_id = {str(item.get("providerId") or ""): item for item in items}
+        self.assertTrue(by_id["anthropic"].get("ready"), by_id["anthropic"])
+        self.assertFalse(by_id["anthropic"].get("issues"))
 
     def test_the_default_provider_is_one_that_exists(self) -> None:
         items = self.daemon.client().get("/v1/providers").get("items") or []
