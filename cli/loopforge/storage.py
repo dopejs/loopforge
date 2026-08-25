@@ -41,7 +41,7 @@ class EventStore:
     def initialized(self) -> bool:
         return self.project_file.is_file() and self.events_file.is_file()
 
-    def initialize(self) -> tuple[dict[str, Any], bool]:
+    def initialize(self, engine: str | None = None) -> tuple[dict[str, Any], bool]:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         with ProjectLock(self.lock_file):
             if self.events_file.exists():
@@ -67,7 +67,16 @@ class EventStore:
                 config = {
                     "schema_version": SCHEMA_VERSION,
                     "project_id": opaque_id("prj"),
-                    "engine": None,
+                    # What was detected in the directory, not a placeholder.
+                    #
+                    # This was written as null and never written again -- the
+                    # only write to this file is the one below. So the schema
+                    # advertised an engine the product had no way to fill, and
+                    # a surface reading it saw "no engine" for a Godot project
+                    # sitting right there. An agent looking at that asked the
+                    # user which engine they wanted, a question nothing could
+                    # act on.
+                    "engine": engine,
                     "target_platforms": [],
                     "profiles": {},
                 }

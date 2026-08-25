@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from loopforge.agent.contracts import build_project_context, project_id
+from loopforge.agent.contracts import build_project_context, provisional_project_id
 from loopforge.agent.kura_client import KuraAgentError, KuraClient
 from loopforge.agent.supervisor import AgentSupervisor
 from loopforge.cli import build_command_parser
@@ -27,7 +27,9 @@ class AgentContractTests(unittest.TestCase):
     def test_uninitialized_context_is_stable_and_redacted(self) -> None:
         context = build_project_context(self.project)
         self.assertEqual(context["schema_version"], "game-project-context-v1")
-        self.assertEqual(context["project_id"], project_id(self.root))
+        # Nothing has been minted yet, so the path is all there is to name it
+        # by. This is the only state in which that is the answer.
+        self.assertEqual(context["project_id"], provisional_project_id(self.root))
         self.assertEqual(context["stage"], "UNINITIALIZED")
         self.assertEqual(context["observed_revision"], 0)
         self.assertNotIn("environment", context)
@@ -41,6 +43,68 @@ class AgentContractTests(unittest.TestCase):
         self.assertEqual(
             context["next_actions"], ["hypothesis create", "gate check PROTOTYPING"]
         )
+
+    def test_an_initialized_project_is_named_by_the_id_its_events_carry(self) -> None:
+        """Not by a hash of its path.
+
+        The context reported `gameproj_<sha256(path)>` while every event, and
+        the `PROJECT_ID_MISMATCH` check, used the `prj_` id minted at init. So
+        an agent told the user an id that no command would print -- and one
+        that changes if the directory is moved, while the real one does not.
+
+        The old test compared the function against itself, so it held whatever
+        the canonical id happened to be.
+        """
+        self.project.init()
+
+        context = build_project_context(self.project)
+        recorded = self.project.store.read_project_config()["project_id"]
+
+        self.assertEqual(context["project_id"], recorded)
+        self.assertTrue(context["project_id"].startswith("prj_"), context["project_id"])
+        self.assertNotEqual(context["project_id"], provisional_project_id(self.root))
+
+    def test_the_reported_id_is_one_the_cli_will_print(self) -> None:
+        """The whole point of reporting it: the user can look it up."""
+        self.project.init()
+
+        self.assertEqual(
+            build_project_context(self.project)["project_id"],
+            self.project.status()["project_id"],
+        )
+
+    def test_the_engine_is_recorded_at_init_rather_than_left_null(self) -> None:
+        """`project.json` wrote `"engine": null` and was never written again.
+
+        So the schema advertised an engine the product could not fill, and a
+        surface reading it saw none for a Godot project sitting right there.
+        """
+        (self.root / "project.godot").write_text("[application]\n", encoding="utf-8")
+
+        self.project.init()
+
+        self.assertEqual(self.project.store.read_project_config()["engine"], "godot")
+        self.assertEqual(build_project_context(self.project)["engine"], "godot")
+
+    def test_a_project_initialized_before_this_still_reports_its_engine(self) -> None:
+        """Projects initialized by an earlier build hold `null` forever.
+
+        Nothing rewrites `project.json`, so the recorded value cannot be
+        backfilled. Detection stays as the fallback for exactly that case,
+        which is every project that already exists.
+        """
+        self.project.init()
+        (self.root / "project.godot").write_text("[application]\n", encoding="utf-8")
+
+        self.assertIsNone(self.project.store.read_project_config()["engine"])
+        self.assertEqual(build_project_context(self.project)["engine"], "godot")
+
+    def test_a_directory_with_no_engine_records_none(self) -> None:
+        """Detection is not invention: nothing recognisable stays null."""
+        self.project.init()
+
+        self.assertIsNone(self.project.store.read_project_config()["engine"])
+        self.assertIsNone(build_project_context(self.project)["engine"])
 
     def test_status_does_not_probe_an_unmanaged_global_daemon(self) -> None:
         supervisor = AgentSupervisor(self.project, dope_binary="/bin/false")

@@ -100,7 +100,11 @@ class LoopforgeProject:
         self.store = EventStore(self.root)
 
     def init(self) -> dict[str, Any]:
-        state, created = self.store.initialize()
+        # Detection runs before the store is written, so the engine is
+        # recorded at initialization rather than left null forever.
+        detections = self.inspect()["engine_detections"]
+        engine = detections[0]["engine"] if detections else None
+        state, created = self.store.initialize(engine)
         result = {
             "created": created,
             "project_root": str(self.root),
@@ -462,6 +466,10 @@ class LoopforgeProject:
         return {
             "project_root": str(self.root),
             "initialized": True,
+            # The id every event carries and every integrity check compares.
+            # No command reported it except `history`, so the id a surface
+            # showed the user was one they could not look up anywhere.
+            "project_id": state["project_id"],
             "observed_revision": state["revision"],
             "stage": state["stage"],
             "active_experiment": state["active_experiment"],
