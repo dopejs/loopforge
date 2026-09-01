@@ -71,6 +71,103 @@ class LoopforgeAgentApplicationTests(unittest.TestCase):
         self.assertEqual(request["threadId"], "thread_1")
         self.assertEqual(response["reply"], "Inspect the movement loop.")
 
+    def _ready(self) -> Mock:
+        self.runtime.status.return_value = {
+            "healthy": True,
+            "base_url": "http://127.0.0.1:19192",
+        }
+        self.runtime.sync_context.return_value = {
+            "context": self.runtime.context.return_value
+        }
+        client = Mock()
+        client.post.return_value = {"reply": "ok"}
+        return client
+
+    def test_a_continued_turn_carries_what_was_said_before_it(self) -> None:
+        """The conversation is carried in the prompt, by this process.
+
+        Kura's continuity resolves a thread from its own store and the ids used
+        here are the Agent's own -- nothing registers them with the runtime, so
+        the lookup found no thread and every turn reached the model as the
+        first one. Asked to recall a number given one message earlier, it
+        answered that the conversation had just started, with all four messages
+        sitting in the session file.
+        """
+        self.agent.sessions_store.append("ses_1", "user", "Remember 8355.")
+        self.agent.sessions_store.append("ses_1", "agent", "OK")
+        client = self._ready()
+
+        with patch("loopforge_agent.application.KuraClient", return_value=client):
+            self.agent.query("What number was it?", "ses_1")
+
+        sent = client.post.call_args.args[1]["query"]
+        self.assertIn("Remember 8355.", sent)
+        self.assertIn("What number was it?", sent)
+        # Ordered oldest first, so the model reads them as a conversation
+        # rather than having to sort them.
+        self.assertLess(sent.index("Remember 8355."), sent.index("OK"))
+
+    def test_a_new_conversation_carries_nothing(self) -> None:
+        # A sentinel that cannot occur in the router skill or the context: an
+        # ordinary word like "unrelated" appears in the bundled skill text and
+        # made this pass or fail for the wrong reason.
+        self.agent.sessions_store.append("ses_other", "user", "ZZQQ-OTHER-THREAD")
+        client = self._ready()
+
+        with patch("loopforge_agent.application.KuraClient", return_value=client):
+            self.agent.query("First question")
+
+        self.assertNotIn("ZZQQ-OTHER-THREAD", client.post.call_args.args[1]["query"])
+
+    def test_the_question_is_not_also_shown_as_history(self) -> None:
+        """History is read before the turn is stored.
+
+        The streaming path records the question before dispatching, so reading
+        history afterwards would hand the model the same question twice -- once
+        as a prior turn and once as the request.
+        """
+        self.agent.sessions_store.append("ses_1", "user", "earlier")
+        self.agent.sessions_store.append("ses_1", "agent", "reply")
+        client = self._ready()
+        client.stream.return_value = iter(())
+
+        with patch("loopforge_agent.application.KuraClient", return_value=client):
+            list(self.agent.query_stream("the new question", "ses_1"))
+
+        sent = client.stream.call_args.args[1]["query"]
+        self.assertIn("earlier", sent)
+        self.assertEqual(sent.count("the new question"), 1)
+
+    def test_history_is_bounded_by_what_a_model_will_accept(self) -> None:
+        """The newest turns survive; the oldest are dropped.
+
+        A message count says nothing about whether a request will be accepted,
+        and the failure mode is the whole turn being refused rather than one
+        long message being trimmed.
+        """
+        self.agent.sessions_store.append("ses_1", "user", "ANCIENT" + "x" * 20000)
+        self.agent.sessions_store.append("ses_1", "agent", "MIDDLE" + "y" * 20000)
+        self.agent.sessions_store.append("ses_1", "user", "RECENT")
+        client = self._ready()
+
+        with patch("loopforge_agent.application.KuraClient", return_value=client):
+            self.agent.query("now what?", "ses_1")
+
+        sent = client.post.call_args.args[1]["query"]
+        self.assertIn("RECENT", sent)
+        self.assertNotIn("ANCIENT", sent)
+
+    def test_an_unreadable_conversation_still_answers(self) -> None:
+        """Losing the history degrades the answer; refusing the turn loses it."""
+        client = self._ready()
+        self.agent.sessions_store = Mock()
+        self.agent.sessions_store.read.side_effect = OSError("unreadable")
+
+        with patch("loopforge_agent.application.KuraClient", return_value=client):
+            response = self.agent.query("still answer me", "ses_1")
+
+        self.assertEqual(response["reply"], "ok")
+
     def test_query_requires_a_ready_runtime(self) -> None:
         self.runtime.status.return_value = {"healthy": False}
 
