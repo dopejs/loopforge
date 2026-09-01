@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
+import { Markdown } from "./Markdown";
 import type { AgentPhase, AgentState, TranscriptEntry } from "../agent";
 
 export function Composer({
@@ -103,10 +104,15 @@ export function Transcript({
           <span className="message-author">
             {entry.author === "user" ? t("agent.you") : t("agent.title")}
           </span>
-          <p className="message-text">
-            {entry.text}
+          {/*
+            The user's own words are shown as typed; the Agent's are Markdown.
+            Rendering what the user wrote would reinterpret their input, and
+            they are the one person here who did not mean any of it as markup.
+          */}
+          <div className="message-text">
+            {entry.author === "user" ? entry.text : <Markdown>{entry.text}</Markdown>}
             {entry.streaming && <span className="caret" aria-hidden="true" />}
-          </p>
+          </div>
         </article>
       ))}
       {busy && !transcript.some((entry) => entry.streaming) && (
