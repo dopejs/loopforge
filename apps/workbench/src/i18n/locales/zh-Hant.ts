@@ -32,6 +32,7 @@ export const zhHant: Messages = {
   "sidebar.assets": "資料夾",
   "sidebar.profiler": "取樣",
   "sidebar.empty": "這裡還沒有內容。",
+  "sidebar.newSession": "新對話",
 
   "project.switch": "切換專案",
   "project.add": "新增專案…",

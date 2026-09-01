@@ -220,6 +220,10 @@ export function App(): React.JSX.Element {
               busy={addingProject || agent.lifecycleBusy}
               agentPhase={agent.phase}
               agentState={agent.state}
+              sessionId={agent.sessionId}
+              turns={agent.turns}
+              onOpenSession={(id) => void agent.openSession(id)}
+              onNewSession={agent.newSession}
               onToggleMenu={() => setMenuOpen((open) => !open)}
               onCloseMenu={() => setMenuOpen(false)}
               onSelectProject={selectProject}

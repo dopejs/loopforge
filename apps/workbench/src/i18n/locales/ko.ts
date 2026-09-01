@@ -32,6 +32,7 @@ export const ko: Messages = {
   "sidebar.assets": "폴더",
   "sidebar.profiler": "캡처",
   "sidebar.empty": "아직 항목이 없습니다.",
+  "sidebar.newSession": "새 대화",
 
   "project.switch": "프로젝트 전환",
   "project.add": "프로젝트 추가…",

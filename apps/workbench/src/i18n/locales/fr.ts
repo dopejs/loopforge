@@ -32,6 +32,7 @@ export const fr: Messages = {
   "sidebar.assets": "Dossiers",
   "sidebar.profiler": "Captures",
   "sidebar.empty": "Rien ici pour l'instant.",
+  "sidebar.newSession": "Nouvelle conversation",
 
   "project.switch": "Changer de projet",
   "project.add": "Ajouter un projet…",

@@ -33,6 +33,7 @@ export const ar: Messages = {
   "sidebar.assets": "المجلدات",
   "sidebar.profiler": "الالتقاطات",
   "sidebar.empty": "لا يوجد شيء هنا بعد.",
+  "sidebar.newSession": "محادثة جديدة",
 
   "project.switch": "تبديل المشروع",
   "project.add": "إضافة مشروع…",

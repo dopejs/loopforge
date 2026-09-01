@@ -844,6 +844,28 @@ async fn agent_sessions(project_path: String) -> Result<Value, String> {
     ).await
 }
 
+/// Reads one conversation, so it can be reopened.
+///
+/// The listing carries a title and a count; the messages are fetched only when
+/// a session is actually opened, because a project accumulates them and the
+/// sidebar needs none of the text to draw a row.
+#[tauri::command]
+async fn agent_session(project_path: String, session_id: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    // Percent-encoded: the id reaches this from a listing rather than from a
+    // user, but it lands in a request path either way.
+    let encoded: String = url::form_urlencoded::byte_serialize(session_id.as_bytes()).collect();
+    agent_request(
+        &metadata,
+        "GET",
+        &format!("/v1/sessions/{encoded}"),
+        None,
+        Duration::from_secs(15),
+    ).await
+}
+
 /// Streams a reply, emitting one Tauri event per chunk.
 ///
 /// A Tauri command is request/response, so the stream cannot be its return
@@ -1583,6 +1605,7 @@ pub fn run() {
             agent_oauth_complete,
             agent_oauth_sign_out,
             agent_sessions,
+            agent_session,
             agent_query_stream,
             agent_runs,
             agent_run,

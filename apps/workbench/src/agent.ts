@@ -53,6 +53,53 @@ type StreamEvent = {
   data: string;
 };
 
+/**
+ * One stored conversation, with its messages.
+ *
+ * Lives here rather than beside `useSessions`: this feeds the transcript, and
+ * importing it from the provider module made that module and this one import
+ * each other -- `useSessions` needs `isDesktopRuntime`, which is here.
+ */
+export type SessionDetail = {
+  schema_version: "loopforge-session-v1";
+  id: string;
+  title: string;
+  updated_at: string;
+  messages: readonly { at: string; author: "user" | "agent"; text: string }[];
+};
+
+/** Reads one conversation so it can be reopened. */
+export function readSession(
+  projectRoot: string,
+  sessionId: string
+): Promise<SessionDetail> {
+  return invoke<SessionDetail>("agent_session", {
+    projectPath: projectRoot,
+    sessionId
+  });
+}
+
+/**
+ * The conversation a turn belongs to, from the Agent's own opening event.
+ *
+ * Emitted once, before the first token, because the Agent mints the id when a
+ * turn has no thread to continue. Carrying it back is what makes the next
+ * message part of the same conversation.
+ */
+export function sessionOf(event: string, data: string): string | null {
+  if (event !== "loopforge.session") return null;
+  try {
+    const parsed: unknown = JSON.parse(data);
+    if (parsed && typeof parsed === "object" && "sessionId" in parsed) {
+      const id = (parsed as { sessionId: unknown }).sessionId;
+      return typeof id === "string" && id ? id : null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 /** Extract the incremental text from a Kura chat event payload. */
 export function streamDelta(event: string, data: string): string | null {
   if (!event.endsWith("delta")) return null;
@@ -111,7 +158,15 @@ export type UseAgent = {
   transcript: readonly TranscriptEntry[];
   busy: boolean;
   lifecycleBusy: boolean;
+  /** The conversation on screen, once one exists. */
+  sessionId?: string;
+  /** Bumped when a turn ends, so a listing of conversations can re-read. */
+  turns: number;
   send: (query: string) => Promise<void>;
+  /** Loads a stored conversation and continues it. */
+  openSession: (sessionId: string) => Promise<void>;
+  /** Leaves the current conversation without ending the Agent. */
+  newSession: () => void;
   start: () => Promise<void>;
   stop: () => Promise<void>;
 };
@@ -130,6 +185,13 @@ export function useAgent(projectRoot: string): UseAgent {
   const [busy, setBusy] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const threadId = useRef<string | undefined>(undefined);
+  // Mirrored into state so the surface can show which conversation is open;
+  // the ref is what the send path reads, because it is written from inside an
+  // event listener that closes over its own render.
+  const [sessionId, setSessionId] = useState<string | undefined>(undefined);
+  // A turn ending is the only thing that creates or lengthens a conversation,
+  // so it is what a listing needs to hear about.
+  const [turns, setTurns] = useState(0);
   // Bumped to re-run activation after an explicit stop/start from the header.
   const [activation, setActivation] = useState(0);
 
@@ -142,6 +204,7 @@ export function useAgent(projectRoot: string): UseAgent {
 
   useEffect(() => {
     threadId.current = undefined;
+    setSessionId(undefined);
     setTranscript([]);
   }, [projectRoot]);
 
@@ -211,6 +274,18 @@ export function useAgent(projectRoot: string): UseAgent {
       // before the invoke promise has even been awaited.
       const unlisten = await listen<StreamEvent>("agent://stream", ({ payload }) => {
         if (payload.streamId !== streamId) return;
+        // The Agent announces which conversation this turn belongs to before
+        // any text arrives, and it was thrown away: the handler only ever
+        // looked for deltas. So the next message was sent with no thread, the
+        // Agent minted another conversation for it, and every exchange became
+        // its own two-message session with nothing before it in view -- the
+        // model was answering each question as the first one it had seen.
+        const opened = sessionOf(payload.event, payload.data);
+        if (opened) {
+          threadId.current = opened;
+          setSessionId(opened);
+          return;
+        }
         const delta = streamDelta(payload.event, payload.data);
         if (delta === null) return;
         sawText = true;
@@ -253,10 +328,45 @@ export function useAgent(projectRoot: string): UseAgent {
       } finally {
         unlisten();
         setBusy(false);
+        // After the reply, not before: the conversation's title and message
+        // count are only final once the turn has been written.
+        setTurns((value) => value + 1);
       }
     },
     [agentInvoke, busy]
   );
+
+  /**
+   * Reopen a stored conversation.
+   *
+   * The transcript is replaced rather than appended to, and the thread is
+   * adopted, so the next message continues this conversation instead of
+   * starting another one beside it.
+   */
+  const openSession = useCallback(
+    async (id: string): Promise<void> => {
+      if (busy || !projectRoot || !isDesktopRuntime()) return;
+      const detail = await readSession(projectRoot, id);
+      threadId.current = detail.id;
+      setSessionId(detail.id);
+      setTranscript(
+        detail.messages.map((message, index) => ({
+          id: `${detail.id}-${index}`,
+          author: message.author,
+          text: message.text
+        }))
+      );
+    },
+    [busy, projectRoot]
+  );
+
+  /** Start a fresh conversation without stopping the Agent. */
+  const newSession = useCallback((): void => {
+    if (busy) return;
+    threadId.current = undefined;
+    setSessionId(undefined);
+    setTranscript([]);
+  }, [busy]);
 
   const start = useCallback(async (): Promise<void> => {
     if (!projectRoot || lifecycleBusy || !isDesktopRuntime()) return;
@@ -269,6 +379,7 @@ export function useAgent(projectRoot: string): UseAgent {
     try {
       await agentInvoke<AgentState>("agent_stop");
       threadId.current = undefined;
+      setSessionId(undefined);
       setState(idleState());
     } catch (error) {
       setState(idleState(errorMessage(error, "failed to stop Loopforge Agent")));
@@ -283,7 +394,11 @@ export function useAgent(projectRoot: string): UseAgent {
     transcript,
     busy,
     lifecycleBusy,
+    sessionId,
+    turns,
     send,
+    openSession,
+    newSession,
     start,
     stop
   };

@@ -35,6 +35,7 @@ export const en = {
   "sidebar.assets": "Folders",
   "sidebar.profiler": "Captures",
   "sidebar.empty": "Nothing here yet.",
+  "sidebar.newSession": "New conversation",
 
   "project.switch": "Switch project",
   "project.add": "Add project…",

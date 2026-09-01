@@ -32,6 +32,7 @@ export const ja: Messages = {
   "sidebar.assets": "フォルダ",
   "sidebar.profiler": "キャプチャ",
   "sidebar.empty": "まだ何もありません。",
+  "sidebar.newSession": "新しい会話",
 
   "project.switch": "プロジェクトを切り替え",
   "project.add": "プロジェクトを追加…",

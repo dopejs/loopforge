@@ -150,27 +150,49 @@ export function Sidebar(props: {
   busy: boolean;
   agentPhase: AgentPhase;
   agentState: AgentState;
+  /** The conversation currently on screen, so its row reads as the open one. */
+  sessionId?: string;
+  /** Bumped when a turn ends; the listing re-reads on it. */
+  turns: number;
   onToggleMenu: () => void;
   onCloseMenu: () => void;
   onSelectProject: (root: string) => void;
   onAddProject: () => void;
+  onOpenSession: (sessionId: string) => void;
+  onNewSession: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   const [selected, setSelected] = useState(0);
   // Chat sessions come from the runtime; the other modes have no Agent
   // capability behind them yet and stay on preview content.
   const live = useSessions(props.projectRoot, props.mode === "chat");
+  const { reload } = live;
   const items =
     props.mode === "chat"
       ? live.sessions.map((session) => ({
+          id: session.id,
           label: session.title || session.id,
           sub: session.updated_at,
           meta: String(session.message_count),
           tone: undefined
         }))
-      : (SIDEBAR_ITEMS[props.mode] ?? []);
+      : (SIDEBAR_ITEMS[props.mode] ?? []).map((item) => ({ ...item, id: undefined }));
 
   useEffect(() => setSelected(0), [props.mode]);
+
+  // A turn is the only thing that creates or lengthens a conversation. Without
+  // this the count stayed at whatever it read when the mode was opened, which
+  // was zero whenever that read beat the Agent to being ready.
+  //
+  // Only on a change, never on the first render: the listing hook fetches on
+  // mount already, and asking again immediately made every opening of the mode
+  // cost two round trips for one answer.
+  const seenTurns = useRef(props.turns);
+  useEffect(() => {
+    if (props.mode !== "chat" || props.turns === seenTurns.current) return;
+    seenTurns.current = props.turns;
+    reload();
+  }, [props.mode, props.turns, reload]);
 
   return (
     <aside className="sidebar">
@@ -187,7 +209,22 @@ export function Sidebar(props: {
 
       <div className="sidebar-section">
         <span className="section-title">{t(sidebarTitleKey(props.mode))}</span>
-        <span className="mono faint section-count">{items.length}</span>
+        {/*
+          Without this, opening a stored conversation was a one-way door:
+          every later message continued it, and there was no way back to a
+          blank one short of restarting the Agent.
+        */}
+        {props.mode === "chat" ? (
+          <button
+            type="button"
+            className="ghost-button small"
+            onClick={props.onNewSession}
+          >
+            {t("sidebar.newSession")}
+          </button>
+        ) : (
+          <span className="mono faint section-count">{items.length}</span>
+        )}
       </div>
 
       {/*
@@ -199,9 +236,26 @@ export function Sidebar(props: {
           <button
             key={item.label}
             type="button"
-            className={index === selected ? "sidebar-item active" : "sidebar-item"}
-            aria-current={index === selected ? "true" : undefined}
-            onClick={() => setSelected(index)}
+            className={
+              (item.id ? item.id === props.sessionId : index === selected)
+                ? "sidebar-item active"
+                : "sidebar-item"
+            }
+            aria-current={
+              (item.id ? item.id === props.sessionId : index === selected)
+                ? "true"
+                : undefined
+            }
+            /*
+              A conversation row reopens that conversation. Selection used to
+              be local state and nothing else: the row highlighted and the
+              transcript beside it did not change, so stored history was
+              visible and unreachable.
+            */
+            onClick={() => {
+              setSelected(index);
+              if (item.id) props.onOpenSession(item.id);
+            }}
           >
             <span className="item-identity">
               <span className="item-label">{item.label}</span>

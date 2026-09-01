@@ -132,13 +132,25 @@ export type SessionState = {
   sessions: readonly Session[];
   reason?: string;
   loading: boolean;
+  reload: () => void;
 };
 
-/** Reads the Agent's projection of the runtime's chat sessions. */
+/**
+ * Reads the Agent's projection of the runtime's chat sessions.
+ *
+ * `reload` exists because the list changes underneath this: a conversation is
+ * created by sending a message, and without a way to ask again the sidebar
+ * kept reporting the count it read when the mode was first opened -- which was
+ * usually zero, because that read can beat the Agent to being ready and
+ * nothing retried it.
+ */
 export function useSessions(projectRoot: string, enabled: boolean): SessionState {
   const [inventory, setInventory] = useState<SessionInventory | null>(null);
   const [loading, setLoading] = useState(false);
   const [reason, setReason] = useState<string>();
+  const [nonce, setNonce] = useState(0);
+
+  const reload = useCallback(() => setNonce((value) => value + 1), []);
 
   useEffect(() => {
     if (!enabled || !projectRoot) return;
@@ -164,9 +176,9 @@ export function useSessions(projectRoot: string, enabled: boolean): SessionState
     return () => {
       cancelled = true;
     };
-  }, [enabled, projectRoot]);
+  }, [enabled, nonce, projectRoot]);
 
-  return { sessions: inventory?.sessions ?? [], reason, loading };
+  return { sessions: inventory?.sessions ?? [], reason, loading, reload };
 }
 
 export { UNSUPPORTED_REASON };

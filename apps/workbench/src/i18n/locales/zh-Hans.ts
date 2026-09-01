@@ -32,6 +32,7 @@ export const zhHans: Messages = {
   "sidebar.assets": "目录",
   "sidebar.profiler": "采样",
   "sidebar.empty": "这里还没有内容。",
+  "sidebar.newSession": "新会话",
 
   "project.switch": "切换工程",
   "project.add": "添加工程…",
