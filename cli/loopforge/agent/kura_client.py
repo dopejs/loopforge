@@ -108,6 +108,19 @@ class KuraClient:
         )
         return self._request(request, "PUT", path)
 
+    def patch(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Partial update. Distinct from `put` because the runtime routes on
+        the method: a `PUT` to a `PATCH` route is a 404 that says nothing about
+        the verb."""
+        payload = json.dumps(body, ensure_ascii=True).encode("utf-8")
+        request = urllib.request.Request(
+            self._url(path),
+            data=payload,
+            headers=self._headers({"Content-Type": "application/json"}),
+            method="PATCH",
+        )
+        return self._request(request, "PATCH", path)
+
     def delete(self, path: str) -> dict[str, Any]:
         """Delete a resource. A 204 with no body yields an empty mapping."""
         request = urllib.request.Request(

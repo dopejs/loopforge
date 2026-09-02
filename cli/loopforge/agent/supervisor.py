@@ -209,6 +209,11 @@ class KuraRuntimeSupervisor:
                 # claiming to be a developer test daemon.
                 "KURA_ENV": "embedded",
                 "KURA_DATA_DIR": str(data_dir),
+                # What the daemon may let a tool server read. Kura builds a
+                # `project_tools` sandbox profile from this, and builds none
+                # when it is unset -- so the profile that grants access to a
+                # project exists only where there is one.
+                "KURA_PROJECT_ROOT": str(self.project.root),
                 "KURA_BIND_ADDR": bind_addr,
             }
         )
@@ -321,7 +326,13 @@ class KuraRuntimeSupervisor:
                     "serverId": self.TOOL_SERVER_ID,
                     "displayName": "Loopforge",
                     "enabled": True,
-                    "sandboxProfileId": "subprocess_default",
+                    # Scoped to this project. The default profile scopes the
+                    # filesystem to the daemon's own data directory, which a
+                    # tool server that reads the project cannot work under --
+                    # and the way to pass that check without a profile is to
+                    # declare the process needs no filesystem while handing it
+                    # the project path on its command line.
+                    "sandboxProfileId": "project_tools",
                     "declarationId": "loopforge-cli",
                     "transportKind": "stdio",
                     "command": binary,
@@ -341,9 +352,9 @@ class KuraRuntimeSupervisor:
             )
             client.post(f"/v1/mcp/servers/{self.TOOL_SERVER_ID}/start", {})
             for tool in self._published_tool_names(client):
-                client.put(
+                client.patch(
                     f"/v1/mcp/servers/{self.TOOL_SERVER_ID}/tools/"
-                    f"{urllib.parse.quote(tool, safe='')}/exposure",
+                    f"{urllib.parse.quote(tool, safe='')}",
                     {
                         "runtimeSurface": self.TOOL_SURFACE,
                         # Everything published here is read-only. A command
