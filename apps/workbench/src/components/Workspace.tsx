@@ -3,6 +3,7 @@ import { Icon } from "../icons";
 import { useI18n } from "../i18n";
 import { type WorkspaceMode, isWired, modeDescriptionKey, modeLabelKey } from "../modes";
 import type { AgentPhase, AgentState, TranscriptEntry } from "../agent";
+import { useProjectStatus } from "../project";
 import { Composer, Transcript } from "./AgentPanel";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { CanvasWorkspace } from "./workspaces/Canvas";
@@ -110,6 +111,10 @@ export function Workspace({
   addingProject: boolean;
 }): React.JSX.Element {
   const { t } = useI18n();
+  // Only to choose what is worth suggesting. The chat surface renders nothing
+  // else from it, and a project whose status cannot be read still gets the one
+  // question that is answerable anywhere.
+  const { status } = useProjectStatus(projectRoot, mode === "chat" && Boolean(projectRoot));
 
   if (!projectRoot) {
     return (
@@ -136,7 +141,13 @@ export function Workspace({
   if (mode === "chat") {
     return (
       <div className="workspace-body chat">
-        <Transcript transcript={transcript} busy={busy} variant="page" />
+        <Transcript
+          transcript={transcript}
+          busy={busy}
+          variant="page"
+          stage={status?.stage}
+          onSuggest={agentPhase === "ready" ? onSend : undefined}
+        />
         {/*
           Between the conversation and the composer, because that is where the
           question was raised. An approval moved to a settings page or a tray

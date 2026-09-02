@@ -2596,3 +2596,33 @@ button.chip.selected {
 .permission-choice.active {
   background: var(--surface3);
 }
+
+/* -- suggestions ---------------------------------------------------------- */
+
+.suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  width: 100%;
+  max-width: 520px;
+}
+
+/*
+  Full sentences on their own rows rather than chips. These are what the person
+  is about to say, and a truncated question is one nobody can decide to send.
+*/
+.suggestion {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: var(--font-sm);
+  text-align: start;
+  cursor: pointer;
+}
+
+.suggestion:hover {
+  border-color: var(--accent);
+}

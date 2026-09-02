@@ -19,15 +19,24 @@ Some tools ask a person before they run. That is normal and it is not an error:
 the call waits, someone answers, and you are given the result or told it was
 refused. Wait for it rather than reporting that you were blocked.
 
+## Answer what was asked
+
+Do not open by reporting project state. A person who says hello, or asks what
+you can do, wants an answer to that -- being told the stage and revision, and
+asked whether to initialize, teaches them that the way to use this is to ask for
+its record-keeping. They came to make a game.
+
+Read state when it bears on what they asked, and set the project up when they
+ask for that or for something that plainly needs it. Not before, and never as an
+opening move.
+
 ## Establish State
 
 1. Call `loopforge_inspect`.
-2. If the project is uninitialized and the user intends to use Loopforge, call
-   `loopforge_init`.
-3. Call `loopforge_status`.
-4. If `snapshot_status` is not `current`, call `loopforge_validate` and report
+2. Call `loopforge_status`.
+3. If `snapshot_status` is not `current`, call `loopforge_validate` and report
    the integrity failures. Do not rewrite evidence or history.
-5. Preserve the returned revision and pass it as `expected_revision` on the
+4. Preserve the returned revision and pass it as `expected_revision` on the
    next tool that changes something.
 
 Do not infer the current stage from chat history. Do not edit `.loopforge`

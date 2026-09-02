@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { Markdown } from "./Markdown";
+import { suggestionsFor } from "../suggestions";
 import type { AgentPhase, AgentState, TranscriptEntry } from "../agent";
 
 export function Composer({
@@ -70,11 +71,17 @@ export function Composer({
 export function Transcript({
   transcript,
   busy,
-  variant
+  variant,
+  stage,
+  onSuggest
 }: {
   transcript: readonly TranscriptEntry[];
   busy: boolean;
   variant: "panel" | "page";
+  /** Where the project is, so the suggestions are about the work it is up to. */
+  stage?: string;
+  /** Sends a suggestion. Absent means none are offered. */
+  onSuggest?: (query: string) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   const end = useRef<HTMLDivElement>(null);
@@ -89,6 +96,29 @@ export function Transcript({
         <div className="transcript-empty">
           <strong>{t("agent.emptyTitle")}</strong>
           <span>{t("agent.emptyBody")}</span>
+          {/*
+            What is worth asking, where the project actually is.
+            
+            An empty chat that only says "how can I help?" leaves a person to
+            guess, and the first thing they learn to say is `initialize the
+            project` -- because that is what the agent answers a vague opening
+            with. That is us teaching them to ask for our bookkeeping. They came
+            to make a game.
+          */}
+          {onSuggest && (
+            <div className="suggestions">
+              {suggestionsFor(stage).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  className="suggestion"
+                  onClick={() => onSuggest(t(key))}
+                >
+                  {t(key)}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );

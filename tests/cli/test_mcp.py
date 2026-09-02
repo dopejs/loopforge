@@ -243,6 +243,24 @@ class PublishedSurfaceTests(unittest.TestCase):
             with self.subTest(action=action):
                 self.assertIn(f"loopforge_{action}", published)
 
+    def test_the_router_does_not_open_by_offering_to_initialize(self) -> None:
+        """The pattern a person notices first.
+
+        Every conversation began with the stage, the revision, and an offer to
+        initialize -- so the first thing anyone learned to say was "initialize
+        the project". They came to make a game.
+        """
+        from pathlib import Path as _Path
+
+        router = _Path(__file__).resolve().parents[2] / "skills" / "loopforge-router" / "SKILL.md"
+        text = router.read_text(encoding="utf-8")
+
+        self.assertIn("Do not open by reporting project state", text)
+        self.assertNotIn(
+            "If the project is uninitialized and the user intends to use Loopforge",
+            text,
+        )
+
     def test_the_router_tells_the_model_to_call_tools(self) -> None:
         """It told the model to run shell commands, which it cannot do. That
         one instruction is why every answer was a narration."""
@@ -252,7 +270,12 @@ class PublishedSurfaceTests(unittest.TestCase):
         text = router.read_text(encoding="utf-8")
 
         self.assertIn("loopforge_inspect", text)
-        self.assertIn("loopforge_init", text)
+        # Not `loopforge_init`. The router deliberately stops naming it as a
+        # step: opening every conversation by offering to set the project up
+        # teaches a person that the way to use this is to ask for its
+        # record-keeping. The tool is still published, so the model can reach
+        # for it when someone actually asks.
+        #
         # No instruction to run a command. The one surviving mention is the
         # sentence telling the model not to write one out.
         instructions = [
