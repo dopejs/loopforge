@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import urllib.parse
 from pathlib import Path
@@ -17,6 +19,8 @@ from ..userstore import UserStore
 from ..project import LoopforgeProject
 from .contracts import build_project_context
 from .kura_client import KuraAgentError, KuraClient
+
+LOGGER = logging.getLogger(__name__)
 
 RUNTIME_SCHEMA = "kura-runtime-v1"
 
@@ -284,7 +288,108 @@ class KuraRuntimeSupervisor:
             raise LoopforgeError(
                 "Kura started but did not become healthy.", "KURA_NOT_READY", 1, result
             )
+        self._publish_tools(result)
         return result
+
+    #: The MCP server that lets the agent run Loopforge's read-only commands
+    #: rather than describe them. One per project, named for that.
+    TOOL_SERVER_ID = "loopforge"
+
+    #: Which surface the exposure rules are written for. Chat turns ask under
+    #: this name, and a rule for another surface does not carry.
+    TOOL_SURFACE = "chat"
+
+    def _publish_tools(self, status: dict[str, Any]) -> None:
+        """Register this project's commands with the daemon, as tools.
+
+        Best-effort. A daemon that will not accept the server leaves the agent
+        able to talk and unable to act, which is where it was before any of
+        this -- degraded, and worth reporting, but not worth refusing to start
+        over. The reason is logged rather than raised for the same reason.
+        """
+        base_url = status.get("base_url")
+        if not base_url:
+            return
+        binary = self._loopforge_binary()
+        if not binary:
+            return
+        client = KuraClient(str(base_url), timeout=30.0, token=status.get("token"))
+        try:
+            client.post(
+                "/v1/mcp/servers",
+                {
+                    "serverId": self.TOOL_SERVER_ID,
+                    "displayName": "Loopforge",
+                    "enabled": True,
+                    "sandboxProfileId": "subprocess_default",
+                    "declarationId": "loopforge-cli",
+                    "transportKind": "stdio",
+                    "command": binary,
+                    # `--project` before the subcommand: the root is a global
+                    # option, and the daemon's working directory is its own.
+                    "args": ["--project", str(self.project.root), "mcp"],
+                    # The project, so a relative path in a tool argument means
+                    # what the user would expect. `--project` says the same
+                    # thing explicitly, because the daemon may normalize this.
+                    "workingDir": str(self.project.root),
+                    # Restarted if it dies. It is a child of the daemon and a
+                    # crash mid-turn should cost that turn, not every later
+                    # one -- the agent would go quietly back to describing
+                    # commands it can no longer run.
+                    "autoRestart": True,
+                },
+            )
+            client.post(f"/v1/mcp/servers/{self.TOOL_SERVER_ID}/start", {})
+            for tool in self._published_tool_names(client):
+                client.put(
+                    f"/v1/mcp/servers/{self.TOOL_SERVER_ID}/tools/"
+                    f"{urllib.parse.quote(tool, safe='')}/exposure",
+                    {
+                        "runtimeSurface": self.TOOL_SURFACE,
+                        # Everything published here is read-only. A command
+                        # that changes project state is not published at all,
+                        # so there is nothing here that `allow` could be wrong
+                        # about.
+                        "exposureMode": "allow",
+                        "active": True,
+                        "reason": "Loopforge read-only project commands",
+                    },
+                )
+        except KuraAgentError as error:
+            LOGGER.warning("Loopforge tools were not published: %s", error)
+
+    def _published_tool_names(self, client: KuraClient) -> list[str]:
+        """What the server actually published, not what we expect it to.
+
+        Writing rules for a hardcoded list would leave a tool added later
+        blocked with nothing saying why, and would write rules for one removed.
+        """
+        try:
+            listing = client.get(f"/v1/mcp/servers/{self.TOOL_SERVER_ID}/tools")
+        except KuraAgentError:
+            return []
+        items = listing.get("items")
+        if not isinstance(items, list):
+            return []
+        names = []
+        for item in items:
+            name = item.get("toolName") if isinstance(item, dict) else None
+            if isinstance(name, str) and name:
+                names.append(name)
+        return names
+
+    def _loopforge_binary(self) -> str | None:
+        """This CLI, as something the daemon can spawn.
+
+        `sys.executable` is not it: in a packaged build that is the bundled
+        interpreter, and in a virtualenv it would run without the console
+        script's entry point.
+        """
+        return shutil.which("loopforge") or (
+            str(Path(sys.argv[0]).resolve())
+            if Path(sys.argv[0]).name.startswith("loopforge")
+            else None
+        )
 
     def _account_environment(self) -> dict[str, str]:
         """Every signed-in subscription, as providers Kura can dispatch at.

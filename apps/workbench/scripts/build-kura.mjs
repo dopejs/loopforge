@@ -33,6 +33,22 @@ const builtCommit = execFileSync("git", ["rev-parse", "HEAD"], {
   encoding: "utf8"
 }).trim();
 writeFileSync(resolve(resourcesRoot, "kura.build.json"), `${JSON.stringify({ commit: builtCommit }, null, 2)}\n`);
+// Re-sign on macOS, or the kernel kills the binary on launch.
+//
+// Copying a freshly built binary over the same path leaves macOS holding a
+// stale signature for it: the file verifies, and the kernel still refuses to
+// execute it, killing the process with SIGKILL before it writes a byte. From
+// the outside that is a daemon that "failed to start" with empty stdout and
+// stderr, which says nothing about why -- the agent script has carried this
+// fix since the sidecar hit it, and the daemon reaches the same kernel.
+if (process.platform === "darwin") {
+  execFileSync("codesign", ["--force", "--sign", "-", bundledBinary], { stdio: "inherit" });
+  // Verified rather than assumed: a signature that does not actually let the
+  // binary run is the exact failure this exists to prevent, and it is
+  // invisible until something tries to run it.
+  execFileSync(bundledBinary, ["--help"], { stdio: "ignore" });
+}
+
 console.log(`Bundled Kura daemon (kura) from ${builtCommit.slice(0, 7)}: ${bundledBinary}`);
 
 // The binary is copied before Tauri packaging, so the large Cargo target is
