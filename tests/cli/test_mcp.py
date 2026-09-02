@@ -113,7 +113,7 @@ class McpServerTests(unittest.TestCase):
         permission mode's business, and covered with it.
         """
         by_name = {tool.name: tool for tool in TOOLS}
-        for name in ("loopforge_advance", "loopforge_run", "loopforge_capture"):
+        for name in ("loopforge_advance", "loopforge_run", "loopforge_capture", "loopforge_init"):
             with self.subTest(tool=name):
                 self.assertIn(name, by_name)
                 self.assertTrue(by_name[name].mutates, f"{name} changes the project")
@@ -223,3 +223,41 @@ class ExposureRuleTests(unittest.TestCase):
         for mode in MODES:
             with self.subTest(mode=mode):
                 self.assertEqual(exposure_for("unrecognized", mode), "approval_required")
+
+
+class PublishedSurfaceTests(unittest.TestCase):
+    """Every action the context names must be one the model can take."""
+
+    def test_the_actions_the_context_offers_are_all_published(self) -> None:
+        """The gap a person sees first.
+
+        The project context names `init` as the next action and the router
+        tells the model to take it. It was not published, so the model said it
+        was running the command -- which is the honest thing to do when you are
+        told to run one and cannot. An instruction the tools cannot satisfy is
+        worse than a missing tool: it produces a confident account of work that
+        did not happen.
+        """
+        published = {tool.name for tool in TOOLS}
+        for action in ("init", "gate", "advance"):
+            with self.subTest(action=action):
+                self.assertIn(f"loopforge_{action}", published)
+
+    def test_the_router_tells_the_model_to_call_tools(self) -> None:
+        """It told the model to run shell commands, which it cannot do. That
+        one instruction is why every answer was a narration."""
+        from pathlib import Path as _Path
+
+        router = _Path(__file__).resolve().parents[2] / "skills" / "loopforge-router" / "SKILL.md"
+        text = router.read_text(encoding="utf-8")
+
+        self.assertIn("loopforge_inspect", text)
+        self.assertIn("loopforge_init", text)
+        # No instruction to run a command. The one surviving mention is the
+        # sentence telling the model not to write one out.
+        instructions = [
+            line
+            for line in text.splitlines()
+            if "`loopforge " in line and "Running" not in line
+        ]
+        self.assertEqual(instructions, [], f"still tells the model to run commands: {instructions}")

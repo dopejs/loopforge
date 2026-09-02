@@ -6,20 +6,29 @@ description: Route Loopforge game-development work from the repository's current
 # Loopforge Router
 
 Inspect durable project state before recommending work. Route to one primary
-skill and keep stage transitions in the CLI.
+skill and keep stage transitions in Loopforge's own tools.
+
+## Use the tools; do not describe them
+
+Loopforge's commands are available to you as tools named `loopforge_*`. Call
+them. Do not write out a shell command and say you are running it -- you cannot
+run shell commands, and a message that says "Running `loopforge init`..." is a
+message in which nothing happened.
+
+Some tools ask a person before they run. That is normal and it is not an error:
+the call waits, someone answers, and you are given the result or told it was
+refused. Wait for it rather than reporting that you were blocked.
 
 ## Establish State
 
-1. Run `loopforge inspect --format json` from the project root.
-2. If the project is uninitialized and the user intends to use Loopforge, run
-   `loopforge init --format json`.
-3. Run `loopforge status --format json`.
-4. If `snapshot_status` is not `current`, run `loopforge validate --format json`
-   and `loopforge reconcile --dry-run --format json`. Apply reconciliation only
-   when the plan rebuilds derived state from intact history; report other
-   integrity failures without rewriting evidence or history.
-5. Preserve the returned revision and pass it through
-   `--expected-revision <revision>` on the next mutation.
+1. Call `loopforge_inspect`.
+2. If the project is uninitialized and the user intends to use Loopforge, call
+   `loopforge_init`.
+3. Call `loopforge_status`.
+4. If `snapshot_status` is not `current`, call `loopforge_validate` and report
+   the integrity failures. Do not rewrite evidence or history.
+5. Preserve the returned revision and pass it as `expected_revision` on the
+   next tool that changes something.
 
 Do not infer the current stage from chat history. Do not edit `.loopforge`
 records directly.
@@ -47,7 +56,7 @@ Do not make art or engine workflows reconstruct scope from unapproved prose.
 
 ## Guardrails
 
-- Run `loopforge gate check <STAGE> --format json` before `advance`.
+- Call `loopforge_gate` before `loopforge_advance`.
 - Treat `missing`, `failed`, `stale`, and `unknown` as blocked, not as implicit
   permission.
 - Never use direct event edits or invent a force path.
@@ -58,5 +67,5 @@ Do not make art or engine workflows reconstruct scope from unapproved prose.
 - Never expand implementation or content beyond the approved design scope.
 - Never start batch art production before the representative target has explicit
   human approval.
-- End each work segment with `loopforge status --format json` and report the
+- End each work segment with `loopforge_status` and report the
   current stage, revision, fresh claims, stale claims, and one next action.

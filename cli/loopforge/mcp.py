@@ -115,6 +115,10 @@ def _validate(project: LoopforgeProject, _arguments: dict[str, Any]) -> Any:
     return project.validate()
 
 
+def _init(project: LoopforgeProject, _arguments: dict[str, Any]) -> Any:
+    return project.init()
+
+
 def _revision(project: LoopforgeProject, arguments: dict[str, Any]) -> int | None:
     """The revision a mutation expects to be applied to.
 
@@ -216,6 +220,20 @@ TOOLS: tuple[Tool, ...] = (
     # Each of these is published under `approval_required`: the runtime asks a
     # person, naming the tool and the arguments, and runs the call only if they
     # say yes.
+    Tool(
+        "loopforge_init",
+        "Set up Loopforge state in this project directory. Safe to call when it "
+        "is already set up: it reports the existing state rather than replacing "
+        "it.",
+        NO_ARGUMENTS,
+        _init,
+        # Creates durable state and asserts nothing about the game. It was
+        # unpublished while nothing mutating was, and stayed unpublished after
+        # -- so the context said the project was uninitialized and named `init`
+        # as the next action, and the model had no way to take it. It said it
+        # was running the command instead, which is the only thing left.
+        tier=TIER_EVIDENCE,
+    ),
     Tool(
         "loopforge_gate",
         "Check whether the project satisfies the gate into a stage, without "
