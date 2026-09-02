@@ -180,19 +180,32 @@ export function Sidebar(props: {
 
   useEffect(() => setSelected(0), [props.mode]);
 
-  // A turn is the only thing that creates or lengthens a conversation. Without
-  // this the count stayed at whatever it read when the mode was opened, which
-  // was zero whenever that read beat the Agent to being ready.
+  // Two things make the listing stale, and it took both to fix it.
   //
-  // Only on a change, never on the first render: the listing hook fetches on
-  // mount already, and asking again immediately made every opening of the mode
-  // cost two round trips for one answer.
+  // A turn creates or lengthens a conversation, so the count has to be re-read
+  // when one ends. That was the first half, and on its own it left the list
+  // empty for the whole of a session that had not sent anything yet: the app
+  // starts, the sidebar asks before the Agent is up, gets nothing, and nothing
+  // asks again until the user sends a message -- at which point every stored
+  // conversation appears at once, as though sending had created them.
+  //
+  // So the Agent becoming ready is the other trigger. It is the moment the
+  // question first has an answer.
+  //
+  // Neither fires on the first render: the listing hook fetches on mount
+  // already, and asking again immediately would cost two round trips for one
+  // answer.
   const seenTurns = useRef(props.turns);
+  const seenPhase = useRef(props.agentPhase);
   useEffect(() => {
-    if (props.mode !== "chat" || props.turns === seenTurns.current) return;
+    if (props.mode !== "chat") return;
+    const aTurnEnded = props.turns !== seenTurns.current;
+    const becameReady =
+      props.agentPhase === "ready" && seenPhase.current !== "ready";
     seenTurns.current = props.turns;
-    reload();
-  }, [props.mode, props.turns, reload]);
+    seenPhase.current = props.agentPhase;
+    if (aTurnEnded || becameReady) reload();
+  }, [props.agentPhase, props.mode, props.turns, reload]);
 
   return (
     <aside className="sidebar">

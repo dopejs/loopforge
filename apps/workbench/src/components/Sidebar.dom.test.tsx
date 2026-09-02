@@ -53,6 +53,26 @@ function mockAgent(): void {
   });
 }
 
+function props(overrides: Record<string, unknown> = {}) {
+  return {
+    mode: "chat" as const,
+    projectRoot: "/p",
+    projectRoots: ["/p"],
+    menuOpen: false,
+    busy: false,
+    agentPhase: "ready" as const,
+    agentState: { ready: true } as never,
+    turns: 0,
+    onToggleMenu: () => {},
+    onCloseMenu: () => {},
+    onSelectProject: () => {},
+    onAddProject: () => {},
+    onOpenSession: () => {},
+    onNewSession: () => {},
+    ...overrides
+  };
+}
+
 function draw(overrides: Record<string, unknown> = {}) {
   return render(
     <Sidebar
@@ -166,5 +186,48 @@ describe("Sidebar conversations", () => {
     fireEvent.click(await screen.findByRole("button", { name: "New conversation" }));
 
     expect(fresh).toHaveBeenCalled();
+  });
+  it("asks again once the Agent is ready, not only once a turn has ended", async () => {
+    // The race a restart made obvious. The app starts, the sidebar asks before
+    // the Agent is up and gets nothing, and until this nothing asked again --
+    // so every stored conversation stayed hidden until the user sent a
+    // message, at which point they all appeared as though sending had created
+    // them.
+    // The first read fails, because that is what happens: the Agent is still
+    // starting and there is nothing to answer with. Modelling it as a
+    // successful read of an empty list would pass with the fix removed --
+    // which is what a first version of this test did.
+    listed = 0;
+    invoke.mockImplementation((command: string) => {
+      if (command !== "agent_sessions") return Promise.resolve({});
+      listed += 1;
+      return listed === 1
+        ? Promise.reject(new Error("Loopforge Agent has not been started"))
+        : Promise.resolve({ schema_version: "loopforge-session-v1", sessions });
+    });
+    sessions = [
+      { id: "ses_a", title: "你好", updated_at: "2026-09-01T14:27:03Z", message_count: 2 }
+    ];
+    const view = render(<Sidebar {...props({ agentPhase: "starting" })} />);
+    await waitFor(() => expect(listed).toBe(1));
+    expect(screen.queryByText("你好")).toBeNull();
+
+    view.rerender(<Sidebar {...props({ agentPhase: "ready" })} />);
+
+    expect(await screen.findByText("你好")).toBeTruthy();
+  });
+
+  it("does not ask again on every unrelated render", async () => {
+    // Re-reading whenever anything changes would poll the Agent for the life
+    // of the window.
+    mockAgent();
+    const view = render(<Sidebar {...props()} />);
+    await waitFor(() => expect(listed).toBe(1));
+
+    view.rerender(<Sidebar {...props({ busy: true })} />);
+    view.rerender(<Sidebar {...props({ menuOpen: true })} />);
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(listed).toBe(1);
   });
 });
