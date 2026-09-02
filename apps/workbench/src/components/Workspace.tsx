@@ -157,6 +157,7 @@ export function Workspace({
         */}
         <ApprovalPanel projectRoot={projectRoot} enabled={agentPhase === "ready"} />
         <Composer
+          projectRoot={projectRoot}
           disabled={agentPhase !== "ready"}
           busy={busy}
           inputRef={composerRef}

@@ -1,22 +1,116 @@
 import React, { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { isDesktopRuntime } from "../agent";
 import { useI18n } from "../i18n";
 import { Markdown } from "./Markdown";
 import { suggestionsFor } from "../suggestions";
 import type { AgentPhase, AgentState, TranscriptEntry } from "../agent";
 
+/**
+ * The `@` mention being typed, if the caret is inside one.
+ *
+ * Returns where it starts and what has been typed after the `@`, so a
+ * completion replaces the mention rather than appending to the message. A `@`
+ * with a space after it is not a mention any more -- someone wrote an email
+ * address or moved on -- and neither is one the caret has left.
+ */
+export function mentionAt(text: string, caret: number): { start: number; query: string } | null {
+  const before = text.slice(0, caret);
+  const start = before.lastIndexOf("@");
+  if (start === -1) return null;
+  // Only at a word boundary: `user@host` is not someone asking for a file.
+  if (start > 0 && !/\s/.test(before[start - 1])) return null;
+  const query = before.slice(start + 1);
+  if (/\s/.test(query)) return null;
+  return { start, query };
+}
+
 export function Composer({
   disabled,
   busy,
   inputRef,
+  projectRoot,
   onSend
 }: {
   disabled: boolean;
   busy: boolean;
   inputRef?: React.RefObject<HTMLTextAreaElement | null>;
+  /** Where to look for the files an `@` mention can complete to. */
+  projectRoot?: string;
   onSend: (query: string) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
   const [draft, setDraft] = useState("");
+  /*
+   * Whether an input method is mid-composition.
+   *
+   * Enter confirms a candidate while composing, and this sent the message
+   * instead -- so anyone typing Chinese, Japanese or Korean sent a fragment of
+   * a word every time they picked one. Not a corner case: it is every message
+   * those users write.
+   *
+   * Two checks rather than one, because neither is sufficient here. The
+   * platform webview on macOS is WKWebView, where `compositionend` fires
+   * *after* the `keydown` that ended it -- so the flag is already false by the
+   * time Enter is seen. `nativeEvent.isComposing` is still true on that event
+   * and catches it. The flag covers engines that leave `isComposing` false
+   * during composition and report `keyCode` 229 instead.
+   */
+  const composing = useRef(false);
+  const own = useRef<HTMLTextAreaElement | null>(null);
+  const box = inputRef ?? own;
+  // The `@` mention under the caret, and what the project has that matches it.
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
+  const [matches, setMatches] = useState<readonly string[]>([]);
+  const [highlighted, setHighlighted] = useState(0);
+
+  useEffect(() => {
+    if (!mention || !projectRoot || !isDesktopRuntime()) {
+      setMatches([]);
+      return;
+    }
+    let cancelled = false;
+    void invoke<string[]>("project_files", {
+      projectPath: projectRoot,
+      query: mention.query
+    })
+      .then((found) => {
+        if (!cancelled) {
+          setMatches(found.slice(0, 8));
+          setHighlighted(0);
+        }
+      })
+      // A listing that fails closes the menu rather than showing a stale one:
+      // completing to a path that is no longer there is worse than not
+      // completing.
+      .catch(() => {
+        if (!cancelled) setMatches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mention?.query, mention?.start, projectRoot]);
+
+  /** Replace the mention being typed with a path. */
+  const complete = (path: string): void => {
+    if (!mention) return;
+    const after = draft.slice(mention.start + 1 + mention.query.length);
+    const next = `${draft.slice(0, mention.start)}@${path}${after.startsWith(" ") ? "" : " "}${after}`;
+    setDraft(next);
+    setMention(null);
+    setMatches([]);
+    // The caret belongs after what was just inserted, not at the end of a
+    // message someone is still in the middle of writing.
+    const caret = mention.start + 1 + path.length + 1;
+    window.requestAnimationFrame(() => {
+      box.current?.focus();
+      box.current?.setSelectionRange(caret, caret);
+    });
+  };
+
+  const track = (element: HTMLTextAreaElement): void => {
+    setMention(mentionAt(element.value, element.selectionStart ?? element.value.length));
+  };
 
   const submit = (): void => {
     const trimmed = draft.trim();
@@ -40,15 +134,92 @@ export function Composer({
           </button>
         ))}
       </div>
+      {/*
+        The files an `@` can mean. Above the box rather than below it, because
+        the box sits at the bottom of the window and a menu under it would open
+        off screen.
+      */}
+      {matches.length > 0 && (
+        <ul className="mentions" role="listbox" aria-label={t("agent.mentionFiles")}>
+          {matches.map((path, index) => (
+            <li key={path}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={index === highlighted}
+                className={index === highlighted ? "mention active" : "mention"}
+                // `onMouseDown` rather than `onClick`: a click would blur the
+                // textarea first, and the caret position it restores is the
+                // one the completion depends on.
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  complete(path);
+                }}
+              >
+                {path}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <textarea
-        ref={inputRef}
+        ref={box}
         value={draft}
         rows={2}
         disabled={disabled}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          track(event.target);
+        }}
+        onClick={(event) => track(event.currentTarget)}
+        onBlur={() => setMention(null)}
+        onCompositionStart={() => {
+          composing.current = true;
+        }}
+        onCompositionEnd={() => {
+          composing.current = false;
+        }}
         onKeyDown={(event) => {
+          // The menu takes the keys it needs first. Enter completing a
+          // highlighted path must not also send the message.
+          if (matches.length > 0) {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setHighlighted((at) => (at + 1) % matches.length);
+              return;
+            }
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setHighlighted((at) => (at - 1 + matches.length) % matches.length);
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setMention(null);
+              setMatches([]);
+              return;
+            }
+            if (
+              (event.key === "Enter" || event.key === "Tab") &&
+              !event.nativeEvent.isComposing &&
+              !composing.current
+            ) {
+              event.preventDefault();
+              complete(matches[highlighted]);
+              return;
+            }
+          }
+          if (event.key !== "Enter") return;
+          // Confirming a candidate, not sending a message.
+          if (
+            composing.current ||
+            event.nativeEvent.isComposing ||
+            event.nativeEvent.keyCode === 229
+          ) {
+            return;
+          }
           // Enter sends; Shift+Enter and the platform modifiers insert a newline.
-          if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+          if (!event.shiftKey && !event.metaKey && !event.ctrlKey) {
             event.preventDefault();
             submit();
           }

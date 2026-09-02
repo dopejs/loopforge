@@ -58,6 +58,7 @@ export const es: Messages = {
   "agent.sending": "Trabajando…",
   "agent.emptyTitle": "What would you like to make?",
   "agent.emptyBody": "I can read this project, run its builds and captures, and move it through its stages -- each change asks you first.",
+  "agent.mentionFiles": "Archivos de este proyecto",
   "suggest.whatIsThis": "What is this project, and what can you do here?",
   "suggest.setUp": "Set this folder up so we can start working on a game",
   "suggest.inspectFolder": "What's in this folder, and which engine is it?",

@@ -58,6 +58,7 @@ export const zhHant: Messages = {
   "agent.sending": "處理中…",
   "agent.emptyTitle": "你想做个什么？",
   "agent.emptyBody": "我可以读这个工程、跑它的构建和截录、推进它的阶段——每一次改动都会先问你。",
+  "agent.mentionFiles": "工程內的檔案",
   "suggest.whatIsThis": "这是个什么项目？你在这儿能做什么？",
   "suggest.setUp": "把这个目录准备好，我们开始做游戏",
   "suggest.inspectFolder": "这个目录里有什么？用的什么引擎？",

@@ -2626,3 +2626,41 @@ button.chip.selected {
 .suggestion:hover {
   border-color: var(--accent);
 }
+
+/* -- @ mentions ----------------------------------------------------------- */
+
+/*
+  Above the composer, because the composer is at the bottom of the window and a
+  menu below it would open off screen.
+*/
+.mentions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 6px;
+  padding: 4px;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface2);
+}
+
+.mention {
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--font-sm);
+  text-align: start;
+  cursor: pointer;
+}
+
+.mention.active,
+.mention:hover {
+  background: var(--surface3);
+}

@@ -1157,6 +1157,87 @@ async fn agent_project_health(project_path: String) -> Result<Value, String> {
     ).await
 }
 
+/// Directories whose contents are not the project.
+///
+/// Mirrors the core's `GENERATED_DIRS`, plus the dependency trees a person
+/// never means when they type `@`. Listing them would bury the handful of files
+/// someone is looking for under thousands they are not.
+const NOT_THE_PROJECT: &[&str] = &[
+    ".loopforge",
+    ".git",
+    ".godot",
+    "build",
+    "dist",
+    "artifacts",
+    "captures",
+    "node_modules",
+    "target",
+    ".venv",
+    "__pycache__",
+];
+
+/// How many paths a completion menu is given.
+///
+/// A menu is read, not scrolled through: past a screenful the answer is to type
+/// more of the name. The cap also bounds the walk, so opening `@` in a large
+/// repository does not stall the window.
+const MAX_PROJECT_FILES: usize = 500;
+
+/// Files in the project, for completing an `@` mention.
+///
+/// Walked here rather than asked of the Agent: this answers on a keystroke, and
+/// a round trip through the Agent and back would be felt on every character.
+#[tauri::command]
+async fn project_files(project_path: String, query: String) -> Result<Vec<String>, String> {
+    let root = project_root(&project_path)?;
+    let needle = query.trim().to_lowercase();
+    let mut found: Vec<String> = Vec::new();
+    let mut pending = vec![root.clone()];
+
+    while let Some(directory) = pending.pop() {
+        if found.len() >= MAX_PROJECT_FILES {
+            break;
+        }
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            // A directory that cannot be read is skipped rather than failing
+            // the listing: one unreadable folder must not hide the rest.
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            // `file_type` rather than `is_dir`, so a symlink is not followed:
+            // one pointing outside the project would list files that are not
+            // in it, and one pointing at an ancestor would never terminate.
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() {
+                if !NOT_THE_PROJECT.contains(&name) && !name.starts_with('.') {
+                    pending.push(path);
+                }
+                continue;
+            }
+            let Ok(relative) = path.strip_prefix(&root) else { continue };
+            let Some(relative) = relative.to_str() else { continue };
+            if needle.is_empty() || relative.to_lowercase().contains(&needle) {
+                found.push(relative.to_string());
+                if found.len() >= MAX_PROJECT_FILES {
+                    break;
+                }
+            }
+        }
+    }
+
+    // Shortest first: a person typing `@main` wants `main.gd`, not
+    // `scenes/levels/main_menu_background.tscn`.
+    found.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+    Ok(found)
+}
+
 /// Tool calls waiting on a person.
 ///
 /// Polled while a turn is running: the Agent holds the call open while it waits,
@@ -1684,6 +1765,7 @@ pub fn run() {
             agent_save_provider_settings,
             agent_forget_provider_settings,
             agent_project_health,
+            project_files,
             agent_approvals,
             agent_resolve_approval,
             agent_permissions,
