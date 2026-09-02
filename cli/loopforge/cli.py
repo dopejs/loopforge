@@ -39,6 +39,10 @@ def build_command_parser() -> argparse.ArgumentParser:
     commands.add_parser("status", help="Show current state and next actions.")
     commands.add_parser("validate", help="Validate project state and event history.")
     commands.add_parser("history", help="Show committed project events.")
+    commands.add_parser(
+        "mcp",
+        help="Serve the read-only project commands as MCP tools over stdio.",
+    )
 
     agent = commands.add_parser("agent", help="Manage the project-local Kura daemon.")
     agent_commands = agent.add_subparsers(dest="agent_command", required=True)
@@ -263,6 +267,12 @@ def execute(
         return project.status()
     if command.command == "validate":
         return project.validate()
+    if command.command == "mcp":
+        # Speaks its own protocol on stdout and never returns a JSON envelope:
+        # anything else written there would corrupt the frame stream.
+        from .mcp import main as serve_mcp
+
+        raise SystemExit(serve_mcp(project.root))
     if command.command == "history":
         return project.history()
     if command.command == "agent":
