@@ -13,6 +13,8 @@ import { isConfigured, saveOperator, useOperator } from "../operator";
 import { SHORTCUTS, displayShortcut, isApplePlatform } from "../shortcuts";
 import { ProviderSettings } from "./ProviderSettings";
 import { UsagePanel } from "./UsagePanel";
+import { savePermissionMode, usePermissions } from "../approvals";
+import { errorMessage } from "../daemon";
 import { TOOL_CHIPS } from "../fixtures.providers";
 import { PreviewBanner } from "./primitives";
 import darkWordmark from "../assets/loopforge-horizontal-dark.svg";
@@ -124,6 +126,72 @@ function Segmented<T extends string>({
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * How much the agent may do without asking.
+ *
+ * The choices come from the runtime rather than being listed here: a list
+ * maintained in the interface is a list that eventually describes an older
+ * build, and this one decides whether a person is asked before their project
+ * moves.
+ */
+function PermissionSettings({ projectRoot }: { projectRoot: string }): React.JSX.Element {
+  const { t } = useI18n();
+  const { permissions, reason, reload } = usePermissions(projectRoot, true);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
+
+  const choose = async (mode: string): Promise<void> => {
+    if (busy || mode === permissions?.mode) return;
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      await savePermissionMode(projectRoot, mode);
+      reload();
+    } catch (error: unknown) {
+      setFailure(errorMessage(error, t("approval.failed")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="settings-section">
+        <span className="section-title">{t("permission.title")}</span>
+      </div>
+      <p className="settings-note">{t("permission.hint")}</p>
+      {permissions === null ? (
+        <p className="settings-note">{reason ?? t("provider.loading")}</p>
+      ) : (
+        <div className="settings-card">
+          {permissions.modes.map((choice) => (
+            <button
+              key={choice.mode}
+              type="button"
+              className={
+                choice.mode === permissions.mode
+                  ? "settings-row permission-choice active"
+                  : "settings-row permission-choice"
+              }
+              aria-pressed={choice.mode === permissions.mode}
+              disabled={busy}
+              onClick={() => void choose(choice.mode)}
+            >
+              <div className="row-label">
+                <span className="mono">{choice.mode}</span>
+                {/* The runtime's own wording, so it cannot drift from what the
+                    mode actually does. */}
+                <small>{choice.summary}</small>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+      {failure && <p className="issue-line">{failure}</p>}
+    </>
   );
 }
 
@@ -377,6 +445,12 @@ export function Settings({
 
           {group === "permissions" && (
             <>
+              {/*
+                Real, and first. What follows is still a mock-up, and a person
+                scrolling past a preview banner to reach the one control that
+                does something would reasonably conclude none of them work.
+              */}
+              <PermissionSettings projectRoot={projectRoot} />
               <PreviewBanner />
               <p className="settings-note">{t("settings.permissions.empty")}</p>
               <div className="settings-card">

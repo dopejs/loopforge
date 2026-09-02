@@ -107,22 +107,30 @@ class McpServerTests(unittest.TestCase):
         """The boundary this file exists to hold.
 
         A stage transition cites evidence and records a human approver. What
-        makes that true is that each of these is published under
-        `approval_required`, and what decides that is the flag here -- declared
-        on the command rather than left to whoever writes the exposure rules, so
-        a misconfigured rule cannot turn one kind into the other.
+        makes that true is the tier declared here -- on the command rather than
+        in whoever writes the exposure rules, so a misconfigured rule cannot
+        turn one kind into another. Which tiers are asked about is the
+        permission mode's business, and covered with it.
         """
         by_name = {tool.name: tool for tool in TOOLS}
-        for name in ("loopforge_advance", "loopforge_run", "loopforge_capture", "loopforge_gate"):
+        for name in ("loopforge_advance", "loopforge_run", "loopforge_capture"):
             with self.subTest(tool=name):
                 self.assertIn(name, by_name)
-                self.assertTrue(by_name[name].mutates, f"{name} must require approval")
+                self.assertTrue(by_name[name].mutates, f"{name} changes the project")
 
     def test_reading_state_is_not_marked_as_changing_it(self) -> None:
         """Asking a person about a read is how a person stops reading the
-        questions."""
+        questions. `gate` is here because it computes requirements and writes
+        nothing -- marked as a mutation it cost an approval prompt for asking a
+        question."""
         by_name = {tool.name: tool for tool in TOOLS}
-        for name in ("loopforge_status", "loopforge_inspect", "loopforge_history", "loopforge_validate"):
+        for name in (
+            "loopforge_status",
+            "loopforge_inspect",
+            "loopforge_history",
+            "loopforge_validate",
+            "loopforge_gate",
+        ):
             with self.subTest(tool=name):
                 self.assertFalse(by_name[name].mutates)
 
@@ -192,22 +200,26 @@ class McpServerTests(unittest.TestCase):
 
 
 class ExposureRuleTests(unittest.TestCase):
-    """Which rule each published tool is registered under."""
+    """What the supervisor publishes each tool under."""
 
-    def test_a_mutating_tool_is_published_as_needing_approval(self) -> None:
+    def test_the_tier_of_every_published_tool_is_known(self) -> None:
         from loopforge.agent.supervisor import KuraRuntimeSupervisor
 
-        mutating = KuraRuntimeSupervisor._mutating_tool_names()
+        tiers = KuraRuntimeSupervisor._tool_tiers()
 
-        self.assertIn("loopforge_advance", mutating)
-        self.assertNotIn("loopforge_status", mutating)
+        self.assertEqual(tiers["loopforge_advance"], "claim")
+        self.assertEqual(tiers["loopforge_run"], "evidence")
+        self.assertEqual(tiers["loopforge_status"], "read")
 
     def test_unreadable_definitions_ask_about_everything(self) -> None:
-        """`None` means "could not tell", and everything is then treated as
-        mutating. An empty set would publish every command as `allow` -- wrong
-        in the direction where a model changes project state with nobody
-        asked."""
+        """`None` means "could not tell", and every tool is then unplaceable --
+        which every mode answers by asking. An empty mapping would do the same
+        thing silently."""
         from loopforge.agent.supervisor import KuraRuntimeSupervisor
+        from loopforge.permissions import MODES, exposure_for
 
         with unittest.mock.patch.dict("sys.modules", {"loopforge.mcp": None}):
-            self.assertIsNone(KuraRuntimeSupervisor._mutating_tool_names())
+            self.assertIsNone(KuraRuntimeSupervisor._tool_tiers())
+        for mode in MODES:
+            with self.subTest(mode=mode):
+                self.assertEqual(exposure_for("unrecognized", mode), "approval_required")

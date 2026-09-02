@@ -51,6 +51,9 @@ MAX_HISTORY_CHARS = 24000
 #: The contract a surface renders waiting approvals from.
 APPROVAL_SCHEMA = "loopforge-approval-v1"
 
+#: The contract a surface renders the permission choice from.
+PERMISSION_SCHEMA = "loopforge-permission-v1"
+
 #: A person cannot work through an unbounded queue, and a surface that tried to
 #: render one would stall on the runtime's answer rather than on the decision.
 MAX_APPROVALS = 50
@@ -320,6 +323,34 @@ class LoopforgeAgent:
             return []
         messages = (record or {}).get("messages")
         return messages if isinstance(messages, list) else []
+
+    def permissions(self) -> dict[str, Any]:
+        """How much the agent may do without asking, and what the modes mean.
+
+        The choices are carried with the answer so a surface renders what the
+        runtime actually implements. A list of modes maintained in the UI is a
+        list that describes an older build.
+        """
+        from loopforge.permissions import MODE_SUMMARY, MODES, describe
+
+        current = self.runtime.permission_mode()
+        return {
+            "schema_version": PERMISSION_SCHEMA,
+            **describe(current),
+            "modes": [{"mode": mode, "summary": MODE_SUMMARY[mode]} for mode in MODES],
+        }
+
+    def save_permissions(self, mode: str) -> dict[str, Any]:
+        """Change it. Takes effect on the next tool call, not the next start."""
+        from loopforge.permissions import MODES
+
+        requested = str(mode or "").strip()
+        if requested not in MODES:
+            raise LoopforgeAgentError(
+                f"Unknown permission mode: {requested or '(empty)'}.", "PERMISSION_MODE_INVALID"
+            )
+        self.runtime.set_permission_mode(requested)
+        return self.permissions()
 
     def approvals(self) -> dict[str, Any]:
         """Tool calls waiting on a person.

@@ -4,6 +4,7 @@ import { useI18n } from "../i18n";
 import { type WorkspaceMode, isWired, modeDescriptionKey, modeLabelKey } from "../modes";
 import type { AgentPhase, AgentState, TranscriptEntry } from "../agent";
 import { Composer, Transcript } from "./AgentPanel";
+import { ApprovalPanel } from "./ApprovalPanel";
 import { CanvasWorkspace } from "./workspaces/Canvas";
 import { FlowWorkspace } from "./workspaces/Flow";
 import { TestWorkspace } from "./workspaces/Test";
@@ -136,6 +137,14 @@ export function Workspace({
     return (
       <div className="workspace-body chat">
         <Transcript transcript={transcript} busy={busy} variant="page" />
+        {/*
+          Between the conversation and the composer, because that is where the
+          question was raised. An approval moved to a settings page or a tray
+          becomes a notification, and a notification is something you clear
+          rather than read -- while the runtime holds the call open waiting for
+          an answer that means something.
+        */}
+        <ApprovalPanel projectRoot={projectRoot} enabled={agentPhase === "ready"} />
         <Composer
           disabled={agentPhase !== "ready"}
           busy={busy}

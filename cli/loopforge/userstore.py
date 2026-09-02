@@ -404,6 +404,19 @@ class UserStore:
             connection.commit()
             return cursor.rowcount > 0
 
+    #: Keyed by project, because how much the agent may do without asking is a
+    #: judgement about one project. A single global value would apply a
+    #: decision made about a throwaway prototype to everything else.
+    PERMISSION_PREFIX = "permission_mode:"
+
+    def permission_mode(self, project_root: str) -> str:
+        """How much the agent may do without asking, in this project."""
+        return self.preferences().get(f"{self.PERMISSION_PREFIX}{project_root}", "")
+
+    def save_permission_mode(self, project_root: str, mode: str) -> str:
+        self.save_preferences({f"{self.PERMISSION_PREFIX}{project_root}": mode})
+        return mode
+
     def preferences(self) -> dict[str, str]:
         with self.connect() as connection:
             rows = connection.execute("SELECT key, value FROM preferences").fetchall()

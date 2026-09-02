@@ -5,22 +5,23 @@ server that lets one run it: a stdio MCP server speaking `Content-Length`-framed
 JSON-RPC, publishing the read-only commands as tools and answering them from the
 same code path the CLI uses.
 
-Two kinds of tool, and the difference is who decides.
+Three kinds of tool, because "does it write" is not the question a person
+actually wants to answer.
 
-Reading project state is something the agent may simply do. Changing it is not:
-Loopforge's whole claim is that a stage transition cites evidence and records a
-human approver, and a tool that let a model advance a stage on its own would
-make that claim false while leaving the record looking correct.
+  READ      Reports state and changes nothing. Nobody wants to be asked.
+  EVIDENCE  Produces a record -- a build result, a capture. It is work, and
+            work being done is not a claim about whether the work was good.
+  CLAIM     Asserts something about the project: this stage is reached, this
+            prototype is kept. Loopforge's whole value is that such a claim
+            cites evidence and records a human approver.
 
-So the mutating commands are published under `approval_required` and the
-read-only ones under `allow`. The runtime raises an approval naming the tool and
-its arguments, waits for a person, and runs the call only if they say yes. That
-is only safe because the person can see what they are approving -- "may the
-agent run `advance`" has no answer without knowing what it would advance to.
+The distinction matters because the middle tier is where a person spends their
+day. Being asked before every build is how someone stops reading the questions,
+and someone who stops reading them will approve a `CLAIM` without looking.
 
-The split is declared here, on the tool, rather than left to whoever writes the
-exposure rules: a rule can be misconfigured, and a tool that says what it is
-cannot be turned into the other kind by getting one wrong.
+Which tier a command is in is declared here, on the command, rather than left to
+whoever writes the exposure rules: a rule can be misconfigured, and a tool that
+says what it is cannot be turned into another kind by getting one wrong.
 """
 
 from __future__ import annotations
@@ -41,6 +42,16 @@ PROTOCOL_VERSION = "2024-11-05"
 MAX_RESULT_CHARS = 24000
 
 
+#: Reports state and changes nothing.
+TIER_READ = "read"
+#: Produces a record. Work being done, not a claim about it.
+TIER_EVIDENCE = "evidence"
+#: Asserts something about the project that cites evidence and an approver.
+TIER_CLAIM = "claim"
+
+TIERS = (TIER_READ, TIER_EVIDENCE, TIER_CLAIM)
+
+
 class Tool:
     """One published command."""
 
@@ -51,16 +62,23 @@ class Tool:
         schema: dict[str, Any],
         run: Callable[[LoopforgeProject, dict[str, Any]], Any],
         *,
-        mutates: bool = False,
+        tier: str = TIER_READ,
     ) -> None:
+        if tier not in TIERS:
+            raise ValueError(f"unknown tier: {tier}")
         self.name = name
         self.description = description
         self.schema = schema
         self.run = run
-        #: Whether running this changes project state. Decides which exposure
-        #: rule it is published under, and it is a property of the command
-        #: rather than of the configuration.
-        self.mutates = mutates
+        #: What kind of thing running this is. Decides which exposure rule it
+        #: is published under, and it is a property of the command rather than
+        #: of the configuration.
+        self.tier = tier
+
+    @property
+    def mutates(self) -> bool:
+        """Whether running this changes anything."""
+        return self.tier != TIER_READ
 
     def declaration(self) -> dict[str, Any]:
         return {
@@ -207,8 +225,10 @@ TOOLS: tuple[Tool, ...] = (
             "properties": {"target_stage": STAGE},
             "required": ["target_stage"],
         },
+        # Reads. `gate_check` computes requirements from current state and
+        # writes nothing -- it was marked as a mutation, which would have cost
+        # a person an approval prompt for asking a question.
         _gate,
-        mutates=True,
     ),
     Tool(
         "loopforge_run",
@@ -223,7 +243,7 @@ TOOLS: tuple[Tool, ...] = (
             "required": ["operation"],
         },
         _run_engine,
-        mutates=True,
+        tier=TIER_EVIDENCE,
     ),
     Tool(
         "loopforge_capture",
@@ -237,7 +257,7 @@ TOOLS: tuple[Tool, ...] = (
             "required": ["path"],
         },
         _capture,
-        mutates=True,
+        tier=TIER_EVIDENCE,
     ),
     Tool(
         "loopforge_advance",
@@ -253,7 +273,7 @@ TOOLS: tuple[Tool, ...] = (
             "required": ["target_stage"],
         },
         _advance,
-        mutates=True,
+        tier=TIER_CLAIM,
     ),
 )
 

@@ -2539,3 +2539,60 @@ button.chip.selected {
   color: var(--faint);
   font-size: var(--font-sm);
 }
+
+/* -- approvals ------------------------------------------------------------ */
+
+/*
+  Between the transcript and the composer. It does not scroll away with the
+  conversation: the runtime is holding a call open, and a question that scrolled
+  out of view would expire unanswered while the person kept typing.
+*/
+.approvals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 var(--gap) 10px;
+}
+
+.approval {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--surface2);
+}
+
+.approval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.approval-reason {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--surface3);
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.permission-choice {
+  width: 100%;
+  text-align: start;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.permission-choice:last-child {
+  border-bottom: 0;
+}
+
+.permission-choice.active {
+  background: var(--surface3);
+}

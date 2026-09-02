@@ -1157,6 +1157,67 @@ async fn agent_project_health(project_path: String) -> Result<Value, String> {
     ).await
 }
 
+/// Tool calls waiting on a person.
+///
+/// Polled while a turn is running: the Agent holds the call open while it waits,
+/// so a surface that only looked once would show nothing and the turn would time
+/// out with the question never asked.
+#[tauri::command]
+async fn agent_approvals(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(&metadata, "GET", "/v1/approvals", None, Duration::from_secs(15)).await
+}
+
+/// Answer one. The waiting call continues or stops immediately.
+#[tauri::command]
+async fn agent_resolve_approval(
+    project_path: String,
+    approval_id: String,
+    approved: bool,
+    comment: String,
+) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/approvals/resolve",
+        Some(json!({
+            "approval_id": approval_id,
+            "approved": approved,
+            "comment": comment,
+        })),
+        Duration::from_secs(30),
+    ).await
+}
+
+/// How much the agent may do without asking, and what the modes mean.
+#[tauri::command]
+async fn agent_permissions(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(&metadata, "GET", "/v1/permissions", None, Duration::from_secs(15)).await
+}
+
+/// Change it. Takes effect on the next tool call.
+#[tauri::command]
+async fn agent_save_permissions(project_path: String, mode: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/permissions",
+        Some(json!({ "mode": mode })),
+        Duration::from_secs(30),
+    ).await
+}
+
 /// The committed event log, newest first.
 #[tauri::command]
 async fn agent_project_history(project_path: String) -> Result<Value, String> {
@@ -1623,6 +1684,10 @@ pub fn run() {
             agent_save_provider_settings,
             agent_forget_provider_settings,
             agent_project_health,
+            agent_approvals,
+            agent_resolve_approval,
+            agent_permissions,
+            agent_save_permissions,
             agent_project_history,
             agent_project_reconcile,
             agent_decision,
