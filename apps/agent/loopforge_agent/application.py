@@ -48,6 +48,13 @@ SETTINGS_SCHEMA = "loopforge-settings-v1"
 #: refused rather than one long message being trimmed.
 MAX_HISTORY_CHARS = 24000
 
+#: The contract a surface renders waiting approvals from.
+APPROVAL_SCHEMA = "loopforge-approval-v1"
+
+#: A person cannot work through an unbounded queue, and a surface that tried to
+#: render one would stall on the runtime's answer rather than on the decision.
+MAX_APPROVALS = 50
+
 #: The only provider whose endpoint the user supplies. The rest are built in or
 #: managed by Kura, and offering to configure them would be offering a choice
 #: that does not exist.
@@ -313,6 +320,89 @@ class LoopforgeAgent:
             return []
         messages = (record or {}).get("messages")
         return messages if isinstance(messages, list) else []
+
+    def approvals(self) -> dict[str, Any]:
+        """Tool calls waiting on a person.
+
+        The model asked for something a rule says a person decides. Nobody can
+        answer what they cannot see, so this is what a surface polls -- a
+        pending approval is a question addressed to the user, not runtime
+        bookkeeping.
+        """
+        status = self.runtime.status()
+        if not status.get("healthy") or not status.get("base_url"):
+            return {
+                "schema_version": APPROVAL_SCHEMA,
+                "approvals": [],
+                "reason": str(status.get("reason") or "The Loopforge Agent runtime is not ready."),
+            }
+        client = KuraClient(
+            str(status["base_url"]),
+            timeout=PROVIDER_TIMEOUT_SECONDS,
+            token=status.get("token"),
+        )
+        try:
+            payload = client.get("/v1/policy/approvals", {"status": "pending"})
+        except KuraAgentError as exc:
+            return {"schema_version": APPROVAL_SCHEMA, "approvals": [], "reason": str(exc)}
+        raw = payload.get("items")
+        if not isinstance(raw, list):
+            return {"schema_version": APPROVAL_SCHEMA, "approvals": []}
+        return {
+            "schema_version": APPROVAL_SCHEMA,
+            "approvals": [
+                projected
+                for entry in raw[:MAX_APPROVALS]
+                if (projected := self._project_approval(entry)) is not None
+            ],
+        }
+
+    @staticmethod
+    def _project_approval(entry: Any) -> dict[str, Any] | None:
+        """One waiting question, in the terms the user has to decide in.
+
+        `resource_id` is `server:tool:surface`, which is where the tool name
+        lives. Shown split, because "may the agent run `advance` in chat" is
+        the question, and the raw triple is not it.
+        """
+        if not isinstance(entry, dict):
+            return None
+        approval_id = str(entry.get("approvalId") or "")
+        if not approval_id:
+            return None
+        parts = str(entry.get("resourceId") or "").split(":")
+        return {
+            "approval_id": approval_id,
+            "action": str(entry.get("action") or ""),
+            "server": parts[0] if parts else "",
+            "tool": parts[1] if len(parts) > 1 else "",
+            "surface": parts[2] if len(parts) > 2 else "",
+            "reason": str(entry.get("reason") or ""),
+            "requested_by": str(entry.get("requestedBy") or ""),
+            "requested_at": str(entry.get("createdAt") or entry.get("requestedAt") or ""),
+        }
+
+    def resolve_approval(self, approval_id: str, approved: bool, comment: str = "") -> dict[str, Any]:
+        """Answer one. The runtime records who decided and when.
+
+        A rejection is as much an answer as an approval: the call that was
+        waiting stops immediately rather than sitting until it times out.
+        """
+        identifier = str(approval_id or "").strip()
+        if not identifier:
+            raise LoopforgeAgentError("An approval id is required.", "APPROVAL_ID_REQUIRED")
+        client = self._runtime_client()
+        try:
+            client.post(
+                f"/v1/policy/approvals/{urllib.parse.quote(identifier, safe='')}/resolve",
+                {
+                    "resolution": "approved" if approved else "rejected",
+                    "comment": str(comment or ""),
+                },
+            )
+        except KuraAgentError as exc:
+            raise LoopforgeAgentError(str(exc), "APPROVAL_RESOLVE_FAILED") from exc
+        return self.approvals()
 
     def sessions(self) -> dict[str, Any]:
         """List conversations for this project.

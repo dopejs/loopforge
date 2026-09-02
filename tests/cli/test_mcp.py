@@ -103,29 +103,38 @@ class McpServerTests(unittest.TestCase):
                 self.assertIn("properties", tool.schema)
                 self.assertTrue(tool.description.strip())
 
-    def test_nothing_that_changes_project_state_is_published(self) -> None:
+    def test_every_command_that_changes_state_says_so(self) -> None:
         """The boundary this file exists to hold.
 
-        A stage transition cites evidence and records a human approver. A tool
-        that let a model advance a stage on its own would make that claim false
-        while leaving the record looking correct -- so the mutating commands are
-        not published at all, which is the one setting an exposure rule cannot
-        get wrong.
+        A stage transition cites evidence and records a human approver. What
+        makes that true is that each of these is published under
+        `approval_required`, and what decides that is the flag here -- declared
+        on the command rather than left to whoever writes the exposure rules, so
+        a misconfigured rule cannot turn one kind into the other.
         """
+        by_name = {tool.name: tool for tool in TOOLS}
+        for name in ("loopforge_advance", "loopforge_run", "loopforge_capture", "loopforge_gate"):
+            with self.subTest(tool=name):
+                self.assertIn(name, by_name)
+                self.assertTrue(by_name[name].mutates, f"{name} must require approval")
+
+    def test_reading_state_is_not_marked_as_changing_it(self) -> None:
+        """Asking a person about a read is how a person stops reading the
+        questions."""
+        by_name = {tool.name: tool for tool in TOOLS}
+        for name in ("loopforge_status", "loopforge_inspect", "loopforge_history", "loopforge_validate"):
+            with self.subTest(tool=name):
+                self.assertFalse(by_name[name].mutates)
+
+    def test_the_commands_that_make_a_claim_are_still_unpublished(self) -> None:
+        """`decide` records that a prototype is kept or killed, and a playtest
+        report is an account of what a person observed. Neither is something a
+        model may enter on their behalf, whoever approves the call."""
         published = {tool.name for tool in TOOLS}
-        forbidden = {
-            "loopforge_init",
-            "loopforge_advance",
-            "loopforge_gate",
-            "loopforge_decide",
-            "loopforge_run",
-            "loopforge_capture",
-            "loopforge_evidence",
-            "loopforge_reconcile",
-            "loopforge_hypothesis",
-            "loopforge_playtest",
-        }
-        self.assertEqual(published & forbidden, set())
+        self.assertEqual(
+            published & {"loopforge_decide", "loopforge_playtest", "loopforge_evidence"},
+            set(),
+        )
 
     # -- calling -----------------------------------------------------------
 
@@ -181,3 +190,24 @@ class McpServerTests(unittest.TestCase):
         self.assertLess(len(text), MAX_RESULT_CHARS + 100)
         self.assertIn("truncated", text)
 
+
+class ExposureRuleTests(unittest.TestCase):
+    """Which rule each published tool is registered under."""
+
+    def test_a_mutating_tool_is_published_as_needing_approval(self) -> None:
+        from loopforge.agent.supervisor import KuraRuntimeSupervisor
+
+        mutating = KuraRuntimeSupervisor._mutating_tool_names()
+
+        self.assertIn("loopforge_advance", mutating)
+        self.assertNotIn("loopforge_status", mutating)
+
+    def test_unreadable_definitions_ask_about_everything(self) -> None:
+        """`None` means "could not tell", and everything is then treated as
+        mutating. An empty set would publish every command as `allow` -- wrong
+        in the direction where a model changes project state with nobody
+        asked."""
+        from loopforge.agent.supervisor import KuraRuntimeSupervisor
+
+        with unittest.mock.patch.dict("sys.modules", {"loopforge.mcp": None}):
+            self.assertIsNone(KuraRuntimeSupervisor._mutating_tool_names())

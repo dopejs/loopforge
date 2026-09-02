@@ -351,23 +351,50 @@ class KuraRuntimeSupervisor:
                 },
             )
             client.post(f"/v1/mcp/servers/{self.TOOL_SERVER_ID}/start", {})
+            mutating = self._mutating_tool_names()
             for tool in self._published_tool_names(client):
+                # Reading state is something the agent may do; changing it is
+                # something a person decides. Which of the two a command is is
+                # declared on the command itself, so a rule written here
+                # cannot quietly turn one into the other.
+                changes_state = mutating is None or tool in mutating
                 client.patch(
                     f"/v1/mcp/servers/{self.TOOL_SERVER_ID}/tools/"
                     f"{urllib.parse.quote(tool, safe='')}",
                     {
                         "runtimeSurface": self.TOOL_SURFACE,
-                        # Everything published here is read-only. A command
-                        # that changes project state is not published at all,
-                        # so there is nothing here that `allow` could be wrong
-                        # about.
-                        "exposureMode": "allow",
+                        "exposureMode": "approval_required" if changes_state else "allow",
                         "active": True,
-                        "reason": "Loopforge read-only project commands",
+                        "reason": (
+                            "Loopforge project mutation; a person approves each call"
+                            if changes_state
+                            else "Loopforge read-only project command"
+                        ),
                     },
                 )
         except KuraAgentError as error:
             LOGGER.warning("Loopforge tools were not published: %s", error)
+
+    @staticmethod
+    def _mutating_tool_names() -> set[str] | None:
+        """Which published commands change project state.
+
+        Read from the tool definitions rather than listed here: a second list
+        is a list that drifts, and the one that drifted would be the one
+        deciding whether a person gets asked.
+
+        `None` means "could not tell", and every tool is then treated as
+        mutating. Returning an empty set instead would publish every command as
+        `allow` -- wrong in the direction where a model changes project state
+        with nobody asked.
+        """
+        try:
+            from ..mcp import TOOLS
+
+            return {tool.name for tool in TOOLS if tool.mutates}
+        except Exception:
+            LOGGER.warning("tool definitions could not be read; every tool will need approval")
+            return None
 
     def _published_tool_names(self, client: KuraClient) -> list[str]:
         """What the server actually published, not what we expect it to.

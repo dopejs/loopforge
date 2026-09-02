@@ -64,6 +64,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/account-usage":
             self._execute(self.server.agent.account_usage)
             return
+        if self.path == "/v1/approvals":
+            self._execute(self.server.agent.approvals)
+            return
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
             return
@@ -211,6 +214,14 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         elif self.path == "/v1/settings/role/clear":
             self._execute(
                 lambda: self.server.agent.clear_model_role(str(body.get("role", "")))
+            )
+        elif self.path == "/v1/approvals/resolve":
+            self._execute(
+                lambda: self.server.agent.resolve_approval(
+                    str(body.get("approval_id", "")),
+                    body.get("approved") is True,
+                    str(body.get("comment", "")),
+                )
             )
         elif self.path == "/v1/settings/provider/forget":
             self._execute(
