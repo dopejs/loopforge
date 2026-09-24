@@ -11,8 +11,8 @@
 | Milestone | Exit evidence | Remaining verification |
 |---|---|---|
 | M0 design baseline | `docs/product.md`, `docs/architecture.md`, `docs/workflow.md`, `docs/cli.md`, `docs/skills.md`, `docs/research.md`, the MVP plan and accepted ADRs define product ownership and non-goals. | None for the design baseline. |
-| M1 state and evidence CLI | `tests/cli/test_milestone1.py` exercises initialization, replayable hash-chained history, corrupted state, stale revisions, lock contention, evidence freshness and reconciliation. A stale snapshot is backed up byte for byte before replacement; missing evidence prevents reconciliation. | The new Windows CI job must run after these changes are submitted. |
-| M2 prototype workflow | `tests/cli/test_engine_integration.py` uses a real Godot 4 process for import, startup, failure, deterministic gameplay behavior and an actual recorded play-state frame. Godot source errors fail a run even with process exit code zero. Godot gates require tool-generated build and startup evidence plus a verified image and a human readiness rationale. Skill evaluation is in `m2-skill-evaluation.md`. Codex also created a distinct small game and verified its mechanics and CLI build/test path in `m2-unseen-prototype.md`. | The Linux Xvfb capture job must run on CI after these working-tree changes are submitted. The new game's hypothesis lacks human approval, so it has not reached the playtest-ready stage; a Loopforge Agent live-model run is also unrecorded. |
+| M1 state and evidence CLI | `tests/cli/test_milestone1.py` exercises initialization, replayable hash-chained history, corrupted state, stale revisions, lock contention, evidence freshness and reconciliation. A stale snapshot is backed up byte for byte before replacement; missing evidence prevents reconciliation. The Windows CI job passed on the committed snapshot. | None for the M1 code and automated gate. |
+| M2 prototype workflow | `tests/cli/test_engine_integration.py` uses a real Godot 4 process for import, startup, failure, deterministic gameplay behavior and an actual recorded play-state frame. Godot source errors fail a run even with process exit code zero. Godot gates require tool-generated build and startup evidence plus a verified image and a human readiness rationale. Skill evaluation is in `m2-skill-evaluation.md`. Codex also created a distinct small game and verified its mechanics and CLI build/test path in `m2-unseen-prototype.md`; its hypothesis was approved and technical evidence rerun against that revision. The Linux Xvfb CI job passed on the committed snapshot. | The new game has not received a separate playtest-readiness approval, so it has not reached that stage; a Loopforge Agent live-model run is also unrecorded. Neither is counted as a passing human-playtest claim. |
 | M3 human playtest loop | `contracts/loopforge-playtest-protocol-v1.schema.json` and `loopforge-playtest-report-v1.schema.json` define recorded protocol and report shapes. Agent, CLI and Workbench tests cover import, consent, separate raw observations and interpretation, evidence citations, early kill/refactor, and keep restrictions. Consent revocation invalidates claims and retries report deletion after an I/O failure. Skill evaluation is in `m3-skill-evaluation.md`. | Actual external participant observations and independent conclusion review remain pending under the MVP verification strategy. |
 
 ## Negative paths explicitly exercised
@@ -36,7 +36,9 @@ prototype conclusions match actual play.
 ## Local verification on 2026-09-24
 
 - Python with Godot 4.7.2 available: `unittest discover` ran 590 tests, passed,
-  with 8 live-provider tests skipped because no test provider was configured.
+  with 17 skipped because the general suite lacked a Kura binary and live-model
+  provider. A separate run against the pinned Kura binary passed all 18
+  real-daemon integration tests. The CI jobs split these dependencies out.
 - Real Godot engine integration: 9 tests passed, including recorded play-state
   pixels, a script parse error with exit code zero, and latest-artifact
   invalidation.
@@ -50,7 +52,15 @@ prototype conclusions match actual play.
 - Changed Core and focused test files checked with Ruff; `git diff --check`, contract JSON parse,
   CI YAML parse, source distribution and wheel builds passed.
 
-The new Linux/Xvfb visual job and Windows locking job have not run against the
-uncommitted working tree. Their results must be read after these changes are
-submitted. Full-repository Ruff and Rust formatting checks are not green in
-the shared working tree and were not counted as passing verification.
+## Committed CI snapshot
+
+[CI run 35959405346](https://github.com/dopejs/loopforge/actions/runs/35959405346)
+passed all six jobs on the isolated branch at `7cae534`: Python, pinned-Kura
+integration plus the approval-timeout contract, Workbench typecheck/build/tests,
+Tauri check/tests, Windows revision/locking/recovery, and Linux Godot 4.3/Xvfb
+runtime capture. The branch is a CI-only draft PR containing the current mixed
+worktree snapshot; it has not been merged into `main`.
+
+Full-repository Ruff and Rust formatting checks are not green in the shared
+working tree and were not counted as passing verification. The local Ruff run
+reported 217 issues; CI does not currently run that check.

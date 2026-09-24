@@ -31,8 +31,8 @@ Exit criteria:
 
 **Goal:** Make a game-development session resumable and auditable.
 
-**Status:** Engineering exit criteria verified locally. CI also exercises
-revision, locking and recovery paths on Windows when these changes are submitted.
+**Status:** Engineering exit criteria verified locally and in the committed
+CI snapshot; the Windows revision, locking and recovery job passed.
 
 Deliverables:
 
@@ -56,11 +56,12 @@ Exit criteria:
 **Goal:** Let an existing coding agent move from hypothesis to a verified
 playable prototype.
 
-**Status:** Engineering exit criteria verified locally. The first-engine
+**Status:** Engineering exit criteria verified locally and in the committed
+CI snapshot. The first-engine
 decision is recorded in ADR 0008, the representative playable fixture is
 exercised through a real Godot process and recorded runtime frame, and the
-Skill gate is recorded in `docs/evaluations/m2-skill-evaluation.md`. The new
-Linux capture job must still run on CI after these changes are submitted.
+Skill gate is recorded in `docs/evaluations/m2-skill-evaluation.md`. The Linux
+Xvfb capture job passed on CI.
 
 Deliverables:
 

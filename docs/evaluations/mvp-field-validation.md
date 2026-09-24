@@ -39,8 +39,9 @@ kill-path validation.
 
 `m2-unseen-prototype.md` records one candidate prompt before implementation;
 `examples/echo-lantern` contains the resulting technical prototype. Its
-mechanics and screenshot have been checked, but the hypothesis is not approved
-in a project history and it has not been played by an external participant.
+mechanics and screenshot have been checked, and the user approved its initial
+hypothesis in an isolated project history. Separate playtest-readiness approval
+and an external participant session have not occurred.
 
 ## Independent review
 

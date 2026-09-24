@@ -44,13 +44,16 @@ prototype and tested a fresh project copy, not the existing risk-dash fixture:
   `adfc24aceb7b322449eaa59f58b09919a5329b1fd03d666dcd1a66059096a309`.
   The frame was inspected visually and registered as manually imported capture
   evidence; it is not evidence of human play.
-- `loopforge validate` reported a current snapshot and 15 valid events in the
-  isolated run after the final source copy, build, test, and capture.
-- `gate check PROTOTYPING` correctly returned `blocked`: no human has approved
-  and registered the hypothesis. The build/test records were made before any
-  approved hypothesis and therefore must be rerun after approval before they
-  can satisfy a later stage gate. No stage transition or external playtest is
-  claimed from this technical run.
+- After the user approved this initial hypothesis in the 2026-09-24
+  conversation, the isolated project registered that approval as a local
+  declaration, passed `gate check PROTOTYPING`, and advanced into that stage.
+  Build, self-test, and screenshot evidence were then rerun against hypothesis
+  revision 1 and the source digest above. `loopforge validate` reported a
+  current snapshot and 22 valid events.
+- `gate check PLAYTEST_REQUIRED` found `BUILD_PASS`, `TEST_PASS`, and
+  `CAPTURE_PRESENT` satisfied, but `HUMAN_APPROVAL` missing. The user approved
+  the hypothesis, not the separate readiness decision; no playtest-ready
+  transition or external playtest is claimed.
 
 The source remains available as a candidate for Run B in
 `mvp-field-validation.md`. Actual participant behavior and an independent
