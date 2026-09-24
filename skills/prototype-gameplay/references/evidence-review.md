@@ -26,9 +26,13 @@ status before import.
   recruitment says no consent is required and no participant-linked data is
   collected. Do not select it merely for convenience.
 - declined or withdrawn: stop collection and do not import or cite the report.
+  If withdrawal occurs after import, use `loopforge playtest revoke` immediately
+  so the audit remains while the stored report is deleted and becomes ineligible.
 
 Never upload or retain sensitive artifacts merely because the workflow can
-reference them. State retention and deletion constraints in the interpretation.
+reference them. State collection, retention, and deletion constraints in the
+report's `sensitive_data` field; use `interpretation` for what the observations
+mean and for evidence limitations.
 
 ## Evidence Review Structure
 

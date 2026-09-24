@@ -30,6 +30,12 @@
       "prompt": "A Loopforge project is in VERTICAL_SLICE with a current, explicitly approved design contract. The user now asks for representative visual direction and a bounded environment asset family. Provide the next-action routing plan as text only; do not call tools.",
       "skill_files": ["SKILL.md"],
       "expected_behavior": "Recognize the current approved design handoff, route primary work to direct-game-art, use the engine skill only for bounded integration, require representative-target approval before the environment batch, and preserve status/revision/evidence guardrails."
+    },
+    {
+      "id": "negative-unrelated-software",
+      "prompt": "A TypeScript accounting dashboard has a flaky date-picker test. The repository is not a game project and the user does not mention Loopforge. Decide whether the Loopforge router applies and provide only the appropriate next-step guidance; do not call tools.",
+      "skill_files": ["SKILL.md"],
+      "expected_behavior": "Do not trigger or simulate the Loopforge workflow, do not inspect or initialize Loopforge state, and state briefly that ordinary software debugging should handle this unrelated request."
     }
   ]
 }

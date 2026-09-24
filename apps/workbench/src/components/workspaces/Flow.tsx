@@ -36,6 +36,7 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
   const current = status?.stage ?? "";
   const [target, setTarget] = useState<string | null>(null);
   const [transitionReason, setTransitionReason] = useState<string | null>(null);
+  const [rationale, setRationale] = useState("");
   const [advancing, setAdvancing] = useState(false);
   const [failure, setFailure] = useState<string>();
   const { operator } = useOperator(projectRoot, true);
@@ -47,13 +48,12 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
    * would report requirements as missing that the advance then satisfies.
    */
   const early = current === "PROTOTYPING" && target === "PROTOTYPE_DECISION";
-  const args: GateArgs | undefined = React.useMemo(() => {
-    if (!early) return undefined;
+  const args: GateArgs = React.useMemo(() => {
     return {
-      ...(transitionReason ? { reason: transitionReason } : {}),
-      rationale: t("stage.advanceRationale", { stage: target ?? "" })
+      ...(early && transitionReason ? { reason: transitionReason } : {}),
+      rationale: rationale.trim()
     };
-  }, [early, transitionReason, target, t]);
+  }, [early, transitionReason, rationale]);
 
   const { gate, reason, loading, reload } = useGate(projectRoot, target, args);
 
@@ -69,13 +69,10 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
     setAdvancing(true);
     setFailure(undefined);
     try {
-      await advanceStage(
-        projectRoot,
-        target,
-        args ?? { rationale: t("stage.advanceRationale", { stage: target }) }
-      );
+      await advanceStage(projectRoot, target, args);
       setTarget(null);
       setTransitionReason(null);
+      setRationale("");
       reloadStatus();
       reload();
     } catch (error: unknown) {
@@ -113,6 +110,7 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
                 if (!selectable) return;
                 setTarget(stage.id);
                 setTransitionReason(null);
+                setRationale("");
               }}
             >
               <div className="node-head">
@@ -168,6 +166,21 @@ export function FlowWorkspace({ projectRoot }: { projectRoot: string }): React.J
           </fieldset>
           <p className="settings-note">{t("stage.reasonNote")}</p>
         </>
+      )}
+
+      {target && (
+        <label className="hypothesis-field">
+          <span className="hypothesis-field-head">
+            <span>{t("stage.rationale")}</span>
+          </span>
+          <textarea
+            className="hypothesis-text"
+            rows={2}
+            value={rationale}
+            placeholder={t("stage.rationalePlaceholder")}
+            onChange={(event) => setRationale(event.target.value)}
+          />
+        </label>
       )}
 
       <Card className="suite-list">

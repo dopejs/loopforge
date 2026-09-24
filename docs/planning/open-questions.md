@@ -33,7 +33,9 @@ browser-heavy adapters but is not part of the MVP CLI.
 
 ## 2. First engine adapter
 
-Current preference: Godot 4 2D.
+Decision: Godot 4 2D. See
+[ADR 0008](../decisions/0008-first-engine-adapter.md) for the spike result,
+validation boundary, and revisit criteria.
 
 Reasons:
 
@@ -43,17 +45,16 @@ Reasons:
 - suitable for small prototypes;
 - screenshot and runtime inspection options.
 
-Unknowns to validate:
+Validated for the MVP:
 
-- reliable runtime interaction in CI and local Codex environments;
-- cross-platform binary discovery;
-- stable screenshot capture;
-- test framework choice and version compatibility;
-- whether web export is necessary for external playtesting in the MVP.
+- real headless editor import and main-scene startup in CI;
+- `godot4`/`godot` binary discovery and an explicit Godot 4 version check;
+- actionable success, non-zero exit, and missing-project behavior;
+- a playable fixture with deterministic reward, failure, and restart checks;
+- manually imported, provenance-recorded screenshots as the MVP capture boundary.
 
-Recommended next action: create a disposable fixture with movement,
-win/fail/restart, a headless smoke test, and a screenshot. Record exact setup and
-failure cases before accepting an engine ADR.
+Engine-driven screenshot capture, web export, Windows packaging, and a general
+Godot test framework are follow-up capabilities, not M2 acceptance conditions.
 
 ## 3. Repository license
 

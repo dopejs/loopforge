@@ -18,7 +18,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from loopforge.mcp import MAX_RESULT_CHARS, TOOLS, read_frame, respond, serve
+from loopforge.mcp import MAX_RESULT_CHARS, TOOLS, read_frame, serve
 from loopforge.project import LoopforgeProject
 
 
@@ -82,10 +82,14 @@ class McpServerTests(unittest.TestCase):
 
     def test_a_notification_is_not_answered(self) -> None:
         """A request with no id has nothing to answer under."""
-        self.assertEqual(self.run_server({"jsonrpc": "2.0", "method": "initialized"}), [])
+        self.assertEqual(
+            self.run_server({"jsonrpc": "2.0", "method": "initialized"}), []
+        )
 
     def test_an_unknown_method_is_a_protocol_error(self) -> None:
-        answered = self.run_server({"jsonrpc": "2.0", "id": "1", "method": "resources/list"})
+        answered = self.run_server(
+            {"jsonrpc": "2.0", "id": "1", "method": "resources/list"}
+        )
 
         self.assertEqual(answered[0]["error"]["code"], -32601)
 
@@ -113,7 +117,13 @@ class McpServerTests(unittest.TestCase):
         permission mode's business, and covered with it.
         """
         by_name = {tool.name: tool for tool in TOOLS}
-        for name in ("loopforge_advance", "loopforge_run", "loopforge_capture", "loopforge_init"):
+        for name in (
+            "loopforge_advance",
+            "loopforge_run",
+            "loopforge_capture",
+            "loopforge_init",
+            "loopforge_reconcile",
+        ):
             with self.subTest(tool=name):
                 self.assertIn(name, by_name)
                 self.assertTrue(by_name[name].mutates, f"{name} changes the project")
@@ -140,7 +150,8 @@ class McpServerTests(unittest.TestCase):
         model may enter on their behalf, whoever approves the call."""
         published = {tool.name for tool in TOOLS}
         self.assertEqual(
-            published & {"loopforge_decide", "loopforge_playtest", "loopforge_evidence"},
+            published
+            & {"loopforge_decide", "loopforge_playtest", "loopforge_evidence"},
             set(),
         )
 
@@ -165,9 +176,37 @@ class McpServerTests(unittest.TestCase):
     def test_history_can_be_asked_for_only_the_recent_events(self) -> None:
         LoopforgeProject(self.root).init()
 
-        answer = json.loads(self.call("loopforge_history", limit=1)["content"][0]["text"])
+        answer = json.loads(
+            self.call("loopforge_history", limit=1)["content"][0]["text"]
+        )
 
         self.assertEqual(len(answer["events"]), 1)
+
+    def test_reconcile_must_preview_before_an_intact_snapshot_is_rebuilt(self) -> None:
+        project = LoopforgeProject(self.root)
+        project.init()
+        state_path = self.root / ".loopforge" / "state.json"
+        state_path.unlink()
+
+        preview = json.loads(
+            self.call("loopforge_reconcile", apply=False)["content"][0]["text"]
+        )
+        self.assertTrue(preview["actions"])
+        self.assertFalse(state_path.exists(), "a preview must not rewrite state")
+
+        applied = json.loads(
+            self.call("loopforge_reconcile", apply=True)["content"][0]["text"]
+        )
+        self.assertTrue(applied["applied"])
+        self.assertTrue(state_path.is_file())
+
+    def test_reconcile_requires_an_explicit_boolean(self) -> None:
+        LoopforgeProject(self.root).init()
+
+        result = self.call("loopforge_reconcile")
+
+        self.assertTrue(result["isError"])
+        self.assertIn("apply must be true or false", result["content"][0]["text"])
 
     def test_an_unknown_tool_is_reported_rather_than_raised(self) -> None:
         """It named a tool that does not exist and can name a real one next
@@ -222,7 +261,9 @@ class ExposureRuleTests(unittest.TestCase):
             self.assertIsNone(KuraRuntimeSupervisor._tool_tiers())
         for mode in MODES:
             with self.subTest(mode=mode):
-                self.assertEqual(exposure_for("unrecognized", mode), "approval_required")
+                self.assertEqual(
+                    exposure_for("unrecognized", mode), "approval_required"
+                )
 
 
 class PublishedSurfaceTests(unittest.TestCase):
@@ -239,7 +280,7 @@ class PublishedSurfaceTests(unittest.TestCase):
         did not happen.
         """
         published = {tool.name for tool in TOOLS}
-        for action in ("init", "gate", "advance"):
+        for action in ("init", "reconcile", "gate", "advance"):
             with self.subTest(action=action):
                 self.assertIn(f"loopforge_{action}", published)
 
@@ -252,7 +293,12 @@ class PublishedSurfaceTests(unittest.TestCase):
         """
         from pathlib import Path as _Path
 
-        router = _Path(__file__).resolve().parents[2] / "skills" / "loopforge-router" / "SKILL.md"
+        router = (
+            _Path(__file__).resolve().parents[2]
+            / "skills"
+            / "loopforge-router"
+            / "SKILL.md"
+        )
         text = router.read_text(encoding="utf-8")
 
         self.assertIn("Do not open by reporting project state", text)
@@ -266,7 +312,12 @@ class PublishedSurfaceTests(unittest.TestCase):
         one instruction is why every answer was a narration."""
         from pathlib import Path as _Path
 
-        router = _Path(__file__).resolve().parents[2] / "skills" / "loopforge-router" / "SKILL.md"
+        router = (
+            _Path(__file__).resolve().parents[2]
+            / "skills"
+            / "loopforge-router"
+            / "SKILL.md"
+        )
         text = router.read_text(encoding="utf-8")
 
         self.assertIn("loopforge_inspect", text)
@@ -283,4 +334,6 @@ class PublishedSurfaceTests(unittest.TestCase):
             for line in text.splitlines()
             if "`loopforge " in line and "Running" not in line
         ]
-        self.assertEqual(instructions, [], f"still tells the model to run commands: {instructions}")
+        self.assertEqual(
+            instructions, [], f"still tells the model to run commands: {instructions}"
+        )

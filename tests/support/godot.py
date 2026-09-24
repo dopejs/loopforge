@@ -18,6 +18,7 @@ gets a green run; CI installs Godot and fails loudly if it goes missing.
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -29,6 +30,11 @@ FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "godot"
 #: Environment variable the fixture scene reads to choose its exit code, which
 #: is how the failure path is driven through a real engine run.
 EXIT_CODE_VARIABLE = "LOOPFORGE_FIXTURE_EXIT_CODE"
+
+#: Enables the fixture's deterministic gameplay-state self-check. Unlike the
+#: generic adapter smoke test, this proves that the representative loop's
+#: reward, failure, and restart transitions execute inside Godot.
+SELF_TEST_VARIABLE = "LOOPFORGE_FIXTURE_SELF_TEST"
 
 
 def _publish_override_on_path() -> None:
@@ -71,7 +77,11 @@ def godot_major_version(binary: str) -> int | None:
     """
     try:
         completed = subprocess.run(
-            [binary, "--version"], capture_output=True, text=True, timeout=30, check=False
+            [binary, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -101,3 +111,48 @@ def materialize_fixture() -> Path:
     destination = Path(tempfile.mkdtemp(prefix="loopforge-godot-")) / "project"
     shutil.copytree(FIXTURE_ROOT, destination)
     return destination
+
+
+def capture_fixture(root: Path) -> Path:
+    """Record and inspect a runtime frame with the real rendering driver."""
+    binary = godot_binary()
+    if binary is None:
+        raise RuntimeError("Godot is not available")
+    destination = root.parent / "runtime.png"
+    command = [binary, "--path", str(root)]
+    if platform.system() == "Linux":
+        xvfb = shutil.which("xvfb-run")
+        if xvfb is None:
+            raise RuntimeError("xvfb-run is required for Linux visual capture")
+        command = [xvfb, "-a", "-s", "-screen 0 1280x1024x24", *command]
+        command.extend(["--display-driver", "x11"])
+    elif platform.system() == "Darwin":
+        command.extend(["--display-driver", "macos"])
+    else:
+        raise RuntimeError("Visual capture is not configured on this platform")
+    command.extend(
+        [
+            "--rendering-driver", "opengl3", "--audio-driver", "Dummy",
+            "--write-movie", str(destination), "--quit-after", "3",
+        ]
+    )
+    capture = subprocess.run(command, capture_output=True, text=True, timeout=60)
+    if capture.returncode != 0:
+        raise AssertionError(
+            "Godot could not record the running scene: "
+            f"{capture.stdout}\n{capture.stderr}"
+        )
+    frame = root.parent / "runtime00000002.png"
+    if not frame.is_file():
+        raise AssertionError("Godot did not produce the expected runtime frame")
+    verified = subprocess.run(
+        [binary, "--headless", "--path", str(root), "--script",
+         "res://verify_capture.gd", "--", str(frame)],
+        capture_output=True, text=True, timeout=30,
+    )
+    if verified.returncode != 0:
+        raise AssertionError(
+            f"The runtime capture did not show the game: "
+            f"{verified.stdout}\n{verified.stderr}"
+        )
+    return frame

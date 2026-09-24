@@ -5,7 +5,7 @@ import { type WorkspaceMode, sidebarTitleKey } from "../modes";
 import { projectName } from "../projects";
 import type { AgentPhase, AgentState } from "../agent";
 import { SIDEBAR_ITEMS } from "../fixtures";
-import { useSessions } from "../providers";
+import { deleteSession, useSessions } from "../providers";
 
 function ProjectSwitcher({
   projectRoot,
@@ -163,6 +163,11 @@ export function Sidebar(props: {
 }): React.JSX.Element {
   const { t } = useI18n();
   const [selected, setSelected] = useState(0);
+  // Which row is asking, and which is being removed. Both by id rather than by
+  // index: the list is re-read after every delete, and an index would confirm
+  // one conversation and delete the one that moved into its place.
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   // Chat sessions come from the runtime; the other modes have no Agent
   // capability behind them yet and stay on preview content.
   const live = useSessions(props.projectRoot, props.mode === "chat");
@@ -177,6 +182,25 @@ export function Sidebar(props: {
           tone: undefined
         }))
       : (SIDEBAR_ITEMS[props.mode] ?? []).map((item) => ({ ...item, id: undefined }));
+
+  const remove = async (sessionId: string): Promise<void> => {
+    if (removing) return;
+    setRemoving(sessionId);
+    try {
+      await deleteSession(props.projectRoot, sessionId);
+      // Deleting the open conversation leaves the transcript showing something
+      // that no longer exists, and every later message would continue a
+      // conversation the Agent has forgotten.
+      if (props.sessionId === sessionId) props.onNewSession();
+      reload();
+    } catch {
+      // Left listed. A row that vanished on a failed delete would say the
+      // conversation was gone when it is still on disk.
+    } finally {
+      setRemoving(null);
+      setConfirming(null);
+    }
+  };
 
   useEffect(() => setSelected(0), [props.mode]);
 
@@ -246,8 +270,21 @@ export function Sidebar(props: {
       */}
       <div className="sidebar-list">
         {items.map((item, index) => (
+          /*
+            A row and its delete, side by side. The row is a button and a
+            button cannot contain one, so the two are siblings rather than
+            nested -- which is also what lets the delete keep its own focus and
+            its own label for a screen reader.
+          */
+          <div className="sidebar-row" key={item.id ?? item.label}>
           <button
-            key={item.label}
+            /*
+              The conversation, not what it happens to be called. Titles are
+              taken from the first message, so three conversations opened with
+              "hello" share one -- React then keyed them together and reused
+              one row's state for another, and the list read as duplicates of a
+              conversation the user could not tell apart from its neighbours.
+            */
             type="button"
             className={
               (item.id ? item.id === props.sessionId : index === selected)
@@ -278,6 +315,44 @@ export function Sidebar(props: {
               <span className={`mono item-meta tone-${item.tone ?? "faint"}`}>{item.meta}</span>
             )}
           </button>
+          {/*
+            Two steps, and no dialog. Deleting removes the conversation from
+            disk and there is no undo, so one stray click must not do it -- but
+            a modal per row would make clearing out a dozen test conversations
+            a chore, which is what this is for. The row's own buttons become
+            the confirmation.
+          */}
+          {item.id && confirming === item.id ? (
+            <span className="sidebar-confirm">
+              <button
+                type="button"
+                className="sidebar-delete danger"
+                disabled={removing === item.id}
+                onClick={() => void remove(item.id!)}
+              >
+                {t("sidebar.confirmDelete")}
+              </button>
+              <button
+                type="button"
+                className="sidebar-delete"
+                onClick={() => setConfirming(null)}
+              >
+                {t("sidebar.cancelDelete")}
+              </button>
+            </span>
+          ) : (
+            item.id && (
+              <button
+                type="button"
+                className="sidebar-delete"
+                aria-label={`${t("sidebar.delete")}: ${item.label}`}
+                onClick={() => setConfirming(item.id!)}
+              >
+                ×
+              </button>
+            )
+          )}
+          </div>
         ))}
         {items.length === 0 && <p className="sidebar-empty">{t("sidebar.empty")}</p>}
       </div>

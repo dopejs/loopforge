@@ -6,6 +6,7 @@ import json
 import logging
 import signal
 import threading
+import urllib.parse
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -70,8 +71,19 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/approvals":
             self._execute(self.server.agent.approvals)
             return
+        if self.path == "/v1/questions":
+            self._execute(self.server.agent.questions)
+            return
         if self.path == "/v1/sessions":
             self._execute(self.server.agent.sessions)
+            return
+        if self.path.split("?", 1)[0] == "/v1/suggestions":
+            # The locale travels with the read because generated suggestions
+            # cannot be translated: the Agent has no interface language of its
+            # own, and the window asking is the one that will render them.
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            locale = (query.get("locale") or ["en"])[0]
+            self._execute(lambda: self.server.agent.suggestions(locale))
             return
         if self.path == "/v1/settings/operator":
             self._execute(self.server.agent.operator_settings)
@@ -122,6 +134,18 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/v1/sessions/"):
             session_id = self.path[len("/v1/sessions/") :]
             self._execute(lambda: self.server.agent.session(session_id))
+            return
+        self._json(HTTPStatus.NOT_FOUND, self._error("ROUTE_NOT_FOUND", "Not found."))
+
+    def do_DELETE(self) -> None:
+        if not self._authorized():
+            return
+        if self.path.startswith("/v1/sessions/"):
+            # The verb carries the meaning. A POST to `/v1/sessions/<id>/delete`
+            # would work too, and would be one more path to keep in step with
+            # the one that reads the same conversation.
+            session_id = self.path[len("/v1/sessions/") :]
+            self._execute(lambda: self.server.agent.delete_session(session_id))
             return
         self._json(HTTPStatus.NOT_FOUND, self._error("ROUTE_NOT_FOUND", "Not found."))
 
@@ -222,6 +246,13 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             self._execute(
                 lambda: self.server.agent.save_permissions(str(body.get("mode", "")))
             )
+        elif self.path == "/v1/questions/answer":
+            self._execute(
+                lambda: self.server.agent.answer_question(
+                    str(body.get("question_id", "")),
+                    str(body.get("answer", "")),
+                )
+            )
         elif self.path == "/v1/approvals/resolve":
             self._execute(
                 lambda: self.server.agent.resolve_approval(
@@ -262,6 +293,13 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         elif self.path == "/v1/playtest/report":
             self._execute(
                 lambda: self.server.agent.import_playtest_report(body.get("report"))
+            )
+        elif self.path == "/v1/playtest/revoke":
+            self._execute(
+                lambda: self.server.agent.revoke_playtest_report(
+                    str(body.get("evidence_id", "")),
+                    str(body.get("reason", "")),
+                )
             )
         elif self.path == "/v1/capture":
             self._execute(

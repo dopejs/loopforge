@@ -30,3 +30,14 @@ uuid = { version = "1", features = ["v4"] }
 # handler, so ending it politely is what stops the daemon too.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# Tauri debug artifacts otherwise retain full symbols and incremental state
+# across dependency and feature changes, growing src-tauri/target without a
+# practical bound on developer machines.
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false

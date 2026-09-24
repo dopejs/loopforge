@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopforge.dev/contracts/loopforge-decision-v1.schema.json",
+  "title": "Loopforge prototype decision",
+  "description": "Workbench decision state or the acknowledgement returned after recording a human-confirmed keep, kill or refactor decision.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "stage",
+        "allowed",
+        "decisions",
+        "playtest_evidence_ids",
+        "recorded"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "loopforge-decision-v1"
+        },
+        "stage": {
+          "type": "string"
+        },
+        "allowed": {
+          "type": "boolean"
+        },
+        "decisions": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "keep"
+            },
+            {
+              "const": "kill"
+            },
+            {
+              "const": "refactor"
+            }
+          ],
+          "items": false
+        },
+        "playtest_evidence_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "recorded": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "decision",
+                "created_at"
+              ],
+              "properties": {
+                "decision": {
+                  "enum": [
+                    "keep",
+                    "kill",
+                    "refactor"
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "decision",
+        "stage",
+        "committed_revision"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "loopforge-decision-v1"
+        },
+        "decision": {
+          "enum": [
+            "keep",
+            "kill",
+            "refactor"
+          ]
+        },
+        "stage": {
+          "type": "string"
+        },
+        "committed_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  ]
+}

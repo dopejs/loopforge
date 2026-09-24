@@ -51,6 +51,14 @@ class FakeAgent:
     def runs(self, operation: str | None = None) -> dict[str, Any]:
         raise LoopforgeAgentError("Unsupported.", "RUN_OPERATION_INVALID")
 
+    def revoke_playtest_report(self, evidence_id: str, reason: str) -> dict[str, Any]:
+        return {
+            "schema_version": "loopforge-playtest-v1",
+            "evidence_id": evidence_id,
+            "reason": reason,
+            "revoked": True,
+        }
+
 
 class AgentServerTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -121,7 +129,9 @@ class AgentServerTests(unittest.TestCase):
     def test_project_init_is_routed_and_authorized(self) -> None:
         with self.assertRaises(urllib.error.HTTPError) as raised:
             urllib.request.urlopen(
-                urllib.request.Request(f"{self.base_url}/v1/project/init", data=b"", method="POST"),
+                urllib.request.Request(
+                    f"{self.base_url}/v1/project/init", data=b"", method="POST"
+                ),
                 timeout=2,
             )
         self.assertEqual(raised.exception.code, 401)
@@ -130,6 +140,20 @@ class AgentServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(payload["created"])
         self.assertEqual(payload["stage"], "DISCOVERY")
+
+    def test_playtest_consent_revocation_is_routed(self) -> None:
+        status, payload = self.request(
+            "/v1/playtest/revoke",
+            "POST",
+            {
+                "evidence_id": "evd_playtest",
+                "reason": "Participant withdrew consent.",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["revoked"])
+        self.assertEqual(payload["evidence_id"], "evd_playtest")
 
     def test_query_uses_agent_contract(self) -> None:
         status, payload = self.request(

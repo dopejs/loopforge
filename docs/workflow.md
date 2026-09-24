@@ -67,16 +67,23 @@ technical and human-attested evidence. This early path can result in `kill` or
 Minimum evidence:
 
 - playtest protocol and consent status;
+- exact tested-build identity;
 - participant context;
+- assistance, prompts, and resulting confounds;
 - session notes or recording reference;
 - comprehension time;
 - confusion, failure, and abandonment points;
 - spontaneous strategies or experimentation;
 - replay behavior;
 - observer interpretation separated from raw observations.
+- sensitive-data collection, retention, and deletion handling.
 
 Automated agents may inspect controls, state transitions, and visible behavior.
 They cannot satisfy the external human playtest requirement.
+
+If consent is withdrawn after import, record the revocation immediately. The
+report contents are deleted, the audit event remains, and the evidence can no
+longer satisfy a gate, claim, or later decision.
 
 Exit condition: evidence has been registered, passes structural gate checks,
 and a human confirms that it is sufficient to consider a decision. The CLI does

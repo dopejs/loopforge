@@ -21,6 +21,7 @@ vi.mock("../i18n", async () => {
   const { en } = await import("../i18n/locales/en");
   return {
     useI18n: () => ({
+      locale: "en",
       t: (key: string) => {
         const template = (en as Record<string, string>)[key];
         if (template === undefined) throw new Error(`missing message key: ${key}`);
@@ -97,6 +98,141 @@ describe("Transcript", () => {
     expect(sent).toHaveBeenCalledWith(
       "Help me turn my idea into something we can test"
     );
+  });
+
+  it("says it is working while a reply has started but said nothing", () => {
+    // With tools in the loop a turn is silent for as long as the model spends
+    // calling them. The stream opens a reply the moment the turn starts, so
+    // the pending line -- keyed on "is anything streaming" -- disappeared
+    // immediately and left an empty bubble sitting where an answer goes.
+    render(
+      <Transcript
+        transcript={[
+          { id: "u", author: "user", text: "我想做一个数独游戏" },
+          { id: "a", author: "agent", text: "", streaming: true }
+        ]}
+        busy
+        variant="page"
+      />
+    );
+
+    expect(screen.getByText("Working…")).toBeTruthy();
+  });
+
+  it("stops saying it once the answer starts arriving", () => {
+    render(
+      <Transcript
+        transcript={[{ id: "a", author: "agent", text: "好的", streaming: true }]}
+        busy
+        variant="page"
+      />
+    );
+
+    expect(screen.queryByText("Working…")).toBeNull();
+    expect(screen.getByText("好的")).toBeTruthy();
+  });
+
+  it("shows why a turn ended rather than an empty bubble", () => {
+    // What the user saw was a blank red bar. A failure nobody can read is
+    // indistinguishable from a hang, and here the reason was actionable: the
+    // sign-in had expired.
+    render(
+      <Transcript
+        transcript={[
+          {
+            id: "a",
+            author: "agent",
+            text: "OAuth access token has expired. Re-authenticate to continue.",
+            failed: true
+          }
+        ]}
+        busy={false}
+        variant="page"
+      />
+    );
+
+    expect(screen.getByText(/Re-authenticate to continue/)).toBeTruthy();
+  });
+
+  it("says why a tool call failed, on the card that failed", () => {
+    // What the user saw: two red boxes reading `Failed  loopforge_status` and
+    // nothing else. A failure nobody can read is a failure nobody can act on,
+    // and here the reason was actionable -- the tool server had died.
+    render(
+      <Transcript
+        transcript={[
+          {
+            id: "t",
+            author: "agent",
+            text: "",
+            tool: {
+              callId: "t1",
+              name: "loopforge_status",
+              arguments: "{}",
+              status: "failed",
+              output: "loopforge_status was not run: mcp server became unavailable"
+            }
+          }
+        ]}
+        busy={false}
+        variant="page"
+      />
+    );
+
+    expect(screen.getByText(/mcp server became unavailable/)).toBeTruthy();
+  });
+
+  it("does not print a successful tool's output onto the card", () => {
+    // A successful tool's result is the model's material -- a page of project
+    // JSON nobody wants in the transcript. The asymmetry is the point.
+    render(
+      <Transcript
+        transcript={[
+          {
+            id: "t",
+            author: "agent",
+            text: "",
+            tool: {
+              callId: "t1",
+              name: "loopforge_status",
+              arguments: "{}",
+              status: "done",
+              output: '{"stage":"DISCOVERY","claims":{}}'
+            }
+          }
+        ]}
+        busy={false}
+        variant="page"
+      />
+    );
+
+    expect(screen.getByText("loopforge_status")).toBeTruthy();
+    expect(screen.queryByText(/DISCOVERY/)).toBeNull();
+  });
+
+  it("shows the arguments a tool was called with", () => {
+    // "The agent ran `advance`" has no answer to "advance to what?".
+    render(
+      <Transcript
+        transcript={[
+          {
+            id: "t",
+            author: "agent",
+            text: "",
+            tool: {
+              callId: "t1",
+              name: "loopforge_advance",
+              arguments: '{"target_stage":"PROTOTYPING"}',
+              status: "running"
+            }
+          }
+        ]}
+        busy
+        variant="page"
+      />
+    );
+
+    expect(screen.getByText(/PROTOTYPING/)).toBeTruthy();
   });
 
   it("offers what the stage makes worth asking", () => {

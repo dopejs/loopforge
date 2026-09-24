@@ -13,18 +13,66 @@ that never boots an engine.
 
 from __future__ import annotations
 
+import platform
 import shutil
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from loopforge.errors import InvalidStateError
+from loopforge.errors import GateBlockedError, InvalidStateError
 from loopforge.project import LoopforgeProject
-from tests.support.godot import EXIT_CODE_VARIABLE, materialize_fixture, requires_godot
+
+from tests.support.godot import (
+    EXIT_CODE_VARIABLE,
+    SELF_TEST_VARIABLE,
+    capture_fixture,
+    godot_binary,
+    materialize_fixture,
+    requires_godot,
+)
+
+
+def write_complete_hypothesis(root: Path) -> Path:
+    path = root / "hypothesis.md"
+    headings = {
+        "Intended player": "Players learning a one-button timing game.",
+        "Platform": "Desktop keyboard.",
+        "Player fantasy": "Risk danger to release a high-value dash.",
+        "Core verb": "Charge and release a dash.",
+        "Moment to moment loop": "Move, approach danger, charge, dash, score, recover.",
+        "Hypothesis": (
+            "A first-time player will voluntarily attempt one x3 dash within "
+            "two minutes."
+        ),
+        "Constraints": "One screen, keyboard only, one moving hazard.",
+        "Non-goals": "Progression, content, accounts, production art, and audio.",
+        "Cheapest validation": (
+            "One neutral external session on the single-screen build."
+        ),
+        "Keep signals": (
+            "The participant attempts an x3 dash and restarts without prompting."
+        ),
+        "Kill signals": (
+            "The participant cannot identify charge or risk after two runs."
+        ),
+    }
+    path.write_text(
+        "\n\n".join(f"## {heading}\n{value}" for heading, value in headings.items()),
+        encoding="utf-8",
+    )
+    return path
 
 
 def claim_status(project: LoopforgeProject, name: str) -> str:
     return project.status()["claims"][name]["status"]
+
+
+APPROVAL = {
+    "approver_id": "operator-1",
+    "approver_name": "Fixture Operator",
+    "rationale": "The evidenced build is ready for external observation.",
+}
 
 
 @requires_godot
@@ -57,15 +105,49 @@ class EngineAdapterIntegrationTests(unittest.TestCase):
         """The assertion behind R4: one run is never enough."""
         self.assertEqual(claim_status(self.project, "TECHNICALLY_VALIDATED"), "unknown")
 
-        self.project.run_engine("test", expected_revision=None)
+        # The supported workflow imports first, then starts the imported scene.
+        # Godot 4.4+ may create source UID sidecars during editor import; running
+        # startup first would correctly make that pre-import evidence stale.
+        self.project.run_engine("build", expected_revision=None)
         self.assertEqual(
             claim_status(self.project, "TECHNICALLY_VALIDATED"),
             "unknown",
-            "a test alone must not satisfy the claim",
+            "a build alone must not satisfy the claim",
         )
 
+        self.project.run_engine("test", expected_revision=None)
+        self.assertEqual(
+            claim_status(self.project, "TECHNICALLY_VALIDATED"), "satisfied"
+        )
+
+    def test_a_missing_run_artifact_cannot_satisfy_the_technical_gate(self) -> None:
+        self.project.create_hypothesis(
+            write_complete_hypothesis(self.root),
+            expected_revision=1,
+            approver_id="operator-1",
+            approver_name="Fixture Operator",
+            rationale="This is the bounded representative experiment.",
+        )
+        self.project.advance("PROTOTYPING", expected_revision=2)
         self.project.run_engine("build", expected_revision=None)
-        self.assertEqual(claim_status(self.project, "TECHNICALLY_VALIDATED"), "satisfied")
+        self.project.run_engine("test", expected_revision=None)
+        result = self.project.run_engine("test", expected_revision=None)
+        self.assertEqual(
+            claim_status(self.project, "TECHNICALLY_VALIDATED"), "satisfied"
+        )
+        (self.root / result["evidence"]["artifact"]["path"]).unlink()
+
+        gate = self.project.gate_check(
+            "PLAYTEST_REQUIRED",
+            approver_id="operator-1",
+            approver_name="Fixture Operator",
+            rationale="The evidence was reviewed.",
+        )
+        requirements = {item["code"]: item["status"] for item in gate["requirements"]}
+        self.assertEqual(requirements["TEST_PASS"], "invalid")
+        self.assertNotEqual(
+            claim_status(self.project, "TECHNICALLY_VALIDATED"), "satisfied"
+        )
 
     def test_a_failing_scene_is_recorded_as_failed(self) -> None:
         """A non-zero exit from the engine must become failed evidence.
@@ -82,6 +164,69 @@ class EngineAdapterIntegrationTests(unittest.TestCase):
         self.assertEqual(result["run"]["exit_code"], 3)
         self.assertEqual(result["evidence"]["result"], "failed")
         self.assertEqual(claim_status(self.project, "TECHNICALLY_VALIDATED"), "failed")
+
+    def test_a_script_parse_error_is_failed_even_when_godot_exits_zero(self) -> None:
+        script = self.root / "main.gd"
+        script.write_text(script.read_text() + "\nthis is invalid GDScript syntax\n")
+
+        result = self.project.run_engine("build", expected_revision=None)
+
+        self.assertEqual(result["run"]["status"], "failed")
+        self.assertEqual(result["evidence"]["result"], "failed")
+        self.assertTrue(result["run"]["engine_errors"])
+        self.assertIn("Parse Error", result["run"]["stderr"])
+
+    def test_a_playable_prototype_reaches_the_playtest_gate(self) -> None:
+        """Exercise M2's full exit path against the real engine.
+
+        The scene's deterministic seam exercises baseline scoring, the x3
+        near-hazard reward, failure, and restart. A regression in any of those
+        transitions exits non-zero. The gate is blocked before technical and
+        visual evidence, then passes only after build, behavior-bearing startup,
+        and capture evidence are all current for the approved hypothesis.
+        """
+        created = self.project.create_hypothesis(
+            write_complete_hypothesis(self.root),
+            expected_revision=1,
+            approver_id="operator-1",
+            approver_name="Fixture Operator",
+            rationale="This is the bounded M2 representative experiment.",
+        )
+        self.assertEqual(created["committed_revision"], 2)
+        self.assertEqual(self.project.gate_check("PROTOTYPING")["result"], "pass")
+        advanced = self.project.advance("PROTOTYPING", expected_revision=2)
+        self.assertEqual(advanced["committed_revision"], 3)
+
+        with self.assertRaises(GateBlockedError):
+            self.project.advance("PLAYTEST_REQUIRED", expected_revision=3)
+
+        build = self.project.run_engine("build", expected_revision=3)
+        self.assertEqual(build["committed_revision"], 5)
+        with patch.dict("os.environ", {SELF_TEST_VARIABLE: "1"}):
+            result = self.project.run_engine("test", expected_revision=5)
+
+        self.assertEqual(result["run"]["status"], "completed", result["run"])
+        self.assertEqual(result["run"]["exit_code"], 0, result["run"]["stderr"])
+        self.assertEqual(result["evidence"]["result"], "passed")
+        self.assertEqual(result["committed_revision"], 7)
+
+        if platform.system() == "Linux" and shutil.which("xvfb-run") is None:
+            self.skipTest("xvfb-run is required for real Linux runtime capture")
+        frame = capture_fixture(self.root)
+        capture = self.project.capture_screenshot(frame, expected_revision=7)
+        self.assertEqual(capture["committed_revision"], 8)
+        gate = self.project.gate_check("PLAYTEST_REQUIRED", **APPROVAL)
+        self.assertEqual(gate["result"], "pass", gate)
+        self.assertEqual(
+            {item["code"] for item in gate["requirements"]},
+            {"BUILD_PASS", "TEST_PASS", "CAPTURE_PRESENT", "HUMAN_APPROVAL"},
+        )
+
+        ready = self.project.advance(
+            "PLAYTEST_REQUIRED", expected_revision=8, **APPROVAL
+        )
+        self.assertEqual(ready["committed_revision"], 9)
+        self.assertEqual(self.project.status()["stage"], "PLAYTEST_REQUIRED")
 
     def test_doctor_accepts_the_fixture_against_a_real_engine(self) -> None:
         """Version detection and main-scene resolution against a real install.
@@ -103,7 +248,29 @@ class EngineAdapterIntegrationTests(unittest.TestCase):
         (self.root / "project.godot").unlink()
         with self.assertRaises(InvalidStateError) as caught:
             self.project.run_engine("test", expected_revision=None)
-        self.assertEqual(caught.exception.diagnostic_code, "ENGINE_PROJECT_NOT_DETECTED")
+        self.assertEqual(
+            caught.exception.diagnostic_code, "ENGINE_PROJECT_NOT_DETECTED"
+        )
+
+    def test_a_project_icon_cannot_pass_as_a_runtime_capture(self) -> None:
+        binary = godot_binary()
+        self.assertIsNotNone(binary)
+        result = subprocess.run(
+            [
+                binary,
+                "--headless",
+                "--path",
+                str(self.root),
+                "--script",
+                "res://verify_capture.gd",
+                "--",
+                str(Path(__file__).resolve().parents[2] / "brand/png/favicon-16.png"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

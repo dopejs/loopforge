@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopforge.dev/contracts/loopforge-playtest-report-v1.schema.json",
+  "title": "Loopforge external playtest report",
+  "description": "Human-observed behavior from the exact build bound to a recorded playtest protocol. Observation, interpretation, intervention and privacy handling remain structurally distinct.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "build_identity",
+    "participant_context",
+    "consent_status",
+    "assistance_given",
+    "raw_observations",
+    "comprehension_time",
+    "confusion_points",
+    "failure_points",
+    "abandonment_points",
+    "strategies",
+    "replay_behavior",
+    "interpretation",
+    "sensitive_data"
+  ],
+  "properties": {
+    "build_identity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "Exact identity supplied by the recorded protocol for the tested source."
+    },
+    "participant_context": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "Relevant experience, relationship and prior exposure without unnecessary identifying data."
+    },
+    "consent_status": {
+      "enum": [
+        "obtained",
+        "not_required"
+      ]
+    },
+    "assistance_given": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "None, or the exact intervention, timing and reason."
+    },
+    "raw_observations": {
+      "$ref": "#/$defs/nonEmptyObservationList"
+    },
+    "comprehension_time": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "confusion_points": {
+      "$ref": "#/$defs/observationList"
+    },
+    "failure_points": {
+      "$ref": "#/$defs/observationList"
+    },
+    "abandonment_points": {
+      "$ref": "#/$defs/observationList"
+    },
+    "strategies": {
+      "$ref": "#/$defs/observationList"
+    },
+    "replay_behavior": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "Analysis, confounds, sampling limits and relation to declared signals; never raw observation."
+    },
+    "sensitive_data": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "What was collected plus retention/deletion handling, or an explicit statement that none was collected."
+    }
+  },
+  "$defs": {
+    "observationList": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4000
+      }
+    },
+    "nonEmptyObservationList": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4000
+      }
+    }
+  }
+}

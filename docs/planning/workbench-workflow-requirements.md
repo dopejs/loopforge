@@ -152,6 +152,9 @@ accepts `--reason {technical,scope,abandon}` plus approver fields.
 - Transitions that carry a `reason` (`technical`, `scope`, `abandon`) must
   make the reason an explicit choice; it is recorded in the event log and
   changes how a later reader interprets the project's end.
+- Playtest readiness and consideration of imported observations require an
+  explicit human rationale. The Workbench shows an editable rationale before
+  advancing and sends it with both the gate check and transition.
 - The next legal stages must be derivable by the user from the current one
   without consulting documentation.
 - This is the Flow workspace's purpose. Flow currently draws a generic coding
@@ -219,13 +222,15 @@ imports the result and requires an existing protocol.
 
 The two artifacts have different shapes, and this decides the two surfaces:
 
-- The **protocol** is free-form UTF-8 Markdown. The core stores it without
-  schema validation, so its quality is entirely the Agent's responsibility and
-  the Workbench cannot validate it. The surface presents and exports prose.
-- The **report** is JSON validated against ten required fields:
-  `participant_context`, `consent_status`, `raw_observations`,
-  `comprehension_time`, `confusion_points`, `failure_points`,
-  `abandonment_points`, `strategies`, `replay_behavior`, `interpretation`.
+- The **protocol** is free-form UTF-8 Markdown. The core rejects empty or
+  unbounded input and binds it to the current source identity, but its
+  facilitation quality remains the Agent's responsibility. The surface presents
+  and exports prose.
+- The **report** is JSON validated against thirteen required fields:
+  `build_identity`, `participant_context`, `consent_status`,
+  `assistance_given`, `raw_observations`, `comprehension_time`,
+  `confusion_points`, `failure_points`, `abandonment_points`, `strategies`,
+  `replay_behavior`, `interpretation`, `sensitive_data`.
   The surface collects structured input and the Agent assembles the JSON; the
   Workbench must not ask a user to write JSON.
 
@@ -240,9 +245,17 @@ The two artifacts have different shapes, and this decides the two surfaces:
 - `raw_observations` and `interpretation` must be visually separated, and
   their difference stated. This is principle 3 and ADR 0002; a surface that
   blends them destroys the evidentiary value of the record.
+- The build identity is supplied by the core and cannot be edited. Import must
+  fail when the report names another build or source changed after protocol
+  creation.
+- Assistance and sensitive-data handling are explicit fields; coaching and
+  privacy limits must not be buried in interpretation.
 - Entering the report before the stage allows it must explain the stage
   requirement rather than surfacing a raw error code.
 - Participant context must carry a privacy note: it describes a real person.
+- A recorded report must expose consent revocation. Revocation requires an
+  explicit reason, deletes the stored report contents, remains visible in the
+  audit trail, and refreshes affected claims.
 
 **Acceptance.** From `PLAYTEST_REQUIRED`, a user can obtain a protocol, enter a
 report with explicit consent, and see `HUMAN_PLAYTESTED` become `satisfied`

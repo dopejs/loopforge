@@ -524,8 +524,18 @@ class SupervisorInjectionTests(unittest.TestCase):
         environment = self._supervisor()._account_environment()
 
         self.assertEqual(environment["KURA_LLM_DEFAULT_PROVIDER"], "deepseek")
-        # A drafted hypothesis is eleven sections; the default timeout is short.
-        self.assertEqual(environment["KURA_LLM_DEFAULT_TIMEOUT_MS"], "180000")
+        # A timeout is sent at all, and it is longer than the daemon's own
+        # thirty-second default -- which is what a drafted hypothesis, eleven
+        # sections long, used to be cut off by. Read from the constant rather
+        # than repeated: pinning the number here only moves the coupling, and
+        # the number has been raised twice already.
+        from loopforge.agent.supervisor import PROVIDER_TIMEOUTS
+
+        self.assertEqual(
+            environment["KURA_LLM_DEFAULT_TIMEOUT_MS"],
+            PROVIDER_TIMEOUTS["KURA_LLM_DEFAULT_TIMEOUT_MS"],
+        )
+        self.assertGreater(int(environment["KURA_LLM_DEFAULT_TIMEOUT_MS"]), 30_000)
 
     def test_an_unreadable_store_does_not_stop_the_daemon(self) -> None:
         """A store this build cannot read must not prevent a daemon that would

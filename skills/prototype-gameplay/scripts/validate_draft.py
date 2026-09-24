@@ -79,6 +79,8 @@ LIST_FIELDS = (
     "strategies",
 )
 PLACEHOLDER = re.compile(r"<[^<>]+>")
+MAX_REPORT_ITEMS = 200
+MAX_REPORT_FIELD_CHARS = 4_000
 
 
 def parse_args() -> argparse.Namespace:
@@ -173,6 +175,15 @@ def validate_report(report: Any) -> list[dict[str, Any]]:
                 {"fields": missing},
             )
         )
+    unknown = sorted(set(report) - set(REPORT_FIELDS))
+    if unknown:
+        diagnostics.append(
+            issue(
+                "PLAYTEST_FIELDS_UNKNOWN",
+                "The playtest report contains unknown fields.",
+                {"fields": unknown},
+            )
+        )
     if report.get("consent_status") not in {"obtained", "not_required"}:
         diagnostics.append(
             issue(
@@ -183,13 +194,36 @@ def validate_report(report: Any) -> list[dict[str, Any]]:
     for field in LIST_FIELDS:
         value = report.get(field)
         if not isinstance(value, list) or (field == "raw_observations" and not value):
+            qualifier = "non-empty " if field == "raw_observations" else ""
             diagnostics.append(
                 issue(
                     "PLAYTEST_FIELD_INVALID",
-                    f"{field} must be a {'non-empty ' if field == 'raw_observations' else ''}list.",
+                    f"{field} must be a {qualifier}list.",
                     {"field": field},
                 )
             )
+            continue
+        if len(value) > MAX_REPORT_ITEMS:
+            diagnostics.append(
+                issue(
+                    "PLAYTEST_FIELD_INVALID",
+                    f"{field} has too many entries.",
+                    {"field": field, "max_items": MAX_REPORT_ITEMS},
+                )
+            )
+        for index, item in enumerate(value):
+            if (
+                not isinstance(item, str)
+                or not item.strip()
+                or len(item.strip()) > MAX_REPORT_FIELD_CHARS
+            ):
+                diagnostics.append(
+                    issue(
+                        "PLAYTEST_FIELD_INVALID",
+                        f"Every {field} entry must be non-empty bounded text.",
+                        {"field": field, "index": index},
+                    )
+                )
     for field in (
         "build_identity",
         "participant_context",
@@ -200,11 +234,15 @@ def validate_report(report: Any) -> list[dict[str, Any]]:
         "sensitive_data",
     ):
         value = report.get(field)
-        if not isinstance(value, str) or not value.strip():
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value.strip()) > MAX_REPORT_FIELD_CHARS
+        ):
             diagnostics.append(
                 issue(
                     "PLAYTEST_FIELD_INVALID",
-                    f"{field} must be a non-empty string.",
+                    f"{field} must be non-empty bounded text.",
                     {"field": field},
                 )
             )

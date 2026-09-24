@@ -18,6 +18,12 @@
       "prompt": "A Godot headless startup fails after a script edit and the existing capture is from before the edit. Plan diagnosis and the evidence-safe next steps. Do not call tools.",
       "skill_files": ["SKILL.md", "references/godot-prototype.md"],
       "expected_behavior": "Fix the first concrete root cause, rerun the failed operation, do not reuse pre-change evidence or disable errors, and consider early technical decision only if infeasibility is demonstrated."
+    },
+    {
+      "id": "negative-non-godot",
+      "prompt": "A Unity project needs an Addressables build failure diagnosed. It has no project.godot and no request to migrate engines. Decide whether build-godot-game applies and provide only routing guidance; do not call tools.",
+      "skill_files": ["SKILL.md"],
+      "expected_behavior": "Do not apply the Godot implementation workflow, do not invent a Godot adapter or migration, and route to an appropriate Unity-specific workflow or report that this skill is not applicable."
     }
   ]
 }

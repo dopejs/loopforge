@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { refreshTargetCopies } from "./refresh-target-copies.mjs";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const submoduleRoot = resolve(desktopRoot, "vendor", "kura");
@@ -47,6 +48,11 @@ if (process.platform === "darwin") {
   // binary run is the exact failure this exists to prevent, and it is
   // invisible until something tries to run it.
   execFileSync(bundledBinary, ["--help"], { stdio: "ignore" });
+}
+
+// And into the copies a development build runs from, which are not these.
+for (const copy of refreshTargetCopies(desktopRoot, bundledBinary, basename(bundledBinary))) {
+  console.log(`Refreshed development copy: ${copy}`);
 }
 
 console.log(`Bundled Kura daemon (kura) from ${builtCommit.slice(0, 7)}: ${bundledBinary}`);

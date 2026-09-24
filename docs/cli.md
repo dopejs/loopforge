@@ -9,8 +9,9 @@ The current alpha implements `setup`, `init`, `inspect`, `doctor`, `status`,
 `validate`, `history`, `reconcile`, `agent start/stop/status/doctor/context/sync`,
 `hypothesis create/show`, `gate check`, `advance`, `run build/test`,
 `capture screenshot`, `playtest create/import`, `decide`, and
-`evidence add/list`. Real Godot runtime validation and production-stage skills
-remain planned work; their contracts below describe the target MVP interface.
+`evidence add/list`. The Godot 4 adapter is validated against a real engine in
+CI. Broader engines, engine-driven capture, and release-production automation
+remain planned work.
 
 ## 2. Command principles
 
@@ -118,21 +119,41 @@ loopforge evidence add --type <type> --file <path> [--result passed|failed|obser
 loopforge evidence list
 ```
 
+Generic `evidence add` cannot create external playtest evidence. Use the
+protocol and report import commands below so consent, build identity, raw
+observations, and interpretation are validated together. On a Godot project,
+the build and smoke-test gate accepts only the adapter's tool-generated run
+evidence; manual technical records remain visible but do not pass that gate.
+
 Engine adapters provide actual build and test commands. Each run records the
 command, environment summary, timestamps, exit code, log path, and artifacts.
 The current adapter supports Godot projects through headless `build` and `test`
 operations. A missing Godot executable returns exit code 4; screenshot capture
-is still a manual evidence path.
+is still a manual evidence path. Godot 4 version and explicit engine error lines
+are checked before a run is marked passing, even when the process exits zero.
+Screenshot registration rejects files without a supported PNG, JPEG or WebP
+image header; manual provenance does not prove that an image shows the current
+running game, so the reviewer must inspect it before approving readiness.
 
 ### Playtests and decisions
 
 ```bash
 loopforge playtest create --protocol playtest.md
 loopforge playtest import --file report.json
+loopforge playtest revoke --evidence <playtest-id> --reason <reason>
 loopforge decide keep --evidence <id>...
 loopforge decide kill --evidence <id>...
 loopforge decide refactor --file revised-hypothesis.md --evidence <id>...
 ```
+
+The protocol is non-empty bounded Markdown bound to the current source identity.
+The report follows `loopforge-playtest-report-v1`: it must repeat that immutable
+build identity and separately record consent, participant context, assistance,
+raw observations, interpretation, and sensitive-data handling. Imports reject
+unknown fields, source changes after protocol creation, and build mismatches.
+Consent withdrawal is append-only: `playtest revoke` records why the evidence
+became ineligible, removes the stored report contents, and leaves the audit event
+visible. Claims that depended on the report return to `unknown`.
 
 Decision commands require an identified approver and a written rationale. The
 CLI validates completeness, not the correctness of the creative conclusion.
@@ -158,10 +179,12 @@ loopforge reconcile --yes
   protocol artifacts. It is read-only and reports one or more structured
   diagnostics when an artifact has been removed or changed.
 - `history` presents transitions, decisions, and relevant run records.
-- `reconcile --dry-run` reports how event history, derived state, incomplete
-  records, and orphan runs differ without writing.
-- `reconcile --yes` performs only the reported recovery actions and requires
-  explicit confirmation for quarantine or cleanup.
+- `reconcile --dry-run` reports whether the derived snapshot needs rebuilding
+  from event history without writing. `doctor` separately reports orphan runs.
+- `reconcile --yes` first verifies referenced artifacts, then backs up the
+  previous snapshot byte for byte under `.loopforge/backups/` before rebuilding
+  it. The output includes `backup_path`. Missing or modified evidence is
+  reported rather than repaired by replacing the snapshot.
 
 ## 4. Output contract
 

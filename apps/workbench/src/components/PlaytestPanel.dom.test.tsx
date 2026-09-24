@@ -41,6 +41,9 @@ function state(overrides: Record<string, unknown> = {}) {
     stage: "PLAYTEST_REQUIRED",
     allowed: true,
     protocol: null,
+    report: null,
+    revocation_warning: "",
+    build_identity: "sha256:tested-build",
     consent_values: ["obtained", "not_required"],
     fields: [],
     list_fields: [],
@@ -67,7 +70,13 @@ describe("PlaytestPanel", () => {
 
   it("offers the report only once a protocol exists", async () => {
     invoke.mockResolvedValue(
-      state({ protocol: { protocol_id: "plt_1", created_at: "2026-08-22T00:00:00Z" } })
+      state({
+        protocol: {
+          protocol_id: "plt_1",
+          created_at: "2026-08-22T00:00:00Z",
+          build_identity: "sha256:tested-build"
+        }
+      })
     );
 
     render(<PlaytestPanel projectRoot="/p" />);
@@ -77,7 +86,13 @@ describe("PlaytestPanel", () => {
 
   it("leaves consent unanswered until a person answers it", async () => {
     invoke.mockResolvedValue(
-      state({ protocol: { protocol_id: "plt_1", created_at: "2026-08-22T00:00:00Z" } })
+      state({
+        protocol: {
+          protocol_id: "plt_1",
+          created_at: "2026-08-22T00:00:00Z",
+          build_identity: "sha256:tested-build"
+        }
+      })
     );
 
     render(<PlaytestPanel projectRoot="/p" />);
@@ -99,7 +114,13 @@ describe("PlaytestPanel", () => {
     invoke.mockImplementation((command: string) => {
       if (command === "agent_playtest") {
         return Promise.resolve(
-          state({ protocol: { protocol_id: "plt_1", created_at: "2026-08-22T00:00:00Z" } })
+          state({
+            protocol: {
+              protocol_id: "plt_1",
+              created_at: "2026-08-22T00:00:00Z",
+              build_identity: "sha256:tested-build"
+            }
+          })
         );
       }
       if (command === "agent_playtest_report") return Promise.resolve(state());
@@ -110,10 +131,14 @@ describe("PlaytestPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Enter report" }));
     fireEvent.click(await screen.findByRole("button", { name: "Consent obtained" }));
 
-    const textareas = screen.getAllByRole("textbox");
-    // participant_context, then the five lists, then two texts, then interpretation.
-    fireEvent.change(textareas[1], { target: { value: "charged twice\ndied once" } });
-    fireEvent.change(textareas[textareas.length - 1], {
+    expect(
+      (screen.getByRole("textbox", { name: "Tested build identity" }) as HTMLTextAreaElement)
+        .value
+    ).toBe("sha256:tested-build");
+    fireEvent.change(screen.getByRole("textbox", { name: /What they did/ }), {
+      target: { value: "charged twice\ndied once" }
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Interpretation" }), {
       target: { value: "the trade-off reads" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Import report" }));
@@ -125,6 +150,76 @@ describe("PlaytestPanel", () => {
       expect(report.raw_observations).toEqual(["charged twice", "died once"]);
       expect(report.interpretation).toBe("the trade-off reads");
       expect(report.consent_status).toBe("obtained");
+      expect(report.build_identity).toBe("sha256:tested-build");
     });
+  });
+
+  it("requires an explicit reason before revoking and deleting a report", async () => {
+    const recorded = state({
+      protocol: {
+        protocol_id: "plt_1",
+        created_at: "2026-08-22T00:00:00Z",
+        build_identity: "sha256:tested-build"
+      },
+      report: {
+        evidence_id: "evd_playtest",
+        revoked: false,
+        revoked_at: "",
+        artifact_deleted: false
+      }
+    });
+    invoke.mockImplementation((command: string) => {
+      if (command === "agent_playtest") return Promise.resolve(recorded);
+      if (command === "agent_playtest_revoke") {
+        return Promise.resolve(
+          state({
+            ...recorded,
+            report: {
+              evidence_id: "evd_playtest",
+              revoked: true,
+              revoked_at: "2026-08-23T00:00:00Z",
+              artifact_deleted: true
+            }
+          })
+        );
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+
+    render(<PlaytestPanel projectRoot="/p" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke consent" }));
+    const confirm = screen.getByRole("button", { name: "Revoke and delete report" });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Reason for withdrawal" }), {
+      target: { value: "Participant withdrew consent." }
+    });
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(confirm);
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("agent_playtest_revoke", {
+        projectPath: "/p",
+        evidenceId: "evd_playtest",
+        reason: "Participant withdrew consent."
+      })
+    );
+  });
+
+  it("offers deletion retry when consent is revoked but the report file remains", async () => {
+    invoke.mockResolvedValue(
+      state({
+        report: {
+          evidence_id: "evd_playtest",
+          revoked: true,
+          revoked_at: "2026-08-23T00:00:00Z",
+          artifact_deleted: false
+        }
+      })
+    );
+
+    render(<PlaytestPanel projectRoot="/p" />);
+
+    expect(await screen.findByRole("button", { name: "Retry report deletion" })).toBeTruthy();
   });
 });

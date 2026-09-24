@@ -10,7 +10,7 @@ from typing import Any
 from .agent import AgentSupervisor
 from .errors import InvalidStateError, LoopforgeError
 from .installation import install_skills, uninstall_skills
-from .project import EVIDENCE_TYPES, MANUAL_TRUST_LEVELS, LoopforgeProject
+from .project import MANUAL_EVIDENCE_TYPES, MANUAL_TRUST_LEVELS, LoopforgeProject
 from .storage import utc_now
 from .version import __version__
 
@@ -143,6 +143,11 @@ def build_command_parser() -> argparse.ArgumentParser:
     playtest_create.add_argument("--protocol", required=True, type=Path)
     playtest_import = playtest_commands.add_parser("import")
     playtest_import.add_argument("--file", required=True, type=Path)
+    playtest_revoke = playtest_commands.add_parser(
+        "revoke", help="Revoke consent for imported external playtest evidence."
+    )
+    playtest_revoke.add_argument("--evidence", required=True)
+    playtest_revoke.add_argument("--reason", required=True)
 
     decide = commands.add_parser("decide", help="Record a prototype decision.")
     decide.add_argument("decision", choices=("keep", "kill", "refactor"))
@@ -162,7 +167,7 @@ def build_command_parser() -> argparse.ArgumentParser:
     evidence_add = evidence_commands.add_parser(
         "add", help="Register a local artifact."
     )
-    evidence_add.add_argument("--type", required=True, choices=EVIDENCE_TYPES)
+    evidence_add.add_argument("--type", required=True, choices=MANUAL_EVIDENCE_TYPES)
     evidence_add.add_argument("--file", required=True, type=Path)
     evidence_add.add_argument(
         "--trust",
@@ -345,6 +350,12 @@ def execute(
             return project.create_playtest_protocol(command.protocol, expected_revision)
         if command.playtest_command == "import":
             return project.import_playtest(command.file, expected_revision)
+        if command.playtest_command == "revoke":
+            return project.revoke_playtest_evidence(
+                command.evidence,
+                command.reason,
+                expected_revision,
+            )
     if command.command == "decide":
         return project.decide(
             command.decision,

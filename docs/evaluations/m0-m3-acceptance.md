@@ -1,0 +1,56 @@
+# M0–M3 Acceptance Audit
+
+- Date: 2026-09-24
+- Scope: the engineering exit criteria in `docs/planning/roadmap.md` for
+  Milestones 0 through 3.
+- Product validation remains separate: `docs/planning/mvp.md` also calls for
+  two actual external prototype sessions and an independent review of the raw
+  observations. Those human activities have not been recorded in this repo;
+  `mvp-field-validation.md` contains the handoff for arranging them.
+
+| Milestone | Exit evidence | Remaining verification |
+|---|---|---|
+| M0 design baseline | `docs/product.md`, `docs/architecture.md`, `docs/workflow.md`, `docs/cli.md`, `docs/skills.md`, `docs/research.md`, the MVP plan and accepted ADRs define product ownership and non-goals. | None for the design baseline. |
+| M1 state and evidence CLI | `tests/cli/test_milestone1.py` exercises initialization, replayable hash-chained history, corrupted state, stale revisions, lock contention, evidence freshness and reconciliation. A stale snapshot is backed up byte for byte before replacement; missing evidence prevents reconciliation. | The new Windows CI job must run after these changes are submitted. |
+| M2 prototype workflow | `tests/cli/test_engine_integration.py` uses a real Godot 4 process for import, startup, failure, deterministic gameplay behavior and an actual recorded play-state frame. Godot source errors fail a run even with process exit code zero. Godot gates require tool-generated build and startup evidence plus a verified image and a human readiness rationale. Skill evaluation is in `m2-skill-evaluation.md`. Codex also created a distinct small game and verified its mechanics and CLI build/test path in `m2-unseen-prototype.md`. | The Linux Xvfb capture job must run on CI after these working-tree changes are submitted. The new game's hypothesis lacks human approval, so it has not reached the playtest-ready stage; a Loopforge Agent live-model run is also unrecorded. |
+| M3 human playtest loop | `contracts/loopforge-playtest-protocol-v1.schema.json` and `loopforge-playtest-report-v1.schema.json` define recorded protocol and report shapes. Agent, CLI and Workbench tests cover import, consent, separate raw observations and interpretation, evidence citations, early kill/refactor, and keep restrictions. Consent revocation invalidates claims and retries report deletion after an I/O failure. Skill evaluation is in `m3-skill-evaluation.md`. | Actual external participant observations and independent conclusion review remain pending under the MVP verification strategy. |
+
+## Negative paths explicitly exercised
+
+- Generic manual evidence cannot register an external playtest report; Godot
+  manual build/test claims cannot satisfy its adapter gate.
+- A missing or modified latest artifact is `invalid` at a stage gate and cannot
+  reveal an older passing record as the current result.
+- Text posing as an image cannot satisfy visual review. The real-engine fixture
+  records a frame and verifies visible player and hazard pixels.
+- A mismatched build identity, changed source, absent protocol, missing consent,
+  malformed report, revoked report or absent approver blocks the relevant gate
+  or decision.
+- Reconciliation refuses to mask missing evidence, and an interrupted report
+  deletion remains visible and retryable.
+
+The skill evaluations test planning and routing behavior. They do not replace
+the external participant and reviewer required to establish whether the
+prototype conclusions match actual play.
+
+## Local verification on 2026-09-24
+
+- Python with Godot 4.7.2 available: `unittest discover` ran 590 tests, passed,
+  with 8 live-provider tests skipped because no test provider was configured.
+- Real Godot engine integration: 9 tests passed, including recorded play-state
+  pixels, a script parse error with exit code zero, and latest-artifact
+  invalidation.
+- Linux ARM64 (Ubuntu 24.04 VM, Godot 4.3, Xvfb and Mesa): all 9 real-engine
+  integration tests passed, including runtime capture. The initial run exposed
+  missing XCursor, Xinerama and XInput libraries; the CI install step now
+  includes those packages. This local VM run does not replace the x86_64 CI job.
+- Workbench: 260 tests passed; TypeScript typecheck and production Vite build
+  passed.
+- Tauri: 21 Rust tests passed.
+- Changed Core and focused test files checked with Ruff; `git diff --check`, contract JSON parse,
+  CI YAML parse, source distribution and wheel builds passed.
+
+The new Linux/Xvfb visual job and Windows locking job have not run against the
+uncommitted working tree. Their results must be read after these changes are
+submitted. Full-repository Ruff and Rust formatting checks are not green in
+the shared working tree and were not counted as passing verification.

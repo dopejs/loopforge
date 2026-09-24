@@ -90,7 +90,8 @@ loopforge decide refactor --file <revised-hypothesis.md> \
 | Interrupted engine run | Run `doctor`; preserve orphan diagnostics and rerun as a new run ID |
 | Source changed | Treat affected evidence as stale and regenerate it |
 | No external participant | Remain at `PLAYTEST_REQUIRED` |
-| Consent declined/withdrawn | Stop collection; do not import or cite the affected report |
+| Consent declined/withdrawn before import | Stop collection; do not import or cite the affected report |
+| Consent withdrawn after import | Revoke the playtest evidence immediately; do not cite it |
 | Early path selected | Permit only `kill` or `refactor` |
 
 Never use direct file edits, stale evidence, fabricated approvals, or a relabeled

@@ -6,6 +6,7 @@ import type { AgentPhase, AgentState, TranscriptEntry } from "../agent";
 import { useProjectStatus } from "../project";
 import { Composer, Transcript } from "./AgentPanel";
 import { ApprovalPanel } from "./ApprovalPanel";
+import { QuestionCard } from "./QuestionCard";
 import { CanvasWorkspace } from "./workspaces/Canvas";
 import { FlowWorkspace } from "./workspaces/Flow";
 import { TestWorkspace } from "./workspaces/Test";
@@ -146,6 +147,7 @@ export function Workspace({
           busy={busy}
           variant="page"
           stage={status?.stage}
+          projectRoot={projectRoot}
           onSuggest={agentPhase === "ready" ? onSend : undefined}
         />
         {/*
@@ -155,6 +157,13 @@ export function Workspace({
           rather than read -- while the runtime holds the call open waiting for
           an answer that means something.
         */}
+        {/*
+          Above the approval, because they answer different things: a question
+          is the agent not knowing what you want, an approval is it asking
+          permission for something it has already decided. Both can be waiting
+          at once.
+        */}
+        <QuestionCard projectRoot={projectRoot} enabled={agentPhase === "ready"} />
         <ApprovalPanel projectRoot={projectRoot} enabled={agentPhase === "ready"} />
         <Composer
           projectRoot={projectRoot}

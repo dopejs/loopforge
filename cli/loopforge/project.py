@@ -32,6 +32,7 @@ EVIDENCE_TYPES = (
     "technical",
     "other",
 )
+MANUAL_EVIDENCE_TYPES = tuple(kind for kind in EVIDENCE_TYPES if kind != "playtest")
 MANUAL_TRUST_LEVELS = ("manually_imported", "human_attested")
 RESULTS = ("passed", "failed", "observation")
 GENERATED_DIRS = (
@@ -81,8 +82,10 @@ TRANSITIONS = {
     "PROTOTYPE_DECISION": {"KILLED", "PROTOTYPING", "VERTICAL_SLICE"},
 }
 PLAYTEST_REPORT_FIELDS = (
+    "build_identity",
     "participant_context",
     "consent_status",
+    "assistance_given",
     "raw_observations",
     "comprehension_time",
     "confusion_points",
@@ -91,7 +94,30 @@ PLAYTEST_REPORT_FIELDS = (
     "strategies",
     "replay_behavior",
     "interpretation",
+    "sensitive_data",
 )
+PLAYTEST_LIST_FIELDS = (
+    "raw_observations",
+    "confusion_points",
+    "failure_points",
+    "abandonment_points",
+    "strategies",
+)
+PLAYTEST_TEXT_FIELDS = (
+    "build_identity",
+    "participant_context",
+    "assistance_given",
+    "comprehension_time",
+    "replay_behavior",
+    "interpretation",
+    "sensitive_data",
+)
+PLAYTEST_CONSENT_VALUES = ("obtained", "not_required")
+MAX_PLAYTEST_PROTOCOL_CHARS = 64 * 1024
+MAX_PLAYTEST_ITEMS = 200
+MAX_PLAYTEST_FIELD_CHARS = 4_000
+MAX_DECISION_RATIONALE_CHARS = 8_000
+MAX_DECISION_EVIDENCE = 64
 
 
 class LoopforgeProject:
@@ -523,6 +549,8 @@ class LoopforgeProject:
         experiment_id = state["active_experiment"]["experiment_id"]
         hypothesis_revision = state["active_experiment"]["hypothesis_revision"]
         for record in evidence.values():
+            if record.get("revoked"):
+                continue
             subject = record.get("subject", {})
             if (
                 subject.get("experiment_id") != experiment_id
@@ -538,7 +566,12 @@ class LoopforgeProject:
         build = latest_record(scoped.get("build", []))
         test = latest_record(scoped.get("test", []))
         technical_records = [record for record in (build, test) if record]
-        if (
+        if any(
+            not self._evidence_eligible_for_claim(record)
+            for record in technical_records
+        ):
+            claims["TECHNICALLY_VALIDATED"] = claim("unknown", technical_records)
+        elif (
             build
             and test
             and build.get("result") == "passed"
@@ -555,25 +588,31 @@ class LoopforgeProject:
             claims["TECHNICALLY_VALIDATED"] = claim("unknown", [])
 
         capture = latest_record(scoped.get("capture", []))
-        claims["VISUALLY_REVIEWED"] = (
-            claim("satisfied", [capture])
-            if capture
-            else claim("stale", stale.get("capture", []))
-            if stale.get("capture")
-            else claim("unknown", [])
-        )
+        if capture:
+            capture_status = (
+                "satisfied" if self._evidence_eligible_for_claim(capture) else "unknown"
+            )
+            claims["VISUALLY_REVIEWED"] = claim(capture_status, [capture])
+        elif stale.get("capture"):
+            claims["VISUALLY_REVIEWED"] = claim("stale", stale["capture"])
+        else:
+            claims["VISUALLY_REVIEWED"] = claim("unknown", [])
         playtest = latest_record(scoped.get("playtest", []))
-        claims["HUMAN_PLAYTESTED"] = (
-            claim("satisfied", [playtest])
-            if playtest
-            else claim("stale", stale.get("playtest", []))
-            if stale.get("playtest")
-            else claim("unknown", [])
-        )
+        valid_playtest = None
+        if playtest:
+            if self._evidence_eligible_for_claim(playtest):
+                valid_playtest = playtest
+            claims["HUMAN_PLAYTESTED"] = claim(
+                "satisfied" if valid_playtest else "unknown", [playtest]
+            )
+        elif stale.get("playtest"):
+            claims["HUMAN_PLAYTESTED"] = claim("stale", stale["playtest"])
+        else:
+            claims["HUMAN_PLAYTESTED"] = claim("unknown", [])
         decision = self._latest_decision(experiment_id, hypothesis_revision)
-        if decision and decision.get("decision") == "keep" and playtest:
+        if decision and decision.get("decision") == "keep" and valid_playtest:
             claims["FUN_HYPOTHESIS_SUPPORTED"] = claim(
-                "satisfied", [playtest], [decision]
+                "satisfied", [valid_playtest], [decision]
             )
         elif decision and decision.get("decision") == "kill":
             claims["FUN_HYPOTHESIS_SUPPORTED"] = claim("failed", [], [decision])
@@ -586,11 +625,16 @@ class LoopforgeProject:
         self, events: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         diagnostics: list[dict[str, Any]] = []
-        evidence_ids = set(self._evidence_by_id())
+        evidence_records = self._evidence_by_id()
+        evidence_ids = set(evidence_records)
+        registered_before: set[str] = set()
         for event in events:
             payload = event["payload"]
             if event["event_type"] == "evidence.registered":
                 record = payload["evidence"]
+                registered_before.add(str(record.get("evidence_id") or ""))
+                if evidence_records.get(record.get("evidence_id"), {}).get("revoked"):
+                    continue
                 artifact = record.get("artifact", {})
                 path = artifact_path(self.root, artifact)
                 if path is None or not path.is_file():
@@ -607,6 +651,27 @@ class LoopforgeProject:
                             "EVIDENCE_CHECKSUM_INVALID",
                             "Referenced evidence checksum does not match the file.",
                             event["event_id"],
+                        )
+                    )
+            elif event["event_type"] == "evidence.revoked":
+                identifier = str(payload.get("evidence_id") or "")
+                record = evidence_records.get(identifier)
+                if identifier not in registered_before or record is None:
+                    diagnostics.append(
+                        diagnostic(
+                            "EVIDENCE_REVOCATION_UNKNOWN",
+                            "Evidence revocation references an unknown record.",
+                            event["event_id"],
+                            {"evidence_id": identifier},
+                        )
+                    )
+                elif record.get("type") != "playtest":
+                    diagnostics.append(
+                        diagnostic(
+                            "EVIDENCE_REVOCATION_TYPE_INVALID",
+                            "Only external playtest evidence may be consent-revoked.",
+                            event["event_id"],
+                            {"evidence_id": identifier},
                         )
                     )
             elif event["event_type"] == "hypothesis.created":
@@ -677,9 +742,53 @@ class LoopforgeProject:
         }
 
     def reconcile(self, apply: bool) -> dict[str, Any]:
-        return self.store.reconcile(apply)
+        def require_intact_history(
+            events: list[dict[str, Any]], projected: dict[str, Any]
+        ) -> None:
+            config = self.store.read_project_config()
+            if config["project_id"] != projected["project_id"]:
+                raise InvalidStateError(
+                    "Project configuration and event history disagree.",
+                    "PROJECT_ID_MISMATCH",
+                )
+            diagnostics = self._record_integrity_diagnostics(events)
+            if diagnostics:
+                raise InvalidStateError(
+                    "Referenced artifacts are invalid; reconcile cannot repair them.",
+                    "RECONCILE_INTEGRITY_FAILED",
+                    {"diagnostics": diagnostics},
+                )
+
+        return self.store.reconcile(apply, require_intact_history)
 
     def add_evidence(
+        self,
+        evidence_type: str,
+        file: Path,
+        trust_level: str,
+        result: str,
+        expected_revision: int | None,
+        producer: str | None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if evidence_type == "playtest":
+            raise InvalidStateError(
+                "External playtest evidence must be imported through a "
+                "validated report.",
+                "PLAYTEST_IMPORT_REQUIRED",
+                {"remediation": "Use playtest create, then playtest import."},
+            )
+        return self._register_evidence(
+            evidence_type,
+            file,
+            trust_level,
+            result,
+            expected_revision,
+            producer,
+            metadata,
+        )
+
+    def _register_evidence(
         self,
         evidence_type: str,
         file: Path,
@@ -769,17 +878,100 @@ class LoopforgeProject:
 
     def list_evidence(self) -> dict[str, Any]:
         events = self.store.read_events()
-        records: list[dict[str, Any]] = []
-        for event in events:
-            if event["event_type"] != "evidence.registered":
-                continue
-            record = dict(event["payload"]["evidence"])
-            record["registration_revision"] = event["revision"]
-            records.append(record)
+        by_id = self._evidence_by_id()
+        records = sorted(
+            by_id.values(), key=lambda record: record["registration_revision"]
+        )
         return {
             "observed_revision": events[-1]["revision"],
             "evidence": records,
         }
+
+    def revoke_playtest_evidence(
+        self,
+        evidence_id: str,
+        reason: str,
+        expected_revision: int | None,
+    ) -> dict[str, Any]:
+        identifier = str(evidence_id or "").strip()
+        rationale = str(reason or "").strip()
+        if not identifier:
+            raise InvalidStateError(
+                "A playtest evidence ID is required.",
+                "PLAYTEST_EVIDENCE_MISSING",
+            )
+        if not rationale:
+            raise InvalidStateError(
+                "A consent-revocation reason is required.",
+                "PLAYTEST_REVOCATION_REASON_MISSING",
+            )
+        if len(rationale) > MAX_PLAYTEST_FIELD_CHARS:
+            raise InvalidStateError(
+                "The consent-revocation reason is too long.",
+                "PLAYTEST_REVOCATION_REASON_INVALID",
+                {"max_characters": MAX_PLAYTEST_FIELD_CHARS},
+            )
+        records = self._evidence_by_id()
+        record = records.get(identifier)
+        if record is None or record.get("type") != "playtest":
+            raise InvalidStateError(
+                "The requested external playtest evidence does not exist.",
+                "PLAYTEST_EVIDENCE_UNKNOWN",
+                {"evidence_id": identifier},
+            )
+        if record.get("revoked"):
+            state, _ = self.store.current_state()
+            deleted, deletion_error = self._delete_stored_playtest_report(record)
+            return {
+                "evidence_id": identifier,
+                "revoked": True,
+                "already_revoked": True,
+                "artifact_deleted": deleted,
+                "deletion_error": deletion_error,
+                "committed_revision": state["revision"],
+            }
+        state, _ = self.store.current_state()
+        revoked_at = utc_now()
+        event, final_state = self.store.commit(
+            "evidence.revoked",
+            {
+                "evidence_id": identifier,
+                "reason": rationale,
+                "revoked_at": revoked_at,
+            },
+            state["revision"] if expected_revision is None else expected_revision,
+        )
+        deleted, deletion_error = self._delete_stored_playtest_report(record)
+        return {
+            "evidence_id": identifier,
+            "revocation_event_id": event["event_id"],
+            "revoked": True,
+            "already_revoked": False,
+            "artifact_deleted": deleted,
+            "deletion_error": deletion_error,
+            "committed_revision": final_state["revision"],
+        }
+
+    def _delete_stored_playtest_report(
+        self, record: dict[str, Any]
+    ) -> tuple[bool, str | None]:
+        artifact = record.get("artifact", {})
+        path = artifact_path(self.root, artifact)
+        if (
+            path is None
+            or artifact.get("kind") != "project-relative"
+            or not path.is_relative_to(self.store.state_dir / "playtests")
+        ):
+            return False, "The report is not in Loopforge's managed playtest store."
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            return False, str(exc)
+        return True, None
+
+    def _evidence_artifact_exists(self, record: dict[str, Any]) -> bool:
+        path = artifact_path(self.root, record.get("artifact", {}))
+        return path is not None and path.is_file()
 
     def run_engine(
         self,
@@ -803,6 +995,13 @@ class LoopforgeProject:
             raise ToolUnavailableError(
                 "Godot executable was not found on PATH.",
                 {"operation": operation, "expected": ["godot4", "godot"]},
+            )
+        adapter_version = self._godot_version(executable)
+        if godot_major_version(adapter_version) != 4:
+            raise InvalidStateError(
+                "The Godot adapter requires a Godot 4 executable.",
+                "GODOT_VERSION_UNSUPPORTED",
+                {"executable": executable, "version": adapter_version},
             )
 
         state, _ = self.store.current_state()
@@ -830,20 +1029,22 @@ class LoopforgeProject:
             exit_code = completed.returncode
             stdout = completed.stdout
             stderr = completed.stderr
-            if exit_code != 0:
+            engine_errors = godot_error_lines(stdout, stderr)
+            if exit_code != 0 or engine_errors:
                 status = "failed"
         except subprocess.TimeoutExpired as exc:
             status = "interrupted"
             timed_out = True
             stdout = _decode_process_output(exc.stdout)
             stderr = _decode_process_output(exc.stderr)
+            engine_errors = godot_error_lines(stdout, stderr)
 
         run_record = {
             "schema_version": 1,
             "run_id": run_id,
             "operation": operation,
             "adapter": "godot",
-            "adapter_version": self._godot_version(executable),
+            "adapter_version": adapter_version,
             "command": command,
             "cwd": str(self.root),
             "started_at": started_at,
@@ -853,6 +1054,7 @@ class LoopforgeProject:
             "timed_out": timed_out,
             "stdout": stdout,
             "stderr": stderr,
+            "engine_errors": engine_errors,
         }
         atomic_write_json(run_path, run_record)
         run_event, _ = self.store.commit(
@@ -911,6 +1113,13 @@ class LoopforgeProject:
         file: Path,
         expected_revision: int | None,
     ) -> dict[str, Any]:
+        candidate = file.expanduser().resolve()
+        if candidate.is_file() and not valid_capture_image(candidate):
+            raise InvalidStateError(
+                "The selected capture has no valid PNG, JPEG, or WebP header.",
+                "CAPTURE_FORMAT_INVALID",
+                {"path": str(candidate)},
+            )
         return self.add_evidence(
             "capture",
             file,
@@ -948,16 +1157,31 @@ class LoopforgeProject:
                 "PLAYTEST_PROTOCOL_INVALID",
                 {"path": str(source), "cause": str(exc)},
             ) from exc
+        if not content.strip():
+            raise InvalidStateError(
+                "The playtest protocol must not be empty.",
+                "PLAYTEST_PROTOCOL_INVALID",
+            )
+        if len(content) > MAX_PLAYTEST_PROTOCOL_CHARS:
+            raise InvalidStateError(
+                "The playtest protocol is too large.",
+                "PLAYTEST_PROTOCOL_INVALID",
+                {"max_characters": MAX_PLAYTEST_PROTOCOL_CHARS},
+            )
+        source_identity = self._source_identity(self._registered_artifact_paths())
         protocol_id = opaque_id("plt")
         relative_path = Path(".loopforge") / "playtests" / f"{protocol_id}-protocol.md"
         stored_path = self.root / relative_path
         atomic_write_text(stored_path, content)
         protocol = {
+            "schema_version": 1,
             "protocol_id": protocol_id,
             "experiment_id": state["active_experiment"]["experiment_id"],
             "hypothesis_revision": state["active_experiment"]["hypothesis_revision"],
             "path": relative_path.as_posix(),
             "checksum": sha256_file(stored_path),
+            "source_identity": source_identity,
+            "build_identity": playtest_build_identity(source_identity),
             "created_at": utc_now(),
         }
         try:
@@ -1005,13 +1229,44 @@ class LoopforgeProject:
                 "PLAYTEST_REPORT_INVALID",
                 {"cause": str(exc)},
             ) from exc
-        validate_playtest_report(report)
+        report = normalize_playtest_report(report)
+        current_source_identity = self._source_identity(
+            self._registered_artifact_paths()
+        )
+        protocol_source_identity = protocol.get("source_identity")
+        if (
+            protocol_source_identity is not None
+            and protocol_source_identity != current_source_identity
+        ):
+            raise InvalidStateError(
+                "The project changed after this playtest protocol was recorded.",
+                "PLAYTEST_BUILD_STALE",
+                {
+                    "protocol_build_identity": protocol.get("build_identity"),
+                    "current_build_identity": playtest_build_identity(
+                        current_source_identity
+                    ),
+                },
+            )
+        expected_build_identity = protocol.get("build_identity") or (
+            playtest_build_identity(current_source_identity)
+        )
+        if report["build_identity"] != expected_build_identity:
+            raise InvalidStateError(
+                "The playtest report does not identify the build bound to "
+                "its protocol.",
+                "PLAYTEST_BUILD_MISMATCH",
+                {
+                    "expected": expected_build_identity,
+                    "reported": report["build_identity"],
+                },
+            )
         report_id = opaque_id("rpt")
         relative_path = Path(".loopforge") / "playtests" / f"{report_id}.json"
         stored_path = self.root / relative_path
         atomic_write_json(stored_path, report)
         try:
-            result = self.add_evidence(
+            result = self._register_evidence(
                 "playtest",
                 stored_path,
                 "human_attested",
@@ -1029,6 +1284,12 @@ class LoopforgeProject:
             raise
         result["report_id"] = report_id
         return result
+
+    def playtest_build_identity(self) -> str:
+        """Stable public token for the source a protocol will bind to."""
+        return playtest_build_identity(
+            self._source_identity(self._registered_artifact_paths())
+        )
 
     def decide(
         self,
@@ -1051,14 +1312,30 @@ class LoopforgeProject:
                 "DECISION_STAGE_INVALID",
                 {"stage": state["stage"]},
             )
-        if not evidence_ids:
+        evidence_ids = [str(item).strip() for item in evidence_ids]
+        if not evidence_ids or any(not item for item in evidence_ids):
             raise InvalidStateError(
                 "At least one evidence ID is required.", "DECISION_EVIDENCE_MISSING"
             )
+        if len(evidence_ids) > MAX_DECISION_EVIDENCE:
+            raise InvalidStateError(
+                "The decision cites too many evidence records.",
+                "DECISION_EVIDENCE_INVALID",
+                {"max_items": MAX_DECISION_EVIDENCE},
+            )
+        approver_id = str(approver_id or "").strip()
+        approver_name = str(approver_name or "").strip()
+        rationale = str(rationale or "").strip()
         if not all((approver_id, approver_name, rationale)):
             raise InvalidStateError(
                 "Approver ID, approver name, and rationale are required.",
                 "APPROVAL_INCOMPLETE",
+            )
+        if len(rationale) > MAX_DECISION_RATIONALE_CHARS:
+            raise InvalidStateError(
+                "The decision rationale is too long.",
+                "DECISION_RATIONALE_INVALID",
+                {"max_characters": MAX_DECISION_RATIONALE_CHARS},
             )
         records = self._evidence_by_id()
         missing = [
@@ -1069,6 +1346,17 @@ class LoopforgeProject:
                 "The decision cites unknown evidence IDs.",
                 "DECISION_EVIDENCE_UNKNOWN",
                 {"missing": missing},
+            )
+        revoked = [
+            evidence_id
+            for evidence_id in evidence_ids
+            if records[evidence_id].get("revoked")
+        ]
+        if revoked:
+            raise InvalidStateError(
+                "The decision cites revoked evidence.",
+                "DECISION_EVIDENCE_REVOKED",
+                {"evidence_ids": revoked},
             )
         wrong_subject = [
             evidence_id
@@ -1085,7 +1373,32 @@ class LoopforgeProject:
                 "DECISION_EVIDENCE_OUT_OF_SCOPE",
                 {"evidence_ids": wrong_subject},
             )
-        if decision == "keep" and self._latest_evidence(state, "playtest") is None:
+        invalid_artifacts: list[str] = []
+        for evidence_id in evidence_ids:
+            artifact = records[evidence_id].get("artifact", {})
+            path = artifact_path(self.root, artifact)
+            if (
+                path is None
+                or not path.is_file()
+                or not checksum_matches(path, artifact.get("checksum"))
+                or (
+                    records[evidence_id].get("type") == "playtest"
+                    and not self._validated_playtest_evidence(records[evidence_id])
+                )
+            ):
+                invalid_artifacts.append(evidence_id)
+        if invalid_artifacts:
+            raise InvalidStateError(
+                "The decision cites missing or modified evidence artifacts.",
+                "DECISION_EVIDENCE_INVALID",
+                {"evidence_ids": invalid_artifacts},
+            )
+        playtest = (
+            self._latest_evidence(state, "playtest") if decision == "keep" else None
+        )
+        if decision == "keep" and (
+            playtest is None or not self._evidence_eligible_for_claim(playtest)
+        ):
             raise GateBlockedError(
                 "Keep requires an applicable external playtest report.",
                 {"requirement": "PLAYTEST_REPORT"},
@@ -1097,7 +1410,6 @@ class LoopforgeProject:
                     "An early technical or scope decision cannot keep the prototype.",
                     {"requirement": "EXTERNAL_PLAYTEST_PATH_REQUIRED"},
                 )
-            playtest = self._latest_evidence(state, "playtest")
             if playtest["evidence_id"] not in evidence_ids:
                 raise InvalidStateError(
                     "A keep decision must cite the applicable playtest report.",
@@ -1249,7 +1561,10 @@ class LoopforgeProject:
         fields = parse_hypothesis(content, content_path.suffix.lower())
         approval = None
         if approver_id or approver_name or rationale:
-            if not all((approver_id, approver_name, rationale)):
+            if not all(
+                str(value or "").strip()
+                for value in (approver_id, approver_name, rationale)
+            ):
                 raise InvalidStateError(
                     "Approver ID, approver name, and rationale must be supplied "
                     "together.",
@@ -1330,6 +1645,10 @@ class LoopforgeProject:
         target_stage = target_stage.upper()
         state, snapshot_status = self.store.current_state()
         requirements: list[dict[str, Any]] = []
+        human_confirmed = all(
+            isinstance(value, str) and bool(value.strip())
+            for value in (approver_id, approver_name, rationale)
+        )
         if snapshot_status != "current":
             requirements.append(
                 requirement(
@@ -1386,6 +1705,13 @@ class LoopforgeProject:
                     status = "missing"
                     message = f"Current-source {evidence_type} evidence is required."
                     ids: list[str] = []
+                elif not self._evidence_eligible_for_claim(record):
+                    status = "invalid"
+                    message = (
+                        f"The latest {evidence_type} evidence artifact or "
+                        "provenance is invalid; regenerate it."
+                    )
+                    ids = [record["evidence_id"]]
                 elif record.get("result") != "passed" and evidence_type != "capture":
                     status = "failed"
                     message = f"The latest {evidence_type} evidence did not pass."
@@ -1395,12 +1721,26 @@ class LoopforgeProject:
                     message = f"Current-source {evidence_type} evidence is present."
                     ids = [record["evidence_id"]]
                 requirements.append(requirement(label, status, message, ids))
+            requirements.append(
+                requirement(
+                    "HUMAN_APPROVAL",
+                    "satisfied" if human_confirmed else "missing",
+                    "A human must confirm this exact build is ready for "
+                    "external playtest.",
+                )
+            )
         elif current_stage == "PROTOTYPING" and target_stage == "PROTOTYPE_DECISION":
             early_evidence = self._latest_evidence(state, "technical")
+            if early_evidence and not self._evidence_eligible_for_claim(early_evidence):
+                early_evidence = None
             if early_evidence is None:
                 for evidence_type in ("build", "test"):
                     candidate = self._latest_evidence(state, evidence_type)
-                    if candidate and candidate.get("result") == "failed":
+                    if (
+                        candidate
+                        and self._evidence_eligible_for_claim(candidate)
+                        and candidate.get("result") == "failed"
+                    ):
                         early_evidence = candidate
                         break
             requirements.extend(
@@ -1422,9 +1762,7 @@ class LoopforgeProject:
                     ),
                     requirement(
                         "HUMAN_APPROVAL",
-                        "satisfied"
-                        if all((approver_id, approver_name, rationale))
-                        else "missing",
+                        "satisfied" if human_confirmed else "missing",
                         "A human approver and rationale are required for an "
                         "early decision.",
                     ),
@@ -1438,10 +1776,22 @@ class LoopforgeProject:
             requirements.append(
                 requirement(
                     "PLAYTEST_REPORT",
-                    "satisfied" if record else "missing",
-                    "An external playtest report scoped to the active "
-                    "hypothesis is required.",
+                    "missing"
+                    if record is None
+                    else "satisfied"
+                    if self._evidence_eligible_for_claim(record)
+                    else "invalid",
+                    "A valid external playtest report scoped to the active "
+                    "hypothesis and recorded protocol is required.",
                     [record["evidence_id"]] if record else [],
+                )
+            )
+            requirements.append(
+                requirement(
+                    "HUMAN_APPROVAL",
+                    "satisfied" if human_confirmed else "missing",
+                    "A human must confirm the imported observations are "
+                    "ready for a decision.",
                 )
             )
         elif current_stage == "PROTOTYPE_DECISION":
@@ -1592,6 +1942,13 @@ class LoopforgeProject:
                 record = dict(event["payload"]["evidence"])
                 record["registration_revision"] = event["revision"]
                 records[record["evidence_id"]] = record
+            elif event["event_type"] == "evidence.revoked":
+                record = records.get(event["payload"].get("evidence_id"))
+                if record is not None:
+                    record["revoked"] = True
+                    record["revoked_at"] = event["payload"].get("revoked_at")
+                    record["revocation_reason"] = event["payload"].get("reason")
+                    record["revocation_event_id"] = event["event_id"]
         return records
 
     def _registered_artifact_paths(self) -> set[Path]:
@@ -1609,11 +1966,14 @@ class LoopforgeProject:
     ) -> dict[str, Any] | None:
         hypothesis_revision = state["active_experiment"].get("hypothesis_revision")
         source_identity = self._source_identity(self._registered_artifact_paths())
-        records: list[dict[str, Any]] = []
-        for event in self.store.read_events():
+        evidence_records = self._evidence_by_id()
+        for event in reversed(self.store.read_events()):
             if event["event_type"] != "evidence.registered":
                 continue
             record = event["payload"]["evidence"]
+            current_record = evidence_records.get(record.get("evidence_id"), {})
+            if current_record.get("revoked"):
+                continue
             subject = record.get("subject", {})
             if (
                 record.get("type") == evidence_type
@@ -1624,8 +1984,86 @@ class LoopforgeProject:
             ):
                 current = dict(record)
                 current["registration_revision"] = event["revision"]
-                records.append(current)
-        return records[-1] if records else None
+                return current
+        return None
+
+    def _evidence_eligible_for_claim(self, record: dict[str, Any]) -> bool:
+        artifact = record.get("artifact", {})
+        path = artifact_path(self.root, artifact)
+        if (
+            path is None
+            or not path.is_file()
+            or not checksum_matches(path, artifact.get("checksum"))
+        ):
+            return False
+        evidence_type = record.get("type")
+        if evidence_type == "capture":
+            return valid_capture_image(path)
+        if evidence_type in {"build", "test"} and (
+            self.root / "project.godot"
+        ).is_file():
+            return (
+                record.get("trust_level") == "tool_generated"
+                and record.get("producer") == "loopforge.adapter.godot"
+                and isinstance(record.get("run_id"), str)
+            )
+        if evidence_type == "playtest":
+            return self._validated_playtest_evidence(record)
+        return True
+
+    def _validated_playtest_evidence(self, record: dict[str, Any]) -> bool:
+        if (
+            record.get("trust_level") != "human_attested"
+            or record.get("producer") != "local-playtest-import"
+        ):
+            return False
+        metadata = record.get("metadata")
+        if not isinstance(metadata, dict):
+            return False
+        protocol_id = metadata.get("protocol_id")
+        report_id = metadata.get("report_id")
+        if not isinstance(protocol_id, str) or not isinstance(report_id, str):
+            return False
+        artifact = record.get("artifact", {})
+        expected_path = f".loopforge/playtests/{report_id}.json"
+        if (
+            artifact.get("kind") != "project-relative"
+            or artifact.get("path") != expected_path
+        ):
+            return False
+        path = artifact_path(self.root, artifact)
+        if (
+            path is None
+            or not path.is_file()
+            or not checksum_matches(path, artifact.get("checksum"))
+        ):
+            return False
+        protocol = None
+        for event in self.store.read_events():
+            if event["event_type"] != "playtest.protocol.created":
+                continue
+            candidate = event["payload"]["protocol"]
+            if candidate.get("protocol_id") == protocol_id:
+                protocol = candidate
+                break
+        if protocol is None or not artifact_checksum_matches(
+            self.root, protocol.get("path"), protocol.get("checksum")
+        ):
+            return False
+        subject = record.get("subject", {})
+        if (
+            protocol.get("experiment_id") != subject.get("experiment_id")
+            or protocol.get("hypothesis_revision") != subject.get("hypothesis_revision")
+            or protocol.get("source_identity") != record.get("source_identity")
+        ):
+            return False
+        try:
+            report = normalize_playtest_report(
+                json.loads(path.read_text(encoding="utf-8"))
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, InvalidStateError):
+            return False
+        return report["build_identity"] == protocol.get("build_identity")
 
     def _source_identity(
         self, excluded_paths: set[Path] | None = None
@@ -1816,6 +2254,40 @@ def godot_major_version(version: str | None) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def godot_error_lines(stdout: str, stderr: str) -> list[str]:
+    """A Godot script or resource error can leave the process exit code at zero."""
+    errors: list[str] = []
+    for line in (stderr + "\n" + stdout).splitlines():
+        stripped = line.strip()
+        if re.match(r"^(?:SCRIPT ERROR|ERROR|FATAL ERROR):", stripped):
+            errors.append(stripped)
+    return errors[:20]
+
+
+def valid_capture_image(path: Path) -> bool:
+    """Reject mislabeled text while keeping manual image provenance explicit."""
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(32)
+            if (
+                header.startswith(b"\x89PNG\r\n\x1a\n")
+                and header[12:16] == b"IHDR"
+                and int.from_bytes(header[8:12], "big") == 13
+            ):
+                return (
+                    int.from_bytes(header[16:20], "big") > 0
+                    and int.from_bytes(header[20:24], "big") > 0
+                )
+            if header.startswith(b"\xff\xd8\xff"):
+                handle.seek(-2, os.SEEK_END)
+                return handle.read(2) == b"\xff\xd9"
+            if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+                return int.from_bytes(header[4:8], "little") + 8 <= path.stat().st_size
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def hypothesis_from_event(event: dict[str, Any]) -> dict[str, Any] | None:
     if event.get("event_type") not in {"hypothesis.created", "decision.recorded"}:
         return None
@@ -1958,7 +2430,11 @@ def _decode_process_output(value: str | bytes | None) -> str:
     return value
 
 
-def validate_playtest_report(report: Any) -> None:
+def playtest_build_identity(source_identity: dict[str, Any]) -> str:
+    return sha256_bytes(canonical_json_bytes(source_identity))
+
+
+def normalize_playtest_report(report: Any) -> dict[str, Any]:
     if not isinstance(report, dict):
         raise InvalidStateError(
             "The playtest report must be a JSON object.",
@@ -1971,36 +2447,73 @@ def validate_playtest_report(report: Any) -> None:
             "PLAYTEST_REPORT_INVALID",
             {"missing": missing},
         )
-    if report["consent_status"] not in {"obtained", "not_required"}:
+    unknown = sorted(set(report) - set(PLAYTEST_REPORT_FIELDS))
+    if unknown:
+        raise InvalidStateError(
+            f"The playtest report contains unknown fields: {', '.join(unknown)}.",
+            "PLAYTEST_REPORT_INVALID",
+            {"unknown": unknown},
+        )
+    if report["consent_status"] not in PLAYTEST_CONSENT_VALUES:
         raise InvalidStateError(
             "Playtest consent must be obtained or explicitly not required.",
             "PLAYTEST_CONSENT_INVALID",
         )
-    if (
-        not isinstance(report["raw_observations"], list)
-        or not report["raw_observations"]
-    ):
-        raise InvalidStateError(
-            "Playtest raw_observations must be a non-empty list.",
-            "PLAYTEST_REPORT_INVALID",
-        )
-    for field in (
-        "confusion_points",
-        "failure_points",
-        "abandonment_points",
-        "strategies",
-    ):
-        if not isinstance(report[field], list):
+    cleaned: dict[str, Any] = {"consent_status": report["consent_status"]}
+    for field in PLAYTEST_LIST_FIELDS:
+        value = report[field]
+        if not isinstance(value, list) or (field == "raw_observations" and not value):
             raise InvalidStateError(
-                f"Playtest {field} must be a list.",
+                f"Playtest {field} must be a "
+                f"{'non-empty ' if field == 'raw_observations' else ''}list.",
                 "PLAYTEST_REPORT_INVALID",
                 {"field": field},
             )
-    if (
-        not isinstance(report["interpretation"], str)
-        or not report["interpretation"].strip()
-    ):
-        raise InvalidStateError(
-            "Playtest interpretation must be a non-empty string.",
-            "PLAYTEST_REPORT_INVALID",
-        )
+        if len(value) > MAX_PLAYTEST_ITEMS:
+            raise InvalidStateError(
+                f"Playtest {field} has too many entries.",
+                "PLAYTEST_REPORT_INVALID",
+                {"field": field, "max_items": MAX_PLAYTEST_ITEMS},
+            )
+        items: list[str] = []
+        for index, item in enumerate(value):
+            if not isinstance(item, str) or not item.strip():
+                raise InvalidStateError(
+                    f"Every playtest {field} entry must be non-empty text.",
+                    "PLAYTEST_REPORT_INVALID",
+                    {"field": field, "index": index},
+                )
+            cleaned_item = item.strip()
+            if len(cleaned_item) > MAX_PLAYTEST_FIELD_CHARS:
+                raise InvalidStateError(
+                    f"A playtest {field} entry is too long.",
+                    "PLAYTEST_REPORT_INVALID",
+                    {
+                        "field": field,
+                        "index": index,
+                        "max_characters": MAX_PLAYTEST_FIELD_CHARS,
+                    },
+                )
+            items.append(cleaned_item)
+        cleaned[field] = items
+    for field in PLAYTEST_TEXT_FIELDS:
+        value = report[field]
+        if not isinstance(value, str) or not value.strip():
+            raise InvalidStateError(
+                f"Playtest {field} must be non-empty text.",
+                "PLAYTEST_REPORT_INVALID",
+                {"field": field},
+            )
+        cleaned_value = value.strip()
+        if len(cleaned_value) > MAX_PLAYTEST_FIELD_CHARS:
+            raise InvalidStateError(
+                f"Playtest {field} is too long.",
+                "PLAYTEST_REPORT_INVALID",
+                {"field": field, "max_characters": MAX_PLAYTEST_FIELD_CHARS},
+            )
+        cleaned[field] = cleaned_value
+    return {field: cleaned[field] for field in PLAYTEST_REPORT_FIELDS}
+
+
+def validate_playtest_report(report: Any) -> None:
+    normalize_playtest_report(report)

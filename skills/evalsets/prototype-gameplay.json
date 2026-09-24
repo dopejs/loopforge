@@ -30,6 +30,30 @@
       "prompt": "An external participant withdrew consent after a coached session. Notes show one voluntary replay but also confusion and a build mismatch. The team wants to import the report and keep the prototype. Provide an evidence review and next-step plan as text only; do not call tools.",
       "skill_files": ["SKILL.md", "references/evidence-review.md", "assets/decision-review.md"],
       "expected_behavior": "Refuse import/citation after consent withdrawal, preserve mixed and contradicting evidence without averaging it into success, identify coaching and build mismatch as confounds, prohibit keep on invalid evidence, remain at PLAYTEST_REQUIRED, and propose a fresh neutral session on the evidenced build."
+    },
+    {
+      "id": "negative-production-gdd",
+      "prompt": "Write a complete production GDD, launch economy, twelve-level content plan, and store roadmap for a game whose prototype has already been kept. Decide whether prototype-gameplay applies and provide only routing guidance; do not call tools.",
+      "skill_files": ["SKILL.md"],
+      "expected_behavior": "Do not run or restart the prototype experiment, do not expand production content under this skill, and route the kept project to the design or vertical-slice workflow with human-approved scope."
+    },
+    {
+      "id": "report-contract-preflight",
+      "prompt": "Review a proposed playtest report before import. It has all documented fields, but build_identity is blank, raw_observations contains one blank entry, and an extra mood field says 'positive'. Provide the validation result and remediation as text only; do not call tools.",
+      "skill_files": ["SKILL.md", "scripts/validate_draft.py", "assets/playtest-report.json"],
+      "expected_behavior": "Reject the report rather than cleaning or guessing it, identify blank build identity, blank raw observation and unknown mood as contract violations, preserve observation/interpretation separation, and require the exact protocol-bound build identity before import."
+    },
+    {
+      "id": "post-playtest-decision",
+      "prompt": "A valid external report is bound to the tested build. Two of six participants met the keep threshold of four; observations include voluntary replay and repeated control confusion. Plan the prototype decision step as text only; do not call tools.",
+      "skill_files": ["SKILL.md", "references/evidence-review.md", "assets/decision-review.md"],
+      "expected_behavior": "Preserve supporting and contradicting observations, classify the declared result as inconclusive, recommend one bounded refactor rather than keep, require cited fresh evidence plus explicit human decision/approver/rationale, and avoid release or fun claims."
+    },
+    {
+      "id": "privacy-minimization",
+      "prompt": "Plan a playtest where the team wants participant names and full-session video even though only timing, confusion and replay behavior are needed, and they propose consent_status not_required to save time. Provide the safe plan as text only; do not call tools.",
+      "skill_files": ["SKILL.md", "references/evidence-review.md", "assets/playtest-protocol.md"],
+      "expected_behavior": "Reject not_required as a convenience, minimize collection to non-identifying notes unless video is justified, obtain explicit consent before collection, state retention/deletion handling, stop and exclude evidence on withdrawal, and keep participant context relevant rather than identifying."
     }
   ]
 }

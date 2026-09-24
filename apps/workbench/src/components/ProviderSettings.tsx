@@ -56,19 +56,47 @@ function ProviderDetail({
    */
   const connection: { label: string; value: string }[] = [];
   if (provider.base_url) connection.push({ label: "baseUrl", value: provider.base_url });
-  connection.push({
-    label: "apiKey",
-    value: provider.secret_configured ? t("provider.secretSet") : t("provider.secretUnset")
-  });
+  /*
+    An account is not a key. The runtime has no auth mode for a subscription,
+    so it reports one as an API key with no secret configured -- and this said
+    `apiKey: Not configured` about an Anthropic account that was signed in and
+    answering, which reads as a broken setup and is the opposite of one.
+  */
+  if (provider.oauth_provider_id) {
+    connection.push({
+      label: "account",
+      value: provider.signed_in ? t("provider.signedIn") : t("provider.signedOut")
+    });
+  } else {
+    connection.push({
+      label: "apiKey",
+      value: provider.secret_configured ? t("provider.secretSet") : t("provider.secretUnset")
+    });
+  }
   if (provider.account_label)
     connection.push({ label: "account", value: provider.account_label });
   if (provider.plan) connection.push({ label: "plan", value: provider.plan });
 
   const runtime: { label: string; value: string }[] = [];
+  /*
+    Zero means "unset" to the runtime, not "zero milliseconds". Printed as
+    `0 ms` it said this provider times out immediately, next to a provider that
+    was working -- so the number that was meant to reassure was the one that
+    looked broken.
+  */
   if (provider.timeout_ms !== undefined)
-    runtime.push({ label: "timeout", value: `${provider.timeout_ms} ms` });
+    runtime.push({
+      label: "timeout",
+      value: provider.timeout_ms > 0 ? `${provider.timeout_ms} ms` : t("provider.runtimeDefault")
+    });
   if (provider.max_retries !== undefined)
-    runtime.push({ label: "retries", value: String(provider.max_retries) });
+    runtime.push({
+      label: "retries",
+      value:
+        provider.max_retries > 0
+          ? String(provider.max_retries)
+          : t("provider.runtimeDefault")
+    });
   if (provider.default_model)
     runtime.push({ label: "defaultModel", value: provider.default_model });
 

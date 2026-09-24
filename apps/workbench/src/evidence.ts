@@ -19,6 +19,8 @@ export type Evidence = {
   trust_level: TrustLevel | string;
   producer: string;
   created_at: string;
+  revoked?: boolean;
+  revoked_at?: string;
   path: string;
   /** `absolute` means the file lives outside the project and is only linked. */
   path_kind: "project-relative" | "absolute" | string;

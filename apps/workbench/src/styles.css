@@ -1779,9 +1779,55 @@ button:disabled {
 
 /* ================================================================ sidebar ==*/
 
+/*
+  A row and its delete. The delete is hidden until the row is hovered or
+  something in it has focus: a list of conversations should read as a list, not
+  as a column of × -- but it must not be mouse-only, so focus reveals it too.
+*/
+.sidebar-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-delete {
+  flex: none;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--faint, var(--dim));
+  font-size: var(--font-sm);
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.sidebar-row:hover .sidebar-delete,
+.sidebar-row:focus-within .sidebar-delete {
+  opacity: 1;
+}
+
+.sidebar-delete:hover { background: var(--surface3); color: var(--dim); }
+.sidebar-delete.danger { color: var(--danger, #b4413c); }
+.sidebar-delete:disabled { cursor: default; opacity: 0.5; }
+
+/* Once it is asking, it stays visible whether or not the pointer is over it --
+   a confirmation that disappears when the mouse drifts is a confirmation
+   nobody can answer. */
+.sidebar-confirm {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.sidebar-confirm .sidebar-delete { opacity: 1; }
+
 .sidebar-item {
   display: flex;
   width: 100%;
+  min-width: 0;
   align-items: center;
   padding: 7px 8px;
   border-radius: 7px;
@@ -2578,6 +2624,15 @@ button.chip.selected {
   font-size: var(--font-sm);
   line-height: 1.6;
   overflow-wrap: anywhere;
+  /*
+    Capped and scrollable. The reason carries the tool's whole argument list,
+    and since files became writable that is the whole of a file: approving a
+    two-hundred-line script pushed its own buttons off the bottom of the
+    window, so the thing being approved was unreachable.
+  */
+  max-height: 40vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
 }
 
 .permission-choice {
@@ -2595,6 +2650,197 @@ button.chip.selected {
 
 .permission-choice.active {
   background: var(--surface3);
+}
+
+/* -- permission switch ---------------------------------------------------- */
+
+/*
+  How much the agent may do, at the end of the composer's own row. It sits with
+  the shortcuts because it belongs to the box, and it is pushed to the far end
+  because it is not one: the chips insert text, this changes what the next turn
+  is allowed to do.
+*/
+.permission-switch {
+  position: relative;
+  margin-inline-start: auto;
+}
+
+/*
+  Opening upward. The composer is at the bottom of the window, so a menu that
+  dropped would open off screen -- the same reason the `@` mention list opens
+  above its box.
+*/
+.permission-menu {
+  position: absolute;
+  inset-block-end: calc(100% + 6px);
+  inset-inline-end: 0;
+  z-index: 20;
+  width: max(260px, 100%);
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+  list-style: none;
+}
+
+.permission-option {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+
+.permission-option:hover { background: var(--surface3); }
+.permission-option.active { background: var(--surface3); }
+
+.permission-option-name {
+  color: var(--dim);
+  font-size: var(--font-sm);
+}
+
+/* What the mode means, from the runtime rather than reworded here. Long enough
+   to need wrapping, which is why it is not a title attribute. */
+.permission-option-summary {
+  color: var(--muted);
+  font-size: var(--font-xs, var(--font-sm));
+  line-height: 1.45;
+  white-space: normal;
+}
+
+/* -- tool runs ------------------------------------------------------------ */
+
+/*
+  What the agent did, in the transcript beside what it said. Quieter than a
+  message: this is a record of work, not something anybody wrote, and it should
+  read as the transcript's margin rather than compete with the reply it
+  precedes.
+*/
+.tool-run {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 var(--gap);
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  font-size: var(--font-sm);
+}
+
+.tool-run-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Still going. The border is the only moving part: a spinner per tool would
+   make a turn that calls three of them flicker. */
+.tool-run.running {
+  border-color: var(--accent);
+}
+
+.tool-run.failed {
+  border-color: var(--danger, #b4413c);
+}
+
+/* The reason a call failed, which is the one thing that card is for. Not
+   monospaced: this is a sentence, not an argument list. */
+.tool-run-why {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--surface3);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.tool-run-args {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--surface3);
+  color: var(--muted);
+  font-size: var(--font-xs, var(--font-sm));
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* -- questions ------------------------------------------------------------ */
+
+/*
+  A question the agent is waiting on, in the transcript where it was asked.
+  Shaped like the approval beside it because they are the same kind of
+  interruption -- the agent has stopped and needs a person -- and different in
+  what they take back: an approval takes yes or no, this takes an answer.
+*/
+.questions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 var(--gap) 10px;
+}
+
+.question {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--surface2);
+}
+
+.question-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.question-text {
+  margin: 0;
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/* Wrapping rather than scrolling: an option pushed out of sight is one nobody
+   picks, and there are never more than six. */
+.question-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.question-free {
+  display: flex;
+  gap: 8px;
+}
+
+.question-free input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface3);
+  color: inherit;
+  font-size: var(--font-sm);
+}
+
+.question-free input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* -- suggestions ---------------------------------------------------------- */

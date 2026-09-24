@@ -11,6 +11,9 @@ must directly support that validated workflow.
 
 **Goal:** Establish a coherent product boundary and implementation plan.
 
+**Status:** Complete. Product, architecture, workflow, CLI, Skill and research
+documents, MVP scope, non-goals and accepted ADRs are present.
+
 Deliverables:
 
 - product, architecture, workflow, CLI, and skill design documents;
@@ -27,6 +30,9 @@ Exit criteria:
 ## Milestone 1: State and evidence CLI
 
 **Goal:** Make a game-development session resumable and auditable.
+
+**Status:** Engineering exit criteria verified locally. CI also exercises
+revision, locking and recovery paths on Windows when these changes are submitted.
 
 Deliverables:
 
@@ -50,6 +56,12 @@ Exit criteria:
 **Goal:** Let an existing coding agent move from hypothesis to a verified
 playable prototype.
 
+**Status:** Engineering exit criteria verified locally. The first-engine
+decision is recorded in ADR 0008, the representative playable fixture is
+exercised through a real Godot process and recorded runtime frame, and the
+Skill gate is recorded in `docs/evaluations/m2-skill-evaluation.md`. The new
+Linux capture job must still run on CI after these changes are submitted.
+
 Deliverables:
 
 - `loopforge-router` and `prototype-gameplay` skills, with discovery and
@@ -71,6 +83,13 @@ Exit criteria:
 ## Milestone 3: Human playtest loop
 
 **Goal:** Turn observed play into an explicit product decision.
+
+**Status:** Engineering exit criteria verified locally. Protocols bind the
+tested source, reports use strict versioned contracts, consent withdrawal
+revokes and deletes stored observations, and keep/kill/refactor records require
+intact cited evidence plus a human approver. The playtest/decision Skill gate
+is recorded in `docs/evaluations/m3-skill-evaluation.md`. The MVP's actual
+external participant sessions and independent review remain pending.
 
 Deliverables:
 

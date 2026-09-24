@@ -55,7 +55,8 @@ function mockAgent(stage: string, nextStages: string[]) {
       });
     }
     if (command === "agent_gate") {
-      const answered = Boolean(args.reason);
+      const early = stage === "PROTOTYPING" && args.stage === "PROTOTYPE_DECISION";
+      const answered = Boolean(args.rationale) && (!early || Boolean(args.reason));
       return Promise.resolve({
         schema_version: "loopforge-gate-v1",
         gate: args.stage,
@@ -128,6 +129,12 @@ describe("FlowWorkspace", () => {
     expect(await screen.findByText("Missing")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Scope" }));
+    fireEvent.change(
+      screen.getByRole("textbox", {
+        name: "Why is this project ready for the next stage?"
+      }),
+      { target: { value: "The scope limit was confirmed against the recorded evidence." } }
+    );
 
     // The gate tests the reason it is given, so holding it back until the
     // advance would leave the checklist reporting a requirement as unmet that
@@ -137,7 +144,31 @@ describe("FlowWorkspace", () => {
         .filter(([command]) => command === "agent_gate")
         .at(-1);
       expect((call as [string, Record<string, unknown>])[1].reason).toBe("scope");
+      expect((call as [string, Record<string, unknown>])[1].rationale).toBe(
+        "The scope limit was confirmed against the recorded evidence."
+      );
     });
     expect(await screen.findByText("Met")).toBeTruthy();
+  });
+
+  it("sends the person's reviewed rationale when advancing", async () => {
+    mockAgent("PROTOTYPING", ["PLAYTEST_REQUIRED", "PROTOTYPE_DECISION"]);
+    render(<FlowWorkspace projectRoot="/p" />);
+    const input = await screen.findByRole("textbox", {
+      name: "Why is this project ready for the next stage?"
+    });
+    expect((input as HTMLTextAreaElement).value).toBe("");
+    fireEvent.change(input, {
+      target: { value: "  I reviewed this build and its current evidence.  " }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Advance" }));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("agent_advance", {
+        projectPath: "/p",
+        stage: "PLAYTEST_REQUIRED",
+        rationale: "I reviewed this build and its current evidence."
+      })
+    );
   });
 });

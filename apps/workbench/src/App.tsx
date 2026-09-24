@@ -263,6 +263,7 @@ export function App(): React.JSX.Element {
                 state={agent.state}
                 transcript={agent.transcript}
                 busy={agent.busy}
+                projectRoot={projectRoot}
                 composerRef={composerRef}
                 onSend={(query) => void agent.send(query)}
               />

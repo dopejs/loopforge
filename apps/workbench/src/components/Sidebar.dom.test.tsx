@@ -217,6 +217,155 @@ describe("Sidebar conversations", () => {
     expect(await screen.findByText("你好")).toBeTruthy();
   });
 
+  it("keeps conversations that share a title apart", async () => {
+    // A title is the first message, so three conversations opened with "hello"
+    // carry one. Keyed by the title they were reconciled as the same row:
+    // React warned, reused one row's state for another, and the list read as
+    // duplicates rather than as three conversations.
+    sessions = [
+      { id: "ses_a", title: "hello", updated_at: "2026-09-01T14:00:00Z", message_count: 2 },
+      { id: "ses_b", title: "hello", updated_at: "2026-09-01T13:00:00Z", message_count: 4 },
+      { id: "ses_c", title: "hello", updated_at: "2026-09-01T12:00:00Z", message_count: 6 }
+    ];
+    mockAgent();
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    const opened = vi.fn();
+    draw({ sessionId: "ses_b", onOpenSession: opened });
+
+    const rows = await screen.findAllByText("hello");
+    expect(rows).toHaveLength(3);
+    expect(
+      warn.mock.calls.some((call) => String(call[0]).includes("same key"))
+    ).toBe(false);
+
+    // The open one is the open one, and clicking the third opens the third --
+    // both go wrong when rows are reconciled together.
+    expect(rows[1].closest("button")?.getAttribute("aria-current")).toBe("true");
+    fireEvent.click(rows[2]);
+    expect(opened).toHaveBeenCalledWith("ses_c");
+    warn.mockRestore();
+  });
+
+  it("does not delete on one click", async () => {
+    // There is no undo: the conversation is removed from disk. A stray click
+    // on a row's × must not be the whole of it.
+    sessions = [
+      { id: "ses_a", title: "测试", updated_at: "2026-09-03T05:00:00Z", message_count: 2 }
+    ];
+    mockAgent();
+    draw();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Delete conversation: 测试/ }));
+
+    expect(
+      invoke.mock.calls.find((entry) => entry[0] === "agent_delete_session")
+    ).toBeUndefined();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+  });
+
+  it("deletes once the row has been asked twice", async () => {
+    sessions = [
+      { id: "ses_a", title: "测试", updated_at: "2026-09-03T05:00:00Z", message_count: 2 }
+    ];
+    mockAgent();
+    draw();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Delete conversation: 测试/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      const call = invoke.mock.calls.find((entry) => entry[0] === "agent_delete_session");
+      expect(call).toBeTruthy();
+      expect((call![1] as Record<string, unknown>).sessionId).toBe("ses_a");
+    });
+  });
+
+  it("keeps the conversation when the second click says to", async () => {
+    sessions = [
+      { id: "ses_a", title: "测试", updated_at: "2026-09-03T05:00:00Z", message_count: 2 }
+    ];
+    mockAgent();
+    draw();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Delete conversation: 测试/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+
+    expect(
+      invoke.mock.calls.find((entry) => entry[0] === "agent_delete_session")
+    ).toBeUndefined();
+    expect(screen.getByText("测试")).toBeTruthy();
+  });
+
+  it("re-reads the listing rather than guessing what deleting did", async () => {
+    // Two windows can be open on the same project. A list edited locally
+    // agrees with nothing.
+    sessions = [
+      { id: "ses_a", title: "测试", updated_at: "2026-09-03T05:00:00Z", message_count: 2 }
+    ];
+    mockAgent();
+    draw();
+    await waitFor(() => expect(listed).toBe(1));
+
+    fireEvent.click(await screen.findByRole("button", { name: /Delete conversation: 测试/ }));
+    sessions = [];
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(listed).toBeGreaterThan(1));
+  });
+
+  it("starts a blank conversation when the open one is deleted", async () => {
+    // Otherwise the transcript shows something that no longer exists, and
+    // every later message continues a conversation the Agent has forgotten.
+    sessions = [
+      { id: "ses_a", title: "测试", updated_at: "2026-09-03T05:00:00Z", message_count: 2 }
+    ];
+    mockAgent();
+    const fresh = vi.fn();
+    draw({ sessionId: "ses_a", onNewSession: fresh });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Delete conversation: 测试/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(fresh).toHaveBeenCalled());
+  });
+
+  it("leaves a conversation listed when deleting it failed", async () => {
+    // A row that vanished would say it is gone when it is still on disk.
+    sessions = [
+      { id: "ses_a", title: "测试", updated_at: "2026-09-03T05:00:00Z", message_count: 2 }
+    ];
+    listed = 0;
+    invoke.mockImplementation((command: string) => {
+      if (command === "agent_sessions") {
+        listed += 1;
+        return Promise.resolve({ schema_version: "loopforge-session-v1", sessions });
+      }
+      if (command === "agent_delete_session") {
+        return Promise.reject(new Error("Loopforge Agent has not been started"));
+      }
+      return Promise.resolve({});
+    });
+    draw();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Delete conversation: 测试/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Delete" })).toBeNull()
+    );
+    expect(screen.getByText("测试")).toBeTruthy();
+  });
+
+  it("does not offer to delete a row that is not a conversation", async () => {
+    // The other modes are still fixtures; there is nothing behind them to
+    // remove.
+    mockAgent();
+    render(<Sidebar {...props({ mode: "flow" })} />);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByRole("button", { name: /Delete conversation/ })).toBeNull();
+  });
+
   it("does not ask again on every unrelated render", async () => {
     // Re-reading whenever anything changes would poll the Agent for the life
     // of the window.
