@@ -74,10 +74,12 @@ jobs:
         env:
           LOOPFORGE_KURA_BIN: ${{ github.workspace }}/apps/workbench/vendor/kura/crates/target/debug/kura
         run: PYTHONPATH=cli:apps/agent python -c "import sys; from tests.support.kura_daemon import kura_binary; sys.exit(0 if kura_binary() else 'no Kura binary was discoverable')"
+      - name: Require the pinned approval-wait source
+        run: test -f apps/workbench/vendor/kura/crates/domains/mcp/src/agent_tool.rs
       - name: Integration tests
         env:
           LOOPFORGE_KURA_BIN: ${{ github.workspace }}/apps/workbench/vendor/kura/crates/target/debug/kura
-        run: PYTHONPATH=cli:apps/agent python -m unittest tests.agent.test_integration -v
+        run: PYTHONPATH=cli:apps/agent python -m unittest tests.agent.test_integration tests.agent.test_approval_wait -v
 
   engine:
     name: Engine adapter against a real Godot

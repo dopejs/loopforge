@@ -51,6 +51,10 @@ def approval_wait_seconds() -> int:
     return int(match.group(1))
 
 
+@unittest.skipUnless(
+    AGENT_TOOL.is_file(),
+    "Kura submodule is not checked out; this contract runs in the integration job",
+)
 class TheClientOutlastsTheRuntime(unittest.TestCase):
     def test_the_runtime_still_states_how_long_it_waits(self) -> None:
         # If this stops being findable, every other assertion here is vacuous.
