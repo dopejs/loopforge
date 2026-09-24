@@ -28,6 +28,7 @@ const EVENT_LABEL: Record<string, MessageKey> = {
   "hypothesis.created": "event.hypothesis.created",
   "stage.transitioned": "event.stage.transitioned",
   "evidence.registered": "event.evidence.registered",
+  "evidence.revoked": "event.evidence.revoked",
   "run.completed": "event.run.completed",
   "decision.recorded": "event.decision.recorded"
 };
@@ -53,6 +54,7 @@ export function HealthPanel({
   const { t } = useI18n();
   const { health, reason, reload } = useProjectHealth(projectRoot, true);
   const [preview, setPreview] = useState<ReconcileResult | null>(null);
+  const [backupPath, setBackupPath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
   const [showHistory, setShowHistory] = useState(false);
@@ -67,6 +69,7 @@ export function HealthPanel({
       const result = await reconcileProject(projectRoot, apply);
       if (apply) {
         setPreview(null);
+        setBackupPath(result.backup_path ?? null);
         reload();
         onReconciled?.();
       } else {
@@ -194,6 +197,12 @@ export function HealthPanel({
             </>
           )}
         </Card>
+      )}
+
+      {backupPath && (
+        <p className="settings-note mono">
+          {t("health.backupSaved", { path: backupPath })}
+        </p>
       )}
 
       {failure && <p className="settings-note tone-bad">{failure}</p>}

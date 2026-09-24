@@ -123,10 +123,13 @@ preparing or interpreting a session.
    notes or media. For this external-session workflow, do not use `not_required`
    unless a written local policy was established before recruitment and no
    participant-linked data is collected. If consent is declined or withdrawn,
-   stop and do not import the report.
+   stop and do not import the report. If consent is withdrawn after import, run
+   `loopforge playtest revoke --evidence <id> --reason <reason>` immediately;
+   do not cite the revoked report.
 4. Record ordered observable behavior in `raw_observations`; keep explanations
-   in `interpretation`. Preserve confusion, failures, abandonment, and absence
-   of replay.
+   in `interpretation`. Record every intervention in `assistance_given` and
+   collection, retention, and deletion handling in `sensitive_data`. Preserve
+   confusion, failures, abandonment, and absence of replay.
 5. Import the report only when required fields are complete and consent is
    `obtained` or legitimately `not_required`.
 6. Check and advance to `PROTOTYPE_DECISION`. If no external participant is

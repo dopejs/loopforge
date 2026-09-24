@@ -97,7 +97,9 @@ export function EvidencePanel({
                 {t(TRUST_KEY[item.trust_level] ?? "evidence.trust.unknown")}
               </span>
               <span className={`badge ${evidenceTone(item.result) === "ok" ? "ok" : evidenceTone(item.result) === "bad" ? "bad" : ""}`}>
-                {t(`evidence.result.${item.result}` as MessageKey)}
+                {item.revoked
+                  ? t("evidence.revoked")
+                  : t(`evidence.result.${item.result}` as MessageKey)}
               </span>
             </div>
           ))

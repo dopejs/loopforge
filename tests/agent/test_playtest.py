@@ -7,11 +7,18 @@ kept separate from the interpretation drawn from them (ADR 0002).
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from loopforge.project import HYPOTHESIS_FIELDS, LoopforgeProject
+from loopforge.project import (
+    HYPOTHESIS_FIELDS,
+    PLAYTEST_LIST_FIELDS,
+    PLAYTEST_REPORT_FIELDS,
+    LoopforgeProject,
+)
 from loopforge_agent.application import LoopforgeAgent, LoopforgeAgentError
 
 APPROVAL = {
@@ -29,9 +36,14 @@ PNG = bytes.fromhex(
 
 def report(**overrides: object) -> dict:
     base = {
+        "build_identity": "sha256:test-build",
         "participant_context": "One player, no prior exposure to the build.",
         "consent_status": "obtained",
-        "raw_observations": ["Charged near the hazard twice", "Died on the third attempt"],
+        "assistance_given": "None.",
+        "raw_observations": [
+            "Charged near the hazard twice",
+            "Died on the third attempt",
+        ],
         "comprehension_time": "About 40 seconds to understand charging.",
         "confusion_points": ["Unclear that charging could be cancelled"],
         "failure_points": [],
@@ -39,6 +51,7 @@ def report(**overrides: object) -> dict:
         "strategies": ["Waited for the hazard to pass before charging"],
         "replay_behavior": "Restarted twice without prompting.",
         "interpretation": "The risk trade-off reads, but cancelling is undiscoverable.",
+        "sensitive_data": "No identifying data; anonymous notes deleted after review.",
     }
     base.update(overrides)
     return base
@@ -92,38 +105,228 @@ class PlaytestStateTests(unittest.TestCase):
         self.assertTrue(self.agent.playtest()["allowed"])
         self.assertIsNone(self.agent.playtest()["protocol"])
 
-        result = self.agent.create_playtest_protocol("# Protocol\n\nWatch, do not prompt.")
+        result = self.agent.create_playtest_protocol(
+            "# Protocol\n\nWatch, do not prompt."
+        )
 
         self.assertIsNotNone(result["protocol"])
         self.assertTrue(result["protocol"]["protocol_id"])
+        self.assertTrue(result["protocol"]["build_identity"].startswith("sha256:"))
+        self.assertEqual(result["build_identity"], result["protocol"]["build_identity"])
+        schema = json.loads(
+            (
+                Path(__file__).resolve().parents[2]
+                / "contracts/loopforge-playtest-protocol-v1.schema.json"
+            ).read_text()
+        )
+        stored = self.agent.project._latest_protocol(
+            self.agent.project.store.current_state()[0]
+        )
+        self.assertIsNotNone(stored)
+        self.assertLessEqual(set(schema["required"]), set(stored))
+        self.assertLessEqual(set(stored), set(schema["properties"]))
 
     def test_an_empty_protocol_is_refused(self) -> None:
         self._reach_playtest_stage()
         for value in ("", "   \n  "):
-            with self.subTest(value=value), self.assertRaises(LoopforgeAgentError) as caught:
+            with (
+                self.subTest(value=value),
+                self.assertRaises(LoopforgeAgentError) as caught,
+            ):
                 self.agent.create_playtest_protocol(value)
             self.assertEqual(caught.exception.code, "PLAYTEST_PROTOCOL_INVALID")
+
+    def test_the_core_also_refuses_an_empty_protocol(self) -> None:
+        self._reach_playtest_stage()
+        empty = self.root / "empty-protocol.md"
+        empty.write_text("  \n")
+
+        with self.assertRaises(Exception) as caught:
+            self.agent.project.create_playtest_protocol(empty, expected_revision=None)
+
+        self.assertEqual(
+            getattr(caught.exception, "diagnostic_code", ""),
+            "PLAYTEST_PROTOCOL_INVALID",
+        )
 
     def test_a_report_satisfies_the_human_playtested_claim(self) -> None:
         self._reach_playtest_stage()
         self.agent.create_playtest_protocol("# Protocol\n\nWatch, do not prompt.")
 
-        self.agent.import_playtest_report(report())
+        self.agent.import_playtest_report(
+            report(build_identity=self.agent.playtest()["build_identity"])
+        )
 
-        claims = {c["claim"]: c["status"] for c in self.agent.project_status()["claims"]}
+        claims = {
+            c["claim"]: c["status"] for c in self.agent.project_status()["claims"]
+        }
         self.assertEqual(claims["HUMAN_PLAYTESTED"], "satisfied")
         # Orthogonal: a person playing it says nothing about whether it builds.
         self.assertEqual(claims["FUN_HYPOTHESIS_SUPPORTED"], "unknown")
+
+    def test_decision_gate_requires_a_person_to_confirm_the_report(self) -> None:
+        self._reach_playtest_stage()
+        protocol = self.agent.create_playtest_protocol("# Protocol\n\nWatch.")
+        self.agent.import_playtest_report(
+            report(build_identity=protocol["build_identity"])
+        )
+
+        self.assertEqual(
+            self.agent.project.gate_check("PROTOTYPE_DECISION")["result"],
+            "blocked",
+        )
+        self.assertEqual(
+            self.agent.project.gate_check("PROTOTYPE_DECISION", **APPROVAL)["result"],
+            "pass",
+        )
 
     def test_a_report_without_a_protocol_is_refused(self) -> None:
         """The protocol is what the observations were gathered against; a
         report without one cannot be scoped to anything."""
         self._reach_playtest_stage()
         with self.assertRaises(Exception) as caught:
-            self.agent.import_playtest_report(report())
+            self.agent.import_playtest_report(
+                report(build_identity=self.agent.playtest()["build_identity"])
+            )
         self.assertEqual(
-            getattr(caught.exception, "diagnostic_code", ""), "PLAYTEST_PROTOCOL_MISSING"
+            getattr(caught.exception, "diagnostic_code", ""),
+            "PLAYTEST_PROTOCOL_MISSING",
         )
+
+    def test_a_report_must_match_the_build_bound_to_the_protocol(self) -> None:
+        self._reach_playtest_stage()
+        state = self.agent.create_playtest_protocol("# Protocol\n\nWatch.")
+
+        with self.assertRaises(Exception) as caught:
+            self.agent.import_playtest_report(report(build_identity="sha256:wrong"))
+
+        self.assertEqual(
+            getattr(caught.exception, "diagnostic_code", ""),
+            "PLAYTEST_BUILD_MISMATCH",
+        )
+        self.assertTrue(state["build_identity"].startswith("sha256:"))
+
+    def test_source_changes_after_the_protocol_refuse_the_report(self) -> None:
+        self._reach_playtest_stage()
+        state = self.agent.create_playtest_protocol("# Protocol\n\nWatch.")
+        (self.root / "changed.gd").write_text("extends Node\n")
+
+        with self.assertRaises(Exception) as caught:
+            self.agent.import_playtest_report(
+                report(build_identity=state["build_identity"])
+            )
+
+        self.assertEqual(
+            getattr(caught.exception, "diagnostic_code", ""),
+            "PLAYTEST_BUILD_STALE",
+        )
+
+    def test_consent_revocation_removes_report_and_invalidates_claim(self) -> None:
+        self._reach_playtest_stage()
+        state = self.agent.create_playtest_protocol("# Protocol\n\nWatch.")
+        imported = self.agent.import_playtest_report(
+            report(build_identity=state["build_identity"])
+        )
+        evidence_id = imported["report"]["evidence_id"]
+        record = self.agent.project._evidence_by_id()[evidence_id]
+        artifact = self.root / record["artifact"]["path"]
+        self.assertTrue(artifact.is_file())
+
+        revoked = self.agent.revoke_playtest_report(
+            evidence_id,
+            "The participant withdrew consent after the session.",
+        )
+
+        self.assertTrue(revoked["report"]["revoked"])
+        self.assertFalse(artifact.exists())
+        listed = self.agent.project._evidence_by_id()[evidence_id]
+        self.assertTrue(listed["revoked"])
+        self.assertEqual(
+            listed["revocation_reason"],
+            "The participant withdrew consent after the session.",
+        )
+        self.assertEqual(
+            self.agent.project.history()["events"][-1]["event_type"],
+            "evidence.revoked",
+        )
+        claims = {
+            c["claim"]: c["status"] for c in self.agent.project_status()["claims"]
+        }
+        self.assertEqual(claims["HUMAN_PLAYTESTED"], "unknown")
+        self.assertEqual(self.agent.decision()["playtest_evidence_ids"], [])
+        self.assertEqual(
+            self.agent.project.gate_check("PROTOTYPE_DECISION", **APPROVAL)["result"],
+            "blocked",
+        )
+        self.assertTrue(self.agent.project.validate()["valid"])
+
+    def test_consent_revocation_is_idempotent(self) -> None:
+        self._reach_playtest_stage()
+        state = self.agent.create_playtest_protocol("# Protocol\n\nWatch.")
+        imported = self.agent.import_playtest_report(
+            report(build_identity=state["build_identity"])
+        )
+        evidence_id = imported["report"]["evidence_id"]
+        first = self.agent.project.revoke_playtest_evidence(
+            evidence_id, "Consent withdrawn.", expected_revision=None
+        )
+        second = self.agent.project.revoke_playtest_evidence(
+            evidence_id, "Consent withdrawn.", expected_revision=None
+        )
+
+        self.assertFalse(first["already_revoked"])
+        self.assertTrue(second["already_revoked"])
+        self.assertEqual(first["committed_revision"], second["committed_revision"])
+
+    def test_revocation_retries_report_deletion_after_an_io_failure(self) -> None:
+        self._reach_playtest_stage()
+        state = self.agent.create_playtest_protocol("# Protocol\n\nWatch.")
+        imported = self.agent.import_playtest_report(
+            report(build_identity=state["build_identity"])
+        )
+        evidence_id = imported["report"]["evidence_id"]
+        stored = self.root / self.agent.project._evidence_by_id()[evidence_id][
+            "artifact"
+        ]["path"]
+
+        with patch.object(Path, "unlink", side_effect=PermissionError("locked")):
+            first = self.agent.project.revoke_playtest_evidence(
+                evidence_id, "Consent withdrawn.", expected_revision=None
+            )
+
+        self.assertTrue(stored.is_file())
+        self.assertFalse(first["artifact_deleted"])
+        self.assertIn("locked", first["deletion_error"])
+        self.assertEqual(
+            self.agent.project.status()["claims"]["HUMAN_PLAYTESTED"]["status"],
+            "unknown",
+        )
+
+        retried = self.agent.project.revoke_playtest_evidence(
+            evidence_id, "Consent withdrawn.", expected_revision=None
+        )
+        self.assertTrue(retried["already_revoked"])
+        self.assertTrue(retried["artifact_deleted"])
+        self.assertFalse(stored.exists())
+        self.assertEqual(first["committed_revision"], retried["committed_revision"])
+
+    def test_playtest_projection_and_report_vocabulary_match_contracts(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        state_schema = json.loads(
+            (root / "contracts" / "loopforge-playtest-v1.schema.json").read_text()
+        )
+        report_schema = json.loads(
+            (
+                root / "contracts" / "loopforge-playtest-report-v1.schema.json"
+            ).read_text()
+        )
+        state = self.agent.playtest()
+
+        self.assertEqual(set(state), set(state_schema["required"]))
+        self.assertEqual(set(PLAYTEST_REPORT_FIELDS), set(report_schema["required"]))
+        self.assertEqual(set(PLAYTEST_REPORT_FIELDS), set(report_schema["properties"]))
+        self.assertEqual(set(state["fields"]), set(PLAYTEST_REPORT_FIELDS))
+        self.assertEqual(set(state["list_fields"]), set(PLAYTEST_LIST_FIELDS))
 
 
 class PlaytestReportValidationTests(unittest.TestCase):
@@ -137,7 +340,10 @@ class PlaytestReportValidationTests(unittest.TestCase):
         than resolve to not_required, which is itself a claim about a person.
         """
         for value in (None, "", "unknown", "yes", True):
-            with self.subTest(value=value), self.assertRaises(LoopforgeAgentError) as caught:
+            with (
+                self.subTest(value=value),
+                self.assertRaises(LoopforgeAgentError) as caught,
+            ):
                 self._clean(report(consent_status=value))
             self.assertEqual(caught.exception.code, "PLAYTEST_CONSENT_INVALID")
 
@@ -156,13 +362,17 @@ class PlaytestReportValidationTests(unittest.TestCase):
 
     def test_raw_observations_must_contain_something(self) -> None:
         for value in ([], ["", "  "]):
-            with self.subTest(value=value), self.assertRaises(LoopforgeAgentError) as caught:
+            with (
+                self.subTest(value=value),
+                self.assertRaises(LoopforgeAgentError) as caught,
+            ):
                 self._clean(report(raw_observations=value))
             self.assertEqual(caught.exception.code, "PLAYTEST_REPORT_INVALID")
 
-    def test_blank_list_entries_are_dropped_not_stored(self) -> None:
-        cleaned = self._clean(report(confusion_points=["  ", "Real point", ""]))
-        self.assertEqual(cleaned["confusion_points"], ["Real point"])
+    def test_blank_list_entries_are_refused_not_silently_dropped(self) -> None:
+        with self.assertRaises(LoopforgeAgentError) as caught:
+            self._clean(report(confusion_points=["  ", "Real point", ""]))
+        self.assertEqual(caught.exception.code, "PLAYTEST_REPORT_INVALID")
 
     def test_optional_lists_may_be_empty(self) -> None:
         cleaned = self._clean(report(failure_points=[], strategies=[]))
@@ -187,7 +397,10 @@ class PlaytestReportValidationTests(unittest.TestCase):
             "replay_behavior",
             "interpretation",
         ):
-            with self.subTest(field=field), self.assertRaises(LoopforgeAgentError) as caught:
+            with (
+                self.subTest(field=field),
+                self.assertRaises(LoopforgeAgentError) as caught,
+            ):
                 self._clean(report(**{field: long}))
             self.assertEqual(caught.exception.code, "PLAYTEST_REPORT_INVALID")
 
@@ -200,7 +413,9 @@ class PlaytestReportValidationTests(unittest.TestCase):
         """Previously the list was sliced, so entries past the cap vanished
         while the import reported success."""
         with self.assertRaises(LoopforgeAgentError) as caught:
-            self._clean(report(raw_observations=[f"observation {n}" for n in range(201)]))
+            self._clean(
+                report(raw_observations=[f"observation {n}" for n in range(201)])
+            )
         self.assertEqual(caught.exception.code, "PLAYTEST_REPORT_INVALID")
 
     def test_interpretation_stays_out_of_the_observations(self) -> None:

@@ -26,6 +26,25 @@ jobs:
       - name: Test
         run: PYTHONPATH=cli:apps/agent python -m unittest discover -s tests -t .
 
+  windows_state:
+    name: State recovery and locking (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Exercise revision, lock and recovery paths
+        env:
+          PYTHONPATH: cli
+        run: >-
+          python -m unittest -v
+          tests.cli.test_milestone1.Milestone1Tests.test_stale_expected_revision_does_not_write
+          tests.cli.test_milestone1.Milestone1Tests.test_live_project_lock_returns_conflict_without_writing
+          tests.cli.test_milestone1.Milestone1Tests.test_stale_snapshot_requires_reconcile
+          tests.cli.test_milestone1.Milestone1Tests.test_reconcile_refuses_to_hide_a_missing_evidence_artifact
+          tests.cli.test_milestone1.Milestone1Tests.test_torn_final_event_is_reported_not_repaired
+
   integration:
     name: Agent against a real Kura daemon
     # Every wire-level bug in this stack -- a rejected URL shape, a route that
@@ -55,10 +74,12 @@ jobs:
         env:
           LOOPFORGE_KURA_BIN: ${{ github.workspace }}/apps/workbench/vendor/kura/crates/target/debug/kura
         run: PYTHONPATH=cli:apps/agent python -c "import sys; from tests.support.kura_daemon import kura_binary; sys.exit(0 if kura_binary() else 'no Kura binary was discoverable')"
+      - name: Require the pinned approval-wait source
+        run: test -f apps/workbench/vendor/kura/crates/domains/mcp/src/agent_tool.rs
       - name: Integration tests
         env:
           LOOPFORGE_KURA_BIN: ${{ github.workspace }}/apps/workbench/vendor/kura/crates/target/debug/kura
-        run: PYTHONPATH=cli:apps/agent python -m unittest tests.agent.test_integration -v
+        run: PYTHONPATH=cli:apps/agent python -m unittest tests.agent.test_integration tests.agent.test_approval_wait -v
 
   engine:
     name: Engine adapter against a real Godot
@@ -83,11 +104,17 @@ jobs:
           mv Godot_v4.3-stable_linux.x86_64 "$HOME/.local/bin/godot4"
           chmod +x "$HOME/.local/bin/godot4"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install an offscreen display for runtime capture
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1-mesa-dri libxcursor1 libxinerama1 libxi6
       # requires_godot skips when no usable binary is found, and a skipped suite
       # still reports success. Fail here instead, so a broken download cannot
       # quietly turn this job into a no-op that reports green.
       - name: Require a discoverable engine
         run: PYTHONPATH=cli:apps/agent python -c "import sys; from tests.support.godot import godot_binary, godot_major_version; b = godot_binary(); sys.exit('no Godot binary was discoverable') if b is None else None; v = godot_major_version(b); sys.exit(f'Godot major version {v} is not the supported 4') if v != 4 else None"
+      - name: Require a runtime capture display
+        run: command -v xvfb-run
       - name: Engine integration tests
         run: PYTHONPATH=cli:apps/agent python -m unittest tests.cli.test_engine_integration -v
 

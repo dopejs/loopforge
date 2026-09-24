@@ -36,6 +36,27 @@ export type AgentQueryResponse = {
   thread_id?: string;
 };
 
+/**
+ * A tool the agent ran, in the transcript where it ran.
+ *
+ * A turn is no longer one dispatch: the model asks for a tool, something runs
+ * it -- sometimes after asking a person -- and the answer comes rounds later.
+ * With only text in the transcript that window is a silence, and a person
+ * cannot tell work from a hang, or see what the agent actually did to their
+ * project. The name and the arguments are what it proposed; `status` is what
+ * became of it.
+ */
+export type ToolRun = {
+  callId: string;
+  /** As registered, without the server prefix the runtime adds. */
+  name: string;
+  /** The model's own argument string, passed through rather than parsed. */
+  arguments: string;
+  status: "running" | "done" | "failed";
+  /** What the tool answered, once it has. */
+  output?: string;
+};
+
 export type TranscriptEntry = {
   id: string;
   author: "user" | "agent";
@@ -44,7 +65,51 @@ export type TranscriptEntry = {
   failed?: boolean;
   /** True while tokens are still arriving for this entry. */
   streaming?: boolean;
+  /** Set when the entry reports a tool rather than something anybody said. */
+  tool?: ToolRun;
 };
+
+/**
+ * The runtime prefixes a tool with the server that published it, so
+ * `loopforge_status` arrives as `loopforge__loopforge_status`. Shown to a
+ * person the prefix is noise: there is one server, and it is named twice.
+ */
+export function toolLabel(name: string): string {
+  const marker = name.indexOf("__");
+  return marker === -1 ? name : name.slice(marker + 2);
+}
+
+/**
+ * A tool frame out of the stream, or `null` for anything else.
+ *
+ * The `end` frame carries no name -- the runtime's event does not have one --
+ * so a reader has to correlate it with the `begin` by `callId`. Returned as it
+ * arrives rather than joined here, because joining needs the transcript.
+ */
+export function streamTool(
+  event: string,
+  data: string
+): { callId: string; name: string; phase: string; arguments: string; output: string; success: boolean } | null {
+  if (!event.endsWith("tool")) return null;
+  try {
+    const parsed: unknown = JSON.parse(data);
+    if (!parsed || typeof parsed !== "object") return null;
+    const frame = parsed as Record<string, unknown>;
+    const callId = typeof frame.callId === "string" ? frame.callId : "";
+    const phase = typeof frame.phase === "string" ? frame.phase : "";
+    if (!callId || (phase !== "begin" && phase !== "end")) return null;
+    return {
+      callId,
+      name: typeof frame.name === "string" ? frame.name : "",
+      phase,
+      arguments: typeof frame.arguments === "string" ? frame.arguments : "",
+      output: typeof frame.output === "string" ? frame.output : "",
+      success: frame.success === true
+    };
+  } catch {
+    return null;
+  }
+}
 
 /** One `agent://stream` payload. */
 type StreamEvent = {
@@ -112,6 +177,45 @@ export function streamDelta(event: string, data: string): string | null {
   } catch {
     // A non-JSON delta is still text worth showing rather than dropping.
     return data;
+  }
+  return null;
+}
+
+/**
+ * Why a turn ended without an answer, as the stream reported it.
+ *
+ * Kura's terminal frame carries the reason -- an expired token, a provider
+ * that refused, a dispatch that timed out -- and this used to be dropped. The
+ * consumer read deltas and session ids and nothing else, so a failed turn left
+ * an empty bubble with `failed` styling and not one word about what happened.
+ * A person looking at a blank red bar cannot tell a failure from a hang, and
+ * the one thing they needed to know here was "sign in again".
+ *
+ * `null` for anything that is not a terminal failure, including a terminal
+ * success: only a frame that says the turn failed is worth interrupting
+ * someone with.
+ */
+export function streamFailure(event: string, data: string): string | null {
+  if (!event.endsWith("failed")) return null;
+  try {
+    const parsed: unknown = JSON.parse(data);
+    if (!parsed || typeof parsed !== "object") return null;
+    const frame = parsed as { error?: unknown; errorCode?: unknown };
+    // The provider's own message is usually a JSON envelope of its own. Its
+    // `message` is the sentence a person can act on; the envelope is not.
+    if (typeof frame.error === "string" && frame.error) {
+      try {
+        const inner: unknown = JSON.parse(frame.error);
+        const message = (inner as { error?: { message?: unknown } })?.error?.message;
+        if (typeof message === "string" && message) return message;
+      } catch {
+        // Not nested. The string itself is the reason.
+      }
+      return frame.error;
+    }
+    if (typeof frame.errorCode === "string" && frame.errorCode) return frame.errorCode;
+  } catch {
+    return null;
   }
   return null;
 }
@@ -270,6 +374,9 @@ export function useAgent(projectRoot: string): UseAgent {
 
       const streamId = replyId;
       let sawText = false;
+      // Why it ended, if the stream said. Kept outside the listener so the
+      // terminal frame survives to where the turn is finished.
+      let reason: string | null = null;
       // Subscribed before the command is issued: the first delta can arrive
       // before the invoke promise has even been awaited.
       const unlisten = await listen<StreamEvent>("agent://stream", ({ payload }) => {
@@ -284,6 +391,52 @@ export function useAgent(projectRoot: string): UseAgent {
         if (opened) {
           threadId.current = opened;
           setSessionId(opened);
+          return;
+        }
+        const failure = streamFailure(payload.event, payload.data);
+        if (failure) {
+          reason = failure;
+          return;
+        }
+        const tool = streamTool(payload.event, payload.data);
+        if (tool) {
+          setTranscript((entries) => {
+            if (tool.phase === "begin") {
+              // Before the reply it belongs to, not after: the model asks for
+              // a tool and then answers with what it learned, so the card
+              // reads in the order the work happened. The reply entry is
+              // already in the list, so this goes in ahead of it.
+              const card: TranscriptEntry = {
+                id: `tool-${tool.callId}`,
+                author: "agent",
+                text: "",
+                tool: {
+                  callId: tool.callId,
+                  name: toolLabel(tool.name),
+                  arguments: tool.arguments,
+                  status: "running"
+                }
+              };
+              const at = entries.findIndex((entry) => entry.id === replyId);
+              return at === -1
+                ? [...entries, card]
+                : [...entries.slice(0, at), card, ...entries.slice(at)];
+            }
+            // The `end` frame carries no name, so it is matched on the call it
+            // finishes rather than on what it finished.
+            return entries.map((entry) =>
+              entry.tool?.callId === tool.callId
+                ? {
+                    ...entry,
+                    tool: {
+                      ...entry.tool,
+                      status: tool.success ? "done" : "failed",
+                      output: tool.output
+                    }
+                  }
+                : entry
+            );
+          });
           return;
         }
         const delta = streamDelta(payload.event, payload.data);
@@ -309,8 +462,11 @@ export function useAgent(projectRoot: string): UseAgent {
                   ...entry,
                   streaming: false,
                   // A run that ends without producing text is a failure the
-                  // user must see, not an empty bubble.
-                  text: sawText ? entry.text : "",
+                  // user must see -- which means saying what it was. This used
+                  // to blank the text and set `failed`, which rendered an
+                  // empty bubble: indistinguishable from a hang, and silent
+                  // about a reason the stream had already reported.
+                  text: sawText ? entry.text : (reason ?? "The agent ended the turn without an answer"),
                   failed: !sawText
                 }
               : entry

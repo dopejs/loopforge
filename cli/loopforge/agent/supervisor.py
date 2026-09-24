@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import ipaddress
 import json
 import logging
@@ -24,12 +25,47 @@ LOGGER = logging.getLogger(__name__)
 
 RUNTIME_SCHEMA = "kura-runtime-v1"
 
+#: How the frozen agent is asked to act as the CLI instead of as the
+#: daemon supervisor. A packaged build has no interpreter to run `-m`
+#: against, and the tool server has to be this build rather than whatever
+#: shares the name on PATH, so the one binary answers to both.
+CLI_DISPATCH_FLAG = "--loopforge-cli"
+
 #: Starting the daemon is meant to return immediately -- it forks and exits.
 #: A binary that does not is either a different program under the same name or
 #: is wedged, and either way waiting forever turns a diagnosable failure into a
 #: hang. This bound was added after an obsolete `dope` on PATH, from before the
 #: rename, blocked a start for seven minutes with no output.
 DAEMON_COMMAND_TIMEOUT_SECONDS = 60.0
+
+
+def daemon_failure_detail(binary: str, completed: Any) -> dict[str, Any]:
+    """What a failed daemon command actually did, when it said nothing.
+
+    Three separate hours in this project were spent on "Kura daemon failed to
+    start" with empty stdout and empty stderr, and the cause each time was the
+    same: on macOS, replacing a binary at a path the kernel has already run
+    leaves it holding a signature for the old inode, and it kills the new one
+    outright. `codesign --verify` reports the file as valid the whole time, so
+    the only visible evidence is an exit status nobody was printing.
+
+    So the status is printed, and 137 -- and its negative form, which is what
+    `subprocess` reports for a signal -- is named rather than left as a number.
+    """
+    detail: dict[str, Any] = {
+        "binary": binary,
+        "exit_code": completed.returncode,
+        "stderr": (completed.stderr or "")[-2000:],
+        "stdout": (completed.stdout or "")[-2000:],
+    }
+    if completed.returncode in (137, -9):
+        detail["diagnosis"] = (
+            "the kernel killed it (SIGKILL) before it ran. On macOS this is a "
+            "stale code signature: the binary was replaced at a path that had "
+            "already been executed. Re-sign it with `codesign --force --sign - "
+            f"{binary}`."
+        )
+    return detail
 
 #: A drafted hypothesis is eleven sections; the default half minute is short.
 #: Applied to every provider rather than to one named slot.
@@ -38,8 +74,14 @@ DAEMON_COMMAND_TIMEOUT_SECONDS = 60.0
 #: anything once providers were registered under their own ids -- leaving a
 #: drafting request, which is eleven sections, on the daemon's thirty-second
 #: default.
+#: Raised from three minutes after a turn asking for a Unity script framework
+#: came back `dispatch timed out`. This is per attempt, and an attempt is now a
+#: round of the agent loop rather than a whole turn -- but a round that writes
+#: several files of code is exactly the kind that takes longer than a drafting
+#: request, and the only thing three minutes bought was a failure the user had
+#: to read as a hang.
 PROVIDER_TIMEOUTS = {
-    "KURA_LLM_DEFAULT_TIMEOUT_MS": "180000",
+    "KURA_LLM_DEFAULT_TIMEOUT_MS": "600000",
 }
 
 
@@ -196,7 +238,23 @@ class KuraRuntimeSupervisor:
         self.root.mkdir(parents=True, exist_ok=True)
         existing = self.status()
         if existing["running"]:
-            return existing
+            stale = self._outdated_reason(binary)
+            if stale is None:
+                return existing
+            # A daemon outlives the app that asked for it -- it forks and
+            # detaches -- so restarting the app connects to whatever is already
+            # listening. Rebuilding the daemon then has no effect and nothing
+            # says so: the fix is on disk, the bug is still running, and the
+            # only symptom is that the bug is still there.
+            LOGGER.info("restarting the Kura daemon: %s", stale)
+            try:
+                self.stop()
+            except LoopforgeError as error:
+                # Reported and carried on. A daemon that will not stop is worse
+                # than an old one, and refusing to hand back the old one would
+                # leave the project with nothing at all.
+                LOGGER.warning("the outdated Kura daemon would not stop: %s", error)
+                return {**existing, "outdated": stale}
         bind_addr = f"127.0.0.1:{port or self._free_port()}"
         data_dir = self.root / "data"
         environment = os.environ.copy()
@@ -252,11 +310,7 @@ class KuraRuntimeSupervisor:
                 "Kura daemon failed to start.",
                 "DOPE_AGENT_START_FAILED",
                 1,
-                {
-                    "stderr": completed.stderr[-2000:],
-                    "stdout": completed.stdout[-2000:],
-                    "bind_addr": bind_addr,
-                },
+                {**daemon_failure_detail(binary, completed), "bind_addr": bind_addr},
             )
         metadata = {
             "schema_version": RUNTIME_SCHEMA,
@@ -315,9 +369,13 @@ class KuraRuntimeSupervisor:
         base_url = status.get("base_url")
         if not base_url:
             return
-        binary = self._loopforge_binary()
-        if not binary:
+        invocation = self._loopforge_invocation()
+        if not invocation:
+            LOGGER.warning(
+                "Loopforge tools were not published: no runnable loopforge CLI"
+            )
             return
+        binary, arg_prefix = invocation
         client = KuraClient(str(base_url), timeout=30.0, token=status.get("token"))
         try:
             client.post(
@@ -338,7 +396,12 @@ class KuraRuntimeSupervisor:
                     "command": binary,
                     # `--project` before the subcommand: the root is a global
                     # option, and the daemon's working directory is its own.
-                    "args": ["--project", str(self.project.root), "mcp"],
+                    "args": [
+                        *arg_prefix,
+                        "--project",
+                        str(self.project.root),
+                        "mcp",
+                    ],
                     # The project, so a relative path in a tool argument means
                     # what the user would expect. `--project` says the same
                     # thing explicitly, because the daemon may normalize this.
@@ -450,18 +513,65 @@ class KuraRuntimeSupervisor:
                 names.append(name)
         return names
 
-    def _loopforge_binary(self) -> str | None:
-        """This CLI, as something the daemon can spawn.
+    def _loopforge_invocation(self) -> tuple[str, list[str]] | None:
+        """This CLI, as something the daemon can spawn: command and arguments.
 
-        `sys.executable` is not it: in a packaged build that is the bundled
-        interpreter, and in a virtualenv it would run without the console
-        script's entry point.
+        This build's own copy first, and PATH only as a last resort. The
+        earlier order was the other way around, and what it found was a
+        `loopforge` installed from the git remote months earlier, which had no
+        `mcp` subcommand at all: argparse rejected the argument, the process
+        exited 2 before writing a frame, and the daemon reported the only thing
+        it could see -- `mcp transport is closed`. Nothing named the stale
+        binary, and the agent simply had no tools. This is the same failure the
+        daemon command timeout above was added for, one command down.
+
+        There is no version check here because there is nothing to check
+        against: the tool server is not a separable component that could be
+        matched by version, it is this process's own `loopforge.mcp` and it is
+        in step with `permissions.py` and the tier table by construction. What
+        went wrong was running a different program, not an older one.
+
+        A frozen build has no interpreter to hand `-m` to, so the agent binary
+        serves as its own CLI under a sentinel argument; see
+        `loopforge_agent.__main__`.
         """
-        return shutil.which("loopforge") or (
-            str(Path(sys.argv[0]).resolve())
-            if Path(sys.argv[0]).name.startswith("loopforge")
-            else None
-        )
+        if getattr(sys, "frozen", False):
+            return sys.executable, [CLI_DISPATCH_FLAG]
+        # `sys.executable` is running this module, so `loopforge` is importable
+        # under it and `-m` reaches the same source tree -- including a
+        # virtualenv, where it does not depend on the console script.
+        if importlib.util.find_spec("loopforge.__main__") is not None:
+            return sys.executable, ["-m", "loopforge"]
+        found = shutil.which("loopforge")
+        if found and self._speaks_mcp(found, []):
+            return found, []
+        if found:
+            LOGGER.warning(
+                "ignoring %s: it does not support `loopforge mcp`, so it is a "
+                "different or older Loopforge than this build",
+                found,
+            )
+        return None
+
+    def _speaks_mcp(self, command: str, prefix: list[str]) -> bool:
+        """Whether that command is a Loopforge that can serve tools.
+
+        Only the PATH fallback is probed, because only it can be a different
+        program. Registering a server whose command exits before the handshake
+        costs a turn and reports a transport error that names nothing, so the
+        second of latency here buys a diagnostic that says which binary and
+        why.
+        """
+        try:
+            probe = subprocess.run(
+                [command, *prefix, "mcp", "--help"],
+                capture_output=True,
+                timeout=DAEMON_COMMAND_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return probe.returncode == 0
 
     def _account_environment(self) -> dict[str, str]:
         """Every signed-in subscription, as providers Kura can dispatch at.
@@ -594,6 +704,33 @@ class KuraRuntimeSupervisor:
             key=lambda account: (recency.get(account["id"], ""), account["id"]),
         )["id"]
 
+    def _outdated_reason(self, binary: str) -> str | None:
+        """Whether the daemon that is running predates the binary on disk.
+
+        Answered from the daemon's own start time against the binary's
+        modification time, which is the question that matters at runtime: the
+        test harness asks whether the binary is older than the source, and that
+        is a different one.
+
+        `None` whenever it cannot be answered -- no metadata, no readable
+        binary, a clock that gives nothing back. An unanswerable check must not
+        restart a working daemon.
+        """
+        metadata = self._metadata() or {}
+        started_at = metadata.get("started_at")
+        if not isinstance(started_at, (int, float)):
+            return None
+        try:
+            built_at = Path(binary).stat().st_mtime
+        except OSError:
+            return None
+        if built_at <= started_at:
+            return None
+        return (
+            f"the daemon started {started_at:.0f} and {Path(binary).name} was "
+            f"built {built_at:.0f}; the running one is from before the build"
+        )
+
     def stop(self) -> dict[str, Any]:
         metadata = self._metadata()
         if not metadata:
@@ -634,7 +771,7 @@ class KuraRuntimeSupervisor:
                 "Kura daemon failed to stop.",
                 "KURA_STOP_FAILED",
                 1,
-                {"stderr": completed.stderr[-2000:]},
+                daemon_failure_detail(binary, completed),
             )
         self.metadata_path.unlink(missing_ok=True)
         return {"running": False, "healthy": False, "stopped": True}

@@ -28,8 +28,9 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, BinaryIO, Callable
+from typing import Any, BinaryIO
 
 from .project import LoopforgeProject
 
@@ -44,12 +45,30 @@ MAX_RESULT_CHARS = 24000
 
 #: Reports state and changes nothing.
 TIER_READ = "read"
+#: Changes the game, not Loopforge's record of it. Writing a script, renaming a
+#: scene: the work a person came here to do, and the tier that makes
+#: `allow-edit` mean what its name says.
+TIER_EDIT = "edit"
 #: Produces a record. Work being done, not a claim about it.
 TIER_EVIDENCE = "evidence"
 #: Asserts something about the project that cites evidence and an approver.
 TIER_CLAIM = "claim"
 
-TIERS = (TIER_READ, TIER_EVIDENCE, TIER_CLAIM)
+TIERS = (TIER_READ, TIER_EDIT, TIER_EVIDENCE, TIER_CLAIM)
+
+#: How much of a file is worth handing to a model. A source file is a few
+#: thousand characters; anything past this is an asset, a log, or a build
+#: artifact, and reading it would spend the turn's context on bytes nobody can
+#: use.
+MAX_FILE_CHARS = 60_000
+
+#: Loopforge's own records. Readable -- `status` and `history` are how, and
+#: they are the same bytes -- but never writable through a file tool. The event
+#: log is a hash chain and the state is derived from it, so an edit here is not
+#: a change to the project, it is a forged history that `loopforge_validate`
+#: exists to catch. The Skill says not to; a tool that could is the difference
+#: between a rule and a wish.
+PROTECTED = ".loopforge"
 
 
 class Tool:
@@ -115,6 +134,13 @@ def _validate(project: LoopforgeProject, _arguments: dict[str, Any]) -> Any:
     return project.validate()
 
 
+def _reconcile(project: LoopforgeProject, arguments: dict[str, Any]) -> Any:
+    apply = arguments.get("apply")
+    if not isinstance(apply, bool):
+        raise ValueError("apply must be true or false")
+    return project.reconcile(apply=apply)
+
+
 def _init(project: LoopforgeProject, _arguments: dict[str, Any]) -> Any:
     return project.init()
 
@@ -173,11 +199,326 @@ STAGE = {
 EXPECTED_REVISION = {
     "type": "integer",
     "minimum": 0,
-    "description": "The revision this change expects. Omit to apply to whatever is current.",
+    "description": (
+        "The revision this change expects. Omit to apply to whatever is current."
+    ),
 }
 
 
+#: Files this process has read, absolute. Overwriting a file nobody looked at
+#: is how work disappears: the model writes what it believes the file should
+#: contain, and whatever was there that it did not know about is gone. Held for
+#: the life of the tool server, which is the life of the session.
+_SEEN: set[str] = set()
+
+
+def _inside(project: LoopforgeProject, raw: Any) -> Path:
+    """A path in the project, or a refusal naming why it is not.
+
+    Resolved before it is checked, so a symlink pointing out of the project is
+    caught rather than followed. The sandbox profile scopes the process to the
+    project too; this is the second of the two, and the one that can say
+    something useful when it refuses.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError("A path is required.")
+    root = Path(project.root).resolve()
+    candidate = Path(text)
+    target = (
+        (root / candidate).resolve()
+        if not candidate.is_absolute()
+        else candidate.resolve()
+    )
+    if target != root and root not in target.parents:
+        raise ValueError(f"{text} is outside the project.")
+    return target
+
+
+def _writable(project: LoopforgeProject, raw: Any) -> Path:
+    """The same, and not one of Loopforge's own records."""
+    target = _inside(project, raw)
+    root = Path(project.root).resolve()
+    relative = target.relative_to(root)
+    if relative.parts and relative.parts[0] == PROTECTED:
+        raise ValueError(
+            f"{relative} is Loopforge's own record and is not written by hand. "
+            "Use the loopforge_* commands, which keep the event log consistent."
+        )
+    return target
+
+
+def _relative(project: LoopforgeProject, target: Path) -> str:
+    return str(target.relative_to(Path(project.root).resolve()))
+
+
+def _list(project: LoopforgeProject, arguments: dict[str, Any]) -> Any:
+    target = _inside(project, arguments.get("path") or ".")
+    if not target.is_dir():
+        raise ValueError(f"{_relative(project, target)} is not a directory.")
+    entries = []
+    for child in sorted(
+        target.iterdir(), key=lambda item: (not item.is_dir(), item.name)
+    ):
+        # Hidden files are listed. `.gitignore` and `.editorconfig` are part of
+        # a project, and a listing that quietly omits things is a listing a
+        # model will draw wrong conclusions from.
+        entries.append(
+            {
+                "path": _relative(project, child),
+                "kind": "directory" if child.is_dir() else "file",
+                "bytes": child.stat().st_size if child.is_file() else None,
+            }
+        )
+    return {"path": _relative(project, target), "entries": entries}
+
+
+def _read(project: LoopforgeProject, arguments: dict[str, Any]) -> Any:
+    target = _inside(project, arguments.get("path"))
+    if not target.is_file():
+        raise ValueError(f"{_relative(project, target)} is not a file.")
+    try:
+        text = target.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        # Named rather than mangled. A model handed replacement characters
+        # would try to edit them back.
+        raise ValueError(
+            f"{_relative(project, target)} is not text; it cannot be read this way."
+        ) from error
+    _SEEN.add(str(target))
+    if len(text) > MAX_FILE_CHARS:
+        # Truncated visibly, and editing is still safe: `loopforge_edit`
+        # matches a string rather than a region, so a model that only saw the
+        # head can still change something it did see.
+        return {
+            "path": _relative(project, target),
+            "content": text[:MAX_FILE_CHARS],
+            "truncated": True,
+            "total_characters": len(text),
+        }
+    return {"path": _relative(project, target), "content": text, "truncated": False}
+
+
+def _write(project: LoopforgeProject, arguments: dict[str, Any]) -> Any:
+    target = _writable(project, arguments.get("path"))
+    content = arguments.get("content")
+    if not isinstance(content, str):
+        raise ValueError("content must be text.")
+    existed = target.is_file()
+    if existed and str(target) not in _SEEN:
+        # The one refusal that is about the person rather than the model.
+        # Overwriting a file nobody looked at replaces whatever it held with
+        # what the model believes it should hold, and the difference is work
+        # that is simply gone.
+        raise ValueError(
+            f"{_relative(project, target)} already exists and has not been read. "
+            "Read it first, then write it -- or use loopforge_edit to change "
+            "part of it."
+        )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    _SEEN.add(str(target))
+    return {
+        "path": _relative(project, target),
+        "created": not existed,
+        "characters": len(content),
+    }
+
+
+def _edit(project: LoopforgeProject, arguments: dict[str, Any]) -> Any:
+    target = _writable(project, arguments.get("path"))
+    old = arguments.get("old_string")
+    new = arguments.get("new_string")
+    if not isinstance(old, str) or not isinstance(new, str):
+        raise ValueError("old_string and new_string must both be text.")
+    if not old:
+        raise ValueError(
+            "old_string must not be empty; use loopforge_write for a new file."
+        )
+    if not target.is_file():
+        raise ValueError(f"{_relative(project, target)} is not a file.")
+    text = target.read_text(encoding="utf-8")
+    found = text.count(old)
+    if found == 0:
+        raise ValueError(f"old_string does not appear in {_relative(project, target)}.")
+    if found > 1:
+        # Refused rather than guessed. Replacing the first of several is how an
+        # edit lands somewhere the model did not mean, and it is invisible
+        # afterwards -- the file still compiles and says something else.
+        raise ValueError(
+            f"old_string appears {found} times in {_relative(project, target)}. "
+            "Include enough surrounding lines to name one of them."
+        )
+    target.write_text(text.replace(old, new, 1), encoding="utf-8")
+    _SEEN.add(str(target))
+    return {"path": _relative(project, target), "replaced": 1}
+
+
+def _ask(project: LoopforgeProject, arguments: dict[str, Any]) -> Any:
+    """Put a question to the person, and wait for their answer.
+
+    The model used to ask in prose -- "A. ... B. ... C. ... Which?" -- and the
+    person answered by typing "A", guessing what that still meant to a model
+    that had moved on. Nothing structured was left behind: no record of what
+    was offered, and no way for a surface to tell a question from a paragraph.
+
+    Blocking is the point. A tool call that returned "I have asked" would put
+    the model straight back to guessing, and it is the same shape as an
+    approval: the call is held open, a person decides, and the decision is the
+    result.
+    """
+    import time
+
+    from .agent.questions_bridge import QuestionBridge
+
+    bridge = QuestionBridge(project.root)
+    record = bridge.ask(
+        arguments.get("question"),
+        arguments.get("options"),
+        bool(arguments.get("allow_free_text", False)),
+    )
+    deadline = time.monotonic() + bridge.wait_seconds
+    while time.monotonic() < deadline:
+        answer = bridge.answer_of(record["question_id"])
+        if answer is not None:
+            return {
+                "question_id": record["question_id"],
+                "answered": True,
+                "answer": answer,
+            }
+        time.sleep(bridge.poll_seconds)
+    bridge.withdraw(record["question_id"])
+    # Reported rather than raised. A question nobody answered is something the
+    # model has to work around -- by asking again, or by choosing a default and
+    # saying so -- and a failed tool call would read to it as a broken tool.
+    return {
+        "question_id": record["question_id"],
+        "answered": False,
+        "answer": "",
+        "note": (
+            "Nobody answered in time. Do not assume an answer; ask again or "
+            "say what you will do without one."
+        ),
+    }
+
+
 TOOLS: tuple[Tool, ...] = (
+    Tool(
+        "loopforge_list",
+        "What is in a directory of the project. Use this to find your way "
+        "around before reading or writing anything.",
+        {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Project-relative directory. Defaults to the project root."
+                    ),
+                }
+            },
+        },
+        _list,
+    ),
+    Tool(
+        "loopforge_read",
+        "Read a text file from the project. Read a file before you change it: "
+        "writing over one you have not read replaces whatever it held.",
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Project-relative file path."}
+            },
+            "required": ["path"],
+        },
+        _read,
+    ),
+    Tool(
+        "loopforge_write",
+        "Create a file, or replace one entirely. Prefer `loopforge_edit` for a "
+        "change to part of an existing file -- this replaces the whole of it. "
+        "You cannot write inside `.loopforge`; those are Loopforge's own "
+        "records and the loopforge_* commands keep them consistent.",
+        {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Project-relative file path.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The whole contents of the file.",
+                },
+            },
+            "required": ["path", "content"],
+        },
+        _write,
+        tier=TIER_EDIT,
+    ),
+    Tool(
+        "loopforge_edit",
+        "Change part of a file by replacing an exact string. `old_string` must "
+        "appear exactly once -- include surrounding lines until it does.",
+        {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Project-relative file path.",
+                },
+                "old_string": {
+                    "type": "string",
+                    "description": (
+                        "The text to replace, exactly as it appears, appearing once."
+                    ),
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "What to put there instead.",
+                },
+            },
+            "required": ["path", "old_string", "new_string"],
+        },
+        _edit,
+        tier=TIER_EDIT,
+    ),
+    Tool(
+        "loopforge_ask",
+        "REQUIRED for any question you need answered. Asks the person and "
+        "blocks until they answer, then returns what they said. Use this "
+        "instead of ending your reply with a question -- a question in a reply "
+        "makes them type an answer to a message you have already moved past, "
+        "and a lettered list makes them type a letter. Supply `options` when "
+        "there is a set of answers you can name; they can still answer in "
+        "their own words.",
+        {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "What you need to know, in one sentence.",
+                },
+                "options": {
+                    "type": "array",
+                    "description": "The answers you can name, if any.",
+                    "items": {"type": "string"},
+                },
+                "allow_free_text": {
+                    "type": "boolean",
+                    "description": (
+                        "Whether they may answer in their own words as well."
+                    ),
+                },
+            },
+            "required": ["question"],
+        },
+        _ask,
+        # Read, so it is never gated behind an approval. Asking a person is not
+        # a change to the project, and putting a "may the agent ask you
+        # something?" prompt in front of the question would be absurd.
+        tier=TIER_READ,
+    ),
     Tool(
         "loopforge_status",
         "The project's current stage, revision, quality claims and the actions "
@@ -214,6 +555,25 @@ TOOLS: tuple[Tool, ...] = (
         "report the diagnostics without repairing anything.",
         NO_ARGUMENTS,
         _validate,
+    ),
+    Tool(
+        "loopforge_reconcile",
+        "Preview or apply rebuilding the derived state snapshot from intact "
+        "event history. Always call with apply=false first and inspect the "
+        "actions; use apply=true only when validation found no history or "
+        "artifact integrity error.",
+        {
+            "type": "object",
+            "properties": {
+                "apply": {
+                    "type": "boolean",
+                    "description": "False previews the rebuild; true applies it.",
+                }
+            },
+            "required": ["apply"],
+        },
+        _reconcile,
+        tier=TIER_EVIDENCE,
     ),
     # -- changing it ------------------------------------------------------
     #
@@ -343,7 +703,7 @@ def _bounded(payload: Any) -> str:
     # Truncated visibly. A silently shortened result would be read as the whole
     # answer, and a model would reason from a project state that is missing its
     # tail without knowing it.
-    return text[:MAX_RESULT_CHARS] + f'… [truncated at {MAX_RESULT_CHARS} characters]'
+    return text[:MAX_RESULT_CHARS] + f"… [truncated at {MAX_RESULT_CHARS} characters]"
 
 
 def respond(request: dict[str, Any], project_root: Path) -> dict[str, Any] | None:
@@ -394,9 +754,16 @@ def respond(request: dict[str, Any], project_root: Path) -> dict[str, Any] | Non
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "result": {**_text_result(f"{type(error).__name__}: {error}"), "isError": True},
+                "result": {
+                    **_text_result(f"{type(error).__name__}: {error}"),
+                    "isError": True,
+                },
             }
-        return {"jsonrpc": "2.0", "id": request_id, "result": _text_result(_bounded(payload))}
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": _text_result(_bounded(payload)),
+        }
 
     return {
         "jsonrpc": "2.0",

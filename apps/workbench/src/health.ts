@@ -47,6 +47,7 @@ export type ReconcileResult = {
   actions: readonly ReconcileAction[];
   snapshot_status: string;
   observed_revision?: number;
+  backup_path?: string | null;
 };
 
 export type HistoryEvent = {

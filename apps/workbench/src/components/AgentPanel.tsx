@@ -2,9 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { isDesktopRuntime } from "../agent";
 import { useI18n } from "../i18n";
+import { PermissionSwitch } from "./PermissionSwitch";
 import { Markdown } from "./Markdown";
-import { suggestionsFor } from "../suggestions";
-import type { AgentPhase, AgentState, TranscriptEntry } from "../agent";
+import { useSuggestions } from "../suggestions";
+import type { AgentPhase, AgentState, ToolRun, TranscriptEntry } from "../agent";
 
 /**
  * The `@` mention being typed, if the caret is inside one.
@@ -25,18 +26,64 @@ export function mentionAt(text: string, caret: number): { start: number; query: 
   return { start, query };
 }
 
+/**
+ * What the agent did, where it did it.
+ *
+ * A turn is no longer one dispatch: the model asks for a tool, something runs
+ * it -- sometimes after asking a person to approve it -- and the answer comes
+ * rounds later. With only text in the transcript that window is a silence, and
+ * a person can neither tell work from a hang nor see what was done to their
+ * project. Before the agent's reply, because that is the order it happened in.
+ *
+ * The arguments are shown, not summarised. "The agent ran `advance`" has no
+ * answer to "advance to what?", and a record of an action that omits what the
+ * action was is decoration.
+ */
+function ToolCard({ run }: { run: ToolRun }): React.JSX.Element {
+  const { t } = useI18n();
+  const detail = run.arguments.trim();
+  return (
+    <article className={`tool-run ${run.status}`}>
+      <header className="tool-run-head">
+        <span className="badge">{t(`tool.${run.status}`)}</span>
+        <span className="mono truncate">{run.name}</span>
+      </header>
+      {/*
+        An empty object is what a tool that takes nothing sends. Printing `{}`
+        tells a reader less than printing nothing.
+      */}
+      {detail && detail !== "{}" && <p className="tool-run-args mono">{detail}</p>}
+      {/*
+        Why it failed, and only when it did. A successful tool's output is the
+        model's material -- a page of project JSON nobody wants on a card --
+        but a failed one's output is the whole of what a person needs, and
+        without it `Failed  loopforge_status` is a red box that explains
+        nothing. That is exactly what it looked like when the tool server had
+        died: two failed cards, and the reason ("mcp server became
+        unavailable") only readable by replaying the stream by hand.
+      */}
+      {run.status === "failed" && run.output && (
+        <p className="tool-run-why">{run.output}</p>
+      )}
+    </article>
+  );
+}
+
 export function Composer({
   disabled,
   busy,
-  inputRef,
   projectRoot,
+  inputRef,
   onSend
 }: {
   disabled: boolean;
   busy: boolean;
-  inputRef?: React.RefObject<HTMLTextAreaElement | null>;
-  /** Where to look for the files an `@` mention can complete to. */
+  /**
+   * The project. Feeds the files an `@` mention completes to, and the
+   * permission switch -- both about this project rather than about the draft.
+   */
   projectRoot?: string;
+  inputRef?: React.RefObject<HTMLTextAreaElement | null>;
   onSend: (query: string) => void;
 }): React.JSX.Element {
   const { t } = useI18n();
@@ -133,6 +180,14 @@ export function Composer({
             {chip}
           </button>
         ))}
+        {/*
+          Pushed to the end of the same row: it belongs with the box, but it is
+          not a shortcut -- it does not insert anything, it changes what the
+          next turn is allowed to do.
+        */}
+        {projectRoot && (
+          <PermissionSwitch projectRoot={projectRoot} enabled={!disabled} />
+        )}
       </div>
       {/*
         The files an `@` can mean. Above the box rather than below it, because
@@ -244,6 +299,7 @@ export function Transcript({
   busy,
   variant,
   stage,
+  projectRoot,
   onSuggest
 }: {
   transcript: readonly TranscriptEntry[];
@@ -251,11 +307,21 @@ export function Transcript({
   variant: "panel" | "page";
   /** Where the project is, so the suggestions are about the work it is up to. */
   stage?: string;
+  /** The project the suggestions are about. */
+  projectRoot?: string;
   /** Sends a suggestion. Absent means none are offered. */
   onSuggest?: (query: string) => void;
 }): React.JSX.Element {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const end = useRef<HTMLDivElement>(null);
+  // Read unconditionally: hooks cannot be called behind the empty-transcript
+  // branch below, and `enabled` carries the same condition.
+  const suggestions = useSuggestions(
+    projectRoot ?? "",
+    locale,
+    stage,
+    Boolean(onSuggest) && transcript.length === 0 && !busy
+  );
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
@@ -278,14 +344,14 @@ export function Transcript({
           */}
           {onSuggest && (
             <div className="suggestions">
-              {suggestionsFor(stage).map((key) => (
+              {suggestions.map((suggestion) => (
                 <button
-                  key={key}
+                  key={suggestion}
                   type="button"
                   className="suggestion"
-                  onClick={() => onSuggest(t(key))}
+                  onClick={() => onSuggest(suggestion)}
                 >
-                  {t(key)}
+                  {suggestion}
                 </button>
               ))}
             </div>
@@ -297,7 +363,16 @@ export function Transcript({
 
   return (
     <div className={`transcript ${variant}`} aria-live="polite">
-      {transcript.map((entry) => (
+      {transcript.map((entry) =>
+        entry.tool ? (
+          <ToolCard key={entry.id} run={entry.tool} />
+        ) : (
+        // A reply that has started but said nothing yet is not shown at all.
+        // With tools in the loop a turn is silent for as long as the model
+        // spends calling them, and an empty bubble sitting there reads as a
+        // finished answer with nothing in it. The pending line below covers
+        // that window instead.
+        entry.streaming && !entry.text ? null : (
         <article
           key={entry.id}
           className={`message ${entry.author}${entry.failed ? " failed" : ""}`}
@@ -315,8 +390,17 @@ export function Transcript({
             {entry.streaming && <span className="caret" aria-hidden="true" />}
           </div>
         </article>
-      ))}
-      {busy && !transcript.some((entry) => entry.streaming) && (
+        )
+        )
+      )}
+      {/*
+        Working, until there is something to show. Keyed on text rather than on
+        `streaming`: the stream opens a reply the moment the turn starts, so a
+        check for "is anything streaming" stopped saying "working" while the
+        model was still calling tools -- which is most of a turn now, and the
+        whole of one that fails before writing a word.
+      */}
+      {busy && !transcript.some((entry) => entry.streaming && entry.text) && (
         <p className="message-pending">
           <span className="spinner" aria-hidden="true" />
           {t("agent.status.working")}
@@ -341,6 +425,7 @@ export function AgentPanel({
   state,
   transcript,
   busy,
+  projectRoot,
   composerRef,
   onSend
 }: {
@@ -348,6 +433,8 @@ export function AgentPanel({
   state: AgentState;
   transcript: readonly TranscriptEntry[];
   busy: boolean;
+  /** Carried for the composer: the same project, the same permission mode. */
+  projectRoot?: string;
   composerRef: React.RefObject<HTMLTextAreaElement | null>;
   onSend: (query: string) => void;
 }): React.JSX.Element {
@@ -412,6 +499,7 @@ export function AgentPanel({
       <Composer
         disabled={phase !== "ready"}
         busy={busy}
+        projectRoot={projectRoot}
         inputRef={composerRef}
         onSend={onSend}
       />

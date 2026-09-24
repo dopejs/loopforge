@@ -21,10 +21,9 @@ The MVP covers:
 - CLI human and JSON output;
 - repository-local Agent Skills.
 
-The engine choice remains an explicit implementation decision. The current
-preference is Godot 4 2D because it supports normal local projects, headless
-execution, screenshots, and a broad range of prototype genres. This must be
-validated with a thin technical spike before being locked.
+The first engine adapter is Godot 4 2D, accepted in
+[ADR 0008](../decisions/0008-first-engine-adapter.md) after a real-engine
+technical spike and representative playable fixture.
 
 ## 3. Representative user journey
 

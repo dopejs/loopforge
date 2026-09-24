@@ -95,8 +95,21 @@ class KuraClientIntegrationTests(unittest.TestCase):
         )
         names = [name for name, _ in events]
         self.assertEqual(names[0], "chat.query.started")
-        # The point of streaming is partial output before completion.
-        self.assertGreater(names.count("chat.query.delta"), 1)
+        # Output before completion, which is the point -- but now a round at a
+        # time rather than a provider chunk at a time. A streaming turn runs
+        # the agent loop, and the loop hands each round's text over whole, so a
+        # one-round answer is one delta.
+        #
+        # Granularity given up deliberately: before the loop reached here, a
+        # streaming turn was a single dispatch offered no tools at all, while
+        # the instructions told the model to call `loopforge_*`. It answered by
+        # writing the call out as text, and nothing ever ran it.
+        self.assertGreaterEqual(names.count("chat.query.delta"), 1)
+        self.assertLess(
+            names.index("chat.query.delta"),
+            max(i for i, name in enumerate(names) if name.endswith("completed")),
+            f"text must arrive before the turn is reported finished: {names}",
+        )
         self.assertTrue(any(name.endswith("completed") for name in names), names)
 
 
@@ -225,8 +238,15 @@ class AgentStreamingIntegrationTests(unittest.TestCase):
         names = [name for name, _ in events]
         self.assertIn("chat.query.started", names)
         # Partial output is the entire point; a single terminal event would
-        # mean the relay buffered the run.
-        self.assertGreater(names.count("chat.query.delta"), 1)
+        # mean the relay buffered the run. One delta per round rather than per
+        # provider chunk since streaming started running tools -- see
+        # `test_streaming_yields_incremental_events`.
+        self.assertGreaterEqual(names.count("chat.query.delta"), 1)
+        self.assertLess(
+            names.index("chat.query.delta"),
+            len(names) - 1,
+            f"text must arrive before the stream closes: {names}",
+        )
 
     def test_an_invalid_query_fails_before_the_stream_starts(self) -> None:
         """An empty query must be a status code, not a stream that opens and

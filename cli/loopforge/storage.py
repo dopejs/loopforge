@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -189,12 +190,19 @@ class EventStore:
             atomic_write_json(self.state_file, new_state)
             return event, new_state
 
-    def reconcile(self, apply: bool) -> dict[str, Any]:
+    def reconcile(
+        self,
+        apply: bool,
+        integrity_check: Callable[[list[dict[str, Any]], dict[str, Any]], None]
+        | None = None,
+    ) -> dict[str, Any]:
         if not self.initialized:
             raise NotInitializedError(str(self.project_root))
         with ProjectLock(self.lock_file):
             events = self.read_events()
             projected = project_events(events)
+            if integrity_check is not None:
+                integrity_check(events, projected)
             status = self._snapshot_status(projected)
             actions: list[dict[str, Any]] = []
             if status != "current":
@@ -205,11 +213,28 @@ class EventStore:
                         "target_revision": projected["revision"],
                     }
                 )
+            backup_path = None
             if apply and actions:
+                if self.state_file.exists():
+                    backup_dir = self.state_dir / "backups"
+                    backup_dir.mkdir(parents=True, exist_ok=True)
+                    backup = backup_dir / f"state-{opaque_id('bak')}.json"
+                    original = self.state_file.read_bytes()
+                    descriptor = os.open(
+                        backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+                    )
+                    with os.fdopen(descriptor, "wb") as output:
+                        written = output.write(original)
+                        if written != len(original):
+                            raise OSError("Snapshot backup was not fully written.")
+                        output.flush()
+                        os.fsync(output.fileno())
+                    backup_path = backup.relative_to(self.project_root).as_posix()
                 atomic_write_json(self.state_file, projected)
             return {
                 "applied": apply,
                 "actions": actions,
+                "backup_path": backup_path,
                 "observed_revision": projected["revision"],
                 "snapshot_status": "current" if apply and actions else status,
             }
@@ -338,6 +363,8 @@ class EventStore:
             required_payload = {"project_id", "experiment_id", "stage"}
         elif event["event_type"] == "evidence.registered":
             required_payload = {"evidence"}
+        elif event["event_type"] == "evidence.revoked":
+            required_payload = {"evidence_id", "reason", "revoked_at"}
         elif event["event_type"] == "hypothesis.created":
             required_payload = {"hypothesis"}
         elif event["event_type"] == "playtest.protocol.created":
@@ -431,6 +458,16 @@ def project_events(events: list[dict[str, Any]]) -> dict[str, Any]:
                     {"event_id": event["event_id"]},
                 )
             evidence_count += 1
+        elif event_type == "evidence.revoked":
+            if not all(
+                isinstance(payload.get(key), str) and payload[key]
+                for key in ("evidence_id", "reason", "revoked_at")
+            ):
+                raise InvalidStateError(
+                    "Evidence revocation payload is invalid.",
+                    "EVENT_PAYLOAD_INVALID",
+                    {"event_id": event["event_id"]},
+                )
         elif event_type == "hypothesis.created":
             hypothesis = payload.get("hypothesis")
             if not isinstance(hypothesis, dict):

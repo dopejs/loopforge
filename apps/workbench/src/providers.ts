@@ -32,6 +32,14 @@ export type Provider = {
   is_default?: boolean;
   base_url?: string;
   secret_configured?: boolean;
+  /**
+   * Set when the Agent knows this provider is reached through a signed-in
+   * account rather than a key. The runtime cannot say so -- its auth modes are
+   * `none`, `api_key` and `local_cli_bridge` -- so it reports every account as
+   * an API key with no secret configured.
+   */
+  oauth_provider_id?: string;
+  signed_in?: boolean;
   account_label?: string;
   plan?: string;
   auth_status?: string;
@@ -179,6 +187,23 @@ export function useSessions(projectRoot: string, enabled: boolean): SessionState
   }, [enabled, nonce, projectRoot]);
 
   return { sessions: inventory?.sessions ?? [], reason, loading, reload };
+}
+
+/**
+ * Remove one conversation.
+ *
+ * Answers with what is left, so a caller redraws from the Agent rather than
+ * from its own guess at what deleting did -- which is what two windows open on
+ * the same project would otherwise disagree about.
+ */
+export function deleteSession(
+  projectRoot: string,
+  sessionId: string
+): Promise<SessionInventory> {
+  return invoke<SessionInventory>("agent_delete_session", {
+    projectPath: projectRoot,
+    sessionId
+  });
 }
 
 export { UNSUPPORTED_REASON };

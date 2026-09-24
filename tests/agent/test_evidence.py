@@ -49,11 +49,11 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(evidence["path_kind"], "project-relative")
 
     def test_a_capture_satisfies_the_visual_claim(self) -> None:
-        self.assertEqual(
-            self.agent.project_status()["claims"][1]["status"], "unknown"
-        )
+        self.assertEqual(self.agent.project_status()["claims"][1]["status"], "unknown")
         self.agent.register_capture(str(self._screenshot()))
-        claims = {c["claim"]: c["status"] for c in self.agent.project_status()["claims"]}
+        claims = {
+            c["claim"]: c["status"] for c in self.agent.project_status()["claims"]
+        }
         self.assertEqual(claims["VISUALLY_REVIEWED"], "satisfied")
         # Orthogonal claims stay orthogonal: a screenshot proves nothing about
         # whether the project builds (ADR 0002).
@@ -73,9 +73,23 @@ class CaptureTests(unittest.TestCase):
             getattr(caught.exception, "diagnostic_code", ""), "EVIDENCE_FILE_MISSING"
         )
 
+    def test_text_with_an_image_extension_is_not_registered_as_a_capture(self) -> None:
+        path = self.root / "fake.png"
+        path.write_text("not an image")
+
+        with self.assertRaises(Exception) as caught:
+            self.agent.register_capture(str(path))
+
+        self.assertEqual(
+            getattr(caught.exception, "diagnostic_code", ""), "CAPTURE_FORMAT_INVALID"
+        )
+
     def test_an_empty_path_is_refused_before_the_core(self) -> None:
         for value in ("", "   "):
-            with self.subTest(value=value), self.assertRaises(LoopforgeAgentError) as caught:
+            with (
+                self.subTest(value=value),
+                self.assertRaises(LoopforgeAgentError) as caught,
+            ):
                 self.agent.register_capture(value)
             self.assertEqual(caught.exception.code, "CAPTURE_PATH_INVALID")
 
@@ -106,7 +120,9 @@ class EvidenceListingTests(unittest.TestCase):
 
         self.assertEqual(len(listed), 2)
         self.assertEqual(listed[0]["path"], "second.png")
-        self.assertTrue(all(item["trust_level"] == "manually_imported" for item in listed))
+        self.assertTrue(
+            all(item["trust_level"] == "manually_imported" for item in listed)
+        )
         self.assertTrue(all(item["id"] for item in listed))
 
 

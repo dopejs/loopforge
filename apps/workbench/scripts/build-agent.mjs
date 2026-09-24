@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { refreshTargetCopies } from "./refresh-target-copies.mjs";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(desktopRoot, "..", "..");
@@ -33,6 +34,12 @@ execFileSync(
     agentRoot,
     "--paths",
     resolve(repositoryRoot, "cli"),
+    // The binary answers to `--loopforge-cli` and serves as the tool server
+    // that way, so the CLI must be inside it. Reached only by an import in a
+    // dispatch branch: named here so a missed analysis is a build change
+    // rather than a shipped agent that silently has no tools.
+    "--hidden-import",
+    "loopforge.cli",
     "--add-data",
     `${resolve(repositoryRoot, "skills")}${dataSeparator}loopforge_agent/_bundled_skills`,
     "--distpath",
@@ -64,6 +71,11 @@ if (process.platform === "darwin") {
   // Verified rather than assumed: a signature that does not actually let the
   // binary run is the exact failure this exists to prevent.
   execFileSync(binary, ["--help"], { stdio: "ignore" });
+}
+
+// And into the copies a development build runs from, which are not these.
+for (const copy of refreshTargetCopies(desktopRoot, binary, binaryName)) {
+  console.log(`Refreshed development copy: ${copy}`);
 }
 
 console.log(`Bundled Loopforge Agent: ${binary}`);

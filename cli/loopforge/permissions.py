@@ -3,18 +3,23 @@
 Three modes over the three tiers a tool can be in. The mode is the only thing a
 person configures; which tier a command is in is a property of the command.
 
-    mode          read    evidence   claim
-    ----------------------------------------
-    ask           allow   ask        ask
-    allow-edit    allow   allow      ask
-    auto          allow   allow      allow
+    mode          read    edit    evidence   claim
+    ------------------------------------------------
+    ask           allow   ask     ask        ask
+    allow-edit    allow   allow   allow      ask
+    auto          allow   allow   allow      allow
 
 `ask` is the default and the safe one. `allow-edit` is the mode a person
-actually works in: builds and captures run without interruption, and moving the
-project to a new stage still stops for them -- which is the distinction that
-matters, because being asked before every build is how someone stops reading the
-questions, and someone who stops reading them will approve a claim without
-looking.
+actually works in: files are written and builds run without interruption, and
+moving the project to a new stage still stops for them -- which is the
+distinction that matters, because being asked before every write is how someone
+stops reading the questions, and someone who stops reading them will approve a
+claim without looking.
+
+`edit` is what makes the name honest. It changes the game; `evidence` and
+`claim` change Loopforge's record of it. Someone who has said "allow edits"
+has said the agent may write their scripts, not that it may decide their
+prototype passed.
 
 `auto` leaves nothing to approve. It is offered because a person running an
 unattended batch has a real use for it, and it is not the default and never
@@ -25,7 +30,7 @@ was not asked.
 
 from __future__ import annotations
 
-from .mcp import TIER_CLAIM, TIER_EVIDENCE, TIER_READ
+from .mcp import TIER_CLAIM, TIER_EDIT, TIER_EVIDENCE, TIER_READ
 
 #: Ask before anything that changes the project.
 MODE_ASK = "ask"
@@ -41,7 +46,7 @@ MODES = (MODE_ASK, MODE_ALLOW_EDIT, MODE_AUTO)
 #: UI where the two can drift.
 MODE_SUMMARY = {
     MODE_ASK: "Ask before anything that changes the project.",
-    MODE_ALLOW_EDIT: "Run builds and captures without asking. Ask before a stage changes.",
+    MODE_ALLOW_EDIT: "Write files and run builds without asking. Ask before a stage changes.",
     MODE_AUTO: "Never ask. The agent can move the project through its stages on its own.",
 }
 
@@ -50,8 +55,8 @@ DEFAULT_MODE = MODE_ASK
 #: Which tiers each mode lets through without asking.
 _ALLOWED: dict[str, frozenset[str]] = {
     MODE_ASK: frozenset({TIER_READ}),
-    MODE_ALLOW_EDIT: frozenset({TIER_READ, TIER_EVIDENCE}),
-    MODE_AUTO: frozenset({TIER_READ, TIER_EVIDENCE, TIER_CLAIM}),
+    MODE_ALLOW_EDIT: frozenset({TIER_READ, TIER_EDIT, TIER_EVIDENCE}),
+    MODE_AUTO: frozenset({TIER_READ, TIER_EDIT, TIER_EVIDENCE, TIER_CLAIM}),
 }
 
 

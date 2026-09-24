@@ -132,6 +132,7 @@ function DecisionDialog({
                   <input
                     type="checkbox"
                     checked={cited.includes(item.id)}
+                    disabled={item.revoked}
                     onChange={() => toggle(item.id)}
                   />
                   <div className="row-label">
@@ -142,7 +143,9 @@ function DecisionDialog({
                     {t(`evidence.trust.${item.trust_level}` as MessageKey)}
                   </span>
                   <span className="badge">
-                    {t(`evidence.result.${item.result}` as MessageKey)}
+                    {item.revoked
+                      ? t("evidence.revoked")
+                      : t(`evidence.result.${item.result}` as MessageKey)}
                   </span>
                 </label>
               ))

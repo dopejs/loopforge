@@ -9,9 +9,11 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+IMAGE = ROOT / "brand" / "png" / "favicon-16.png"
 PYTHON = sys.executable
 sys.path.insert(0, str(ROOT / "cli"))
 from loopforge.locking import ProjectLock  # noqa: E402
+from loopforge.project import LoopforgeProject  # noqa: E402
 from loopforge.storage import EventStore  # noqa: E402
 
 
@@ -133,6 +135,104 @@ class Milestone1Tests(unittest.TestCase):
         self.assertEqual(advanced.returncode, 0, advanced.stderr)
         return evidence_id
 
+    def test_manual_playtest_evidence_cannot_bypass_report_import(self) -> None:
+        self.enter_prototyping()
+        artifact = self.project.parent / "not-a-playtest-report.txt"
+        artifact.write_text("Arbitrary text, without consent or observations.\n")
+        project = LoopforgeProject(self.project)
+        for evidence_type in ("build", "test"):
+            project.add_evidence(
+                evidence_type, artifact, "manually_imported", "passed", None, "test"
+            )
+        project.add_evidence(
+            "capture", IMAGE, "manually_imported", "observation", None, "test"
+        )
+        self.assertEqual(project.gate_check("PLAYTEST_REQUIRED")["result"], "blocked")
+        project.advance(
+            "PLAYTEST_REQUIRED",
+            None,
+            approver_id="local:test",
+            approver_name="Test User",
+            rationale="The manual fallback evidence is ready for observation.",
+        )
+
+        rejected = run_cli(
+            self.project,
+            "evidence",
+            "add",
+            "--type",
+            "playtest",
+            "--file",
+            str(artifact),
+        )
+        self.assertNotEqual(rejected.returncode, 0)
+        with self.assertRaises(Exception) as caught:
+            project.add_evidence(
+                "playtest", artifact, "human_attested", "observation", None, "test"
+            )
+        self.assertEqual(
+            getattr(caught.exception, "diagnostic_code", ""),
+            "PLAYTEST_IMPORT_REQUIRED",
+        )
+        self.assertEqual(
+            project.gate_check(
+                "PROTOTYPE_DECISION",
+                approver_id="local:test",
+                approver_name="Test User",
+                rationale="I reviewed the available evidence.",
+            )["result"],
+            "blocked",
+        )
+        self.assertEqual(
+            project.status()["claims"]["HUMAN_PLAYTESTED"]["status"], "unknown"
+        )
+
+    def test_manual_build_and_test_cannot_validate_a_godot_project(self) -> None:
+        (self.project / "project.godot").write_text(
+            '[application]\nconfig/name="Test"\n'
+        )
+        self.enter_prototyping()
+        artifact = self.project.parent / "manual-claim.txt"
+        artifact.write_text("A person says the build and test passed.\n")
+        project = LoopforgeProject(self.project)
+        for evidence_type in ("build", "test"):
+            project.add_evidence(
+                evidence_type, artifact, "manually_imported", "passed", None, "test"
+            )
+        project.add_evidence(
+            "capture", IMAGE, "manually_imported", "observation", None, "test"
+        )
+
+        gate = project.gate_check("PLAYTEST_REQUIRED")
+        status_by_code = {item["code"]: item["status"] for item in gate["requirements"]}
+        self.assertEqual(status_by_code["BUILD_PASS"], "invalid")
+        self.assertEqual(status_by_code["TEST_PASS"], "invalid")
+        self.assertEqual(
+            project.status()["claims"]["TECHNICALLY_VALIDATED"]["status"], "unknown"
+        )
+
+    def test_revoking_an_unknown_playtest_does_not_write_an_event(self) -> None:
+        self.assertEqual(run_cli(self.project, "init").returncode, 0)
+        result = run_cli(
+            self.project,
+            "playtest",
+            "revoke",
+            "--evidence",
+            "evd_missing",
+            "--reason",
+            "Consent withdrawn.",
+            "--format",
+            "json",
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(
+            json.loads(result.stdout)["diagnostics"][0]["code"],
+            "PLAYTEST_EVIDENCE_UNKNOWN",
+        )
+        self.assertEqual(
+            LoopforgeProject(self.project).status()["observed_revision"], 1
+        )
+
     def test_init_is_idempotent_and_status_is_machine_readable(self) -> None:
         first = run_cli(self.project, "--format", "json", "init")
         self.assertEqual(first.returncode, 0, first.stderr)
@@ -170,7 +270,7 @@ class Milestone1Tests(unittest.TestCase):
         (self.project / "main.tscn").write_text("[gd_scene format=3]\n")
         fake_bin = self.project / "fake-bin"
         fake_bin.mkdir()
-        fake_godot = fake_bin / "godot"
+        fake_godot = fake_bin / "godot4"
         fake_godot.write_text(
             '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "4.4.stable"; fi\nexit 0\n'
         )
@@ -274,6 +374,7 @@ class Milestone1Tests(unittest.TestCase):
         state = json.loads(state_path.read_text())
         state["stage"] = "CORRUPTED"
         state_path.write_text(json.dumps(state))
+        original_snapshot = state_path.read_bytes()
 
         validate = run_cli(self.project, "validate", "--format", "json")
         self.assertEqual(validate.returncode, 2)
@@ -285,6 +386,7 @@ class Milestone1Tests(unittest.TestCase):
         dry_run = run_cli(self.project, "reconcile", "--dry-run", "--format", "json")
         self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
         self.assertTrue(json.loads(dry_run.stdout)["data"]["actions"])
+        self.assertFalse((self.project / ".loopforge" / "backups").exists())
 
         apply = run_cli(self.project, "reconcile", "--yes", "--format", "json")
         self.assertEqual(apply.returncode, 0, apply.stderr)
@@ -292,7 +394,32 @@ class Milestone1Tests(unittest.TestCase):
             json.loads(apply.stdout)["data"]["snapshot_status"],
             "current",
         )
+        backup_path = json.loads(apply.stdout)["data"]["backup_path"]
+        self.assertEqual((self.project / backup_path).read_bytes(), original_snapshot)
         self.assertEqual(run_cli(self.project, "validate").returncode, 0)
+
+    def test_reconcile_refuses_to_hide_a_missing_evidence_artifact(self) -> None:
+        project = LoopforgeProject(self.project)
+        project.init()
+        artifact = self.project / "shot.png"
+        artifact.write_bytes(b"recorded capture")
+        project.add_evidence(
+            "capture", artifact, "manually_imported", "observation", None, "test"
+        )
+        artifact.unlink()
+        state_path = self.project / ".loopforge" / "state.json"
+        state_path.write_bytes(b"{stale snapshot")
+        before = state_path.read_bytes()
+
+        result = run_cli(self.project, "reconcile", "--yes", "--format", "json")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(
+            json.loads(result.stdout)["diagnostics"][0]["code"],
+            "RECONCILE_INTEGRITY_FAILED",
+        )
+        self.assertEqual(state_path.read_bytes(), before)
+        self.assertFalse((self.project / ".loopforge" / "backups").exists())
 
     def test_repeated_init_does_not_repair_stale_snapshot(self) -> None:
         self.assertEqual(run_cli(self.project, "init").returncode, 0)
@@ -319,8 +446,8 @@ class Milestone1Tests(unittest.TestCase):
 
     def test_evidence_records_checksum_and_source_identity(self) -> None:
         self.assertEqual(run_cli(self.project, "init").returncode, 0)
-        artifact = self.project / "capture.txt"
-        artifact.write_text("playable evidence\n")
+        artifact = self.project / "capture.png"
+        artifact.write_bytes(IMAGE.read_bytes())
 
         add = run_cli(
             self.project,
@@ -347,6 +474,19 @@ class Milestone1Tests(unittest.TestCase):
         self.assertEqual(listing.returncode, 0, listing.stderr)
         self.assertEqual(len(json.loads(listing.stdout)["data"]["evidence"]), 1)
 
+    def test_generic_text_capture_cannot_satisfy_visual_review(self) -> None:
+        project = LoopforgeProject(self.project)
+        project.init()
+        artifact = self.project / "fake-capture.txt"
+        artifact.write_text("not an image")
+        project.add_evidence(
+            "capture", artifact, "manually_imported", "observation", None, "test"
+        )
+
+        self.assertEqual(
+            project.status()["claims"]["VISUALLY_REVIEWED"]["status"], "unknown"
+        )
+
     def test_quality_claims_become_satisfied_then_stale_after_source_change(
         self,
     ) -> None:
@@ -371,7 +511,7 @@ class Milestone1Tests(unittest.TestCase):
                     "--result",
                     "observation" if evidence_type == "capture" else "passed",
                     "--file",
-                    str(artifact),
+                    str(IMAGE if evidence_type == "capture" else artifact),
                     "--expected-revision",
                     str(revision),
                 )
@@ -664,7 +804,7 @@ class Milestone1Tests(unittest.TestCase):
                     "--result",
                     "passed" if evidence_type != "capture" else "observation",
                     "--file",
-                    str(artifact),
+                    str(IMAGE if evidence_type == "capture" else artifact),
                     "--expected-revision",
                     str(revision),
                     "--format",
@@ -687,7 +827,7 @@ class Milestone1Tests(unittest.TestCase):
         )
         fake_bin = self.project / "fake-bin"
         fake_bin.mkdir()
-        fake_godot = fake_bin / "godot"
+        fake_godot = fake_bin / "godot4"
         fake_godot.write_text(
             '#!/bin/sh\nif [ "$1" = "--version" ]; then '
             "echo 'Godot Fake 4.0'; fi\nexit 0\n"
@@ -719,13 +859,40 @@ class Milestone1Tests(unittest.TestCase):
             event_types, ["project.initialized", "run.completed", "evidence.registered"]
         )
 
+    def test_run_refuses_an_unsupported_godot_version_before_recording(self) -> None:
+        self.assertEqual(run_cli(self.project, "init").returncode, 0)
+        (self.project / "project.godot").write_text("[application]\n")
+        fake_bin = self.project / "fake-bin"
+        fake_bin.mkdir()
+        fake_godot = fake_bin / "godot4"
+        fake_godot.write_text(
+            '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "3.6.stable"; fi\nexit 0\n'
+        )
+        fake_godot.chmod(0o755)
+        result = run_cli(
+            self.project,
+            "run",
+            "build",
+            "--format",
+            "json",
+            extra_env={"PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"},
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(
+            json.loads(result.stdout)["diagnostics"][0]["code"],
+            "GODOT_VERSION_UNSUPPORTED",
+        )
+        self.assertEqual(
+            LoopforgeProject(self.project).status()["observed_revision"], 1
+        )
+
     def test_complete_keep_path_from_hypothesis_to_decision(self) -> None:
         (self.project / "project.godot").write_text(
             "[application]\nconfig/name=Fixture\n"
         )
         fake_bin = self.project / "fake-bin"
         fake_bin.mkdir()
-        fake_godot = fake_bin / "godot"
+        fake_godot = fake_bin / "godot4"
         fake_godot.write_text(
             '#!/bin/sh\nif [ "$1" = "--version" ]; then '
             "echo 'Godot Fake 4.0'; fi\nexit 0\n"
@@ -782,15 +949,17 @@ class Milestone1Tests(unittest.TestCase):
         screenshot = self.project / "screenshot.png"
         protocol = self.project.parent / f"{self.project.name}-protocol.md"
         report = self.project.parent / f"{self.project.name}-report.json"
-        screenshot.write_bytes(b"fake png")
+        screenshot.write_bytes(IMAGE.read_bytes())
         protocol.write_text("Observe controls without coaching.\n")
         report.write_text(
             json.dumps(
                 {
+                    "build_identity": "set-after-protocol-creation",
                     "participant_context": (
                         "Experienced developer, first exposure to this build."
                     ),
                     "consent_status": "obtained",
+                    "assistance_given": "None.",
                     "raw_observations": ["Started charging after seeing the hazard."],
                     "comprehension_time": "42 seconds",
                     "confusion_points": [],
@@ -801,6 +970,7 @@ class Milestone1Tests(unittest.TestCase):
                     "interpretation": (
                         "The risk was understood and the reward was visible."
                     ),
+                    "sensitive_data": "No identifying data was collected.",
                 }
             )
         )
@@ -818,7 +988,13 @@ class Milestone1Tests(unittest.TestCase):
             )
             self.assertEqual(capture.returncode, 0, capture.stderr)
             self.assertEqual(
-                run_cli(self.project, "gate", "check", "PLAYTEST_REQUIRED").returncode,
+                run_cli(
+                    self.project,
+                    "gate", "check", "PLAYTEST_REQUIRED",
+                    "--approver-id", "local:test",
+                    "--approver-name", "Test User",
+                    "--rationale", "The evidenced build is ready for observation.",
+                ).returncode,
                 0,
             )
             self.assertEqual(
@@ -826,6 +1002,9 @@ class Milestone1Tests(unittest.TestCase):
                     self.project,
                     "advance",
                     "PLAYTEST_REQUIRED",
+                    "--approver-id", "local:test",
+                    "--approver-name", "Test User",
+                    "--rationale", "The evidenced build is ready for observation.",
                     "--expected-revision",
                     "8",
                 ).returncode,
@@ -843,6 +1022,11 @@ class Milestone1Tests(unittest.TestCase):
                 "json",
             )
             self.assertEqual(protocol_result.returncode, 0, protocol_result.stderr)
+            report_payload = json.loads(report.read_text())
+            report_payload["build_identity"] = json.loads(protocol_result.stdout)[
+                "data"
+            ]["protocol"]["build_identity"]
+            report.write_text(json.dumps(report_payload))
             imported = run_cli(
                 self.project,
                 "playtest",
@@ -856,7 +1040,14 @@ class Milestone1Tests(unittest.TestCase):
             )
             self.assertEqual(imported.returncode, 0, imported.stderr)
             self.assertEqual(
-                run_cli(self.project, "gate", "check", "PROTOTYPE_DECISION").returncode,
+                run_cli(
+                    self.project,
+                    "gate", "check", "PROTOTYPE_DECISION",
+                    "--approver-id", "local:test",
+                    "--approver-name", "Test User",
+                    "--rationale",
+                    "The imported observations are ready for a decision.",
+                ).returncode,
                 0,
             )
             self.assertEqual(
@@ -864,6 +1055,10 @@ class Milestone1Tests(unittest.TestCase):
                     self.project,
                     "advance",
                     "PROTOTYPE_DECISION",
+                    "--approver-id", "local:test",
+                    "--approver-name", "Test User",
+                    "--rationale",
+                    "The imported observations are ready for a decision.",
                     "--expected-revision",
                     "11",
                 ).returncode,
@@ -914,6 +1109,35 @@ class Milestone1Tests(unittest.TestCase):
                     "decision_event_ids"
                 ]
             )
+            revoked = run_cli(
+                self.project,
+                "playtest",
+                "revoke",
+                "--evidence",
+                evidence_ids[-1],
+                "--reason",
+                "The participant withdrew consent after the review.",
+                "--expected-revision",
+                "13",
+                "--format",
+                "json",
+            )
+            self.assertEqual(revoked.returncode, 0, revoked.stderr)
+            self.assertTrue(json.loads(revoked.stdout)["data"]["artifact_deleted"])
+            after_revocation = json.loads(
+                run_cli(self.project, "status", "--format", "json").stdout
+            )
+            self.assertEqual(
+                after_revocation["data"]["claims"]["HUMAN_PLAYTESTED"]["status"],
+                "unknown",
+            )
+            self.assertEqual(
+                after_revocation["data"]["claims"]["FUN_HYPOTHESIS_SUPPORTED"][
+                    "status"
+                ],
+                "unknown",
+            )
+            self.assertEqual(run_cli(self.project, "validate").returncode, 0)
         finally:
             screenshot.unlink(missing_ok=True)
             protocol.unlink(missing_ok=True)

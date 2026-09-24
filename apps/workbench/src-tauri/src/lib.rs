@@ -412,6 +412,12 @@ fn agent_request_blocking(
             .set("Authorization", &authorization)
             .timeout(timeout)
             .send_json(body.unwrap_or_else(|| json!({}))),
+        // Sent without a body: what is being deleted is in the path, and a
+        // body would be a second place to say it.
+        "DELETE" => ureq::delete(&url)
+            .set("Authorization", &authorization)
+            .timeout(timeout)
+            .call(),
         _ => return Err("unsupported Agent request method".to_string()),
     };
     response
@@ -1275,6 +1281,98 @@ async fn agent_resolve_approval(
     ).await
 }
 
+/// Remove one conversation.
+///
+/// Answers with what is left rather than only that it worked, so a sidebar
+/// redraws from the Agent instead of from its own guess -- which is what two
+/// windows open on the same project would otherwise disagree about.
+#[tauri::command]
+async fn agent_delete_session(project_path: String, session_id: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    // Validated rather than escaped, and this one deletes a file: an id shaped
+    // like anything else is a bug, and refusing is cheaper than discovering
+    // what a traversal reaches. The Agent checks again on its own side.
+    if session_id.is_empty()
+        || session_id.len() > 64
+        || !session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(format!("Not a conversation id: {session_id}"));
+    }
+    agent_request(
+        &metadata,
+        "DELETE",
+        &format!("/v1/sessions/{session_id}"),
+        None,
+        Duration::from_secs(15),
+    )
+    .await
+}
+
+/// What the agent is waiting on a person to answer.
+///
+/// Polled the way approvals are: the question appears while a turn is already
+/// running, so reading once on mount would show nothing while the call sat
+/// waiting for it.
+#[tauri::command]
+async fn agent_questions(project_path: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(&metadata, "GET", "/v1/questions", None, Duration::from_secs(15)).await
+}
+
+/// A person's choice, which releases the tool call that asked.
+#[tauri::command]
+async fn agent_answer_question(
+    project_path: String,
+    question_id: String,
+    answer: String,
+) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/questions/answer",
+        Some(json!({ "question_id": question_id, "answer": answer })),
+        Duration::from_secs(30),
+    )
+    .await
+}
+
+/// What is worth asking, written by the model that read the project.
+///
+/// The locale travels with the read because generated suggestions cannot be
+/// translated: the Agent has no interface language of its own, and the window
+/// asking is the one that will render them.
+#[tauri::command]
+async fn agent_suggestions(project_path: String, locale: String) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    // Validated rather than escaped. A locale reaches this from the app's own
+    // catalogue list and nowhere else, so anything shaped differently is a bug
+    // worth seeing -- and refusing is safe here in a way that guessing is not,
+    // because the caller falls back to its fixed list, which is translated.
+    if locale.is_empty()
+        || locale.len() > 20
+        || !locale.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!("Not a locale: {locale}"));
+    }
+    agent_request(
+        &metadata,
+        "GET",
+        &format!("/v1/suggestions?locale={locale}"),
+        None,
+        Duration::from_secs(15),
+    )
+    .await
+}
+
 /// How much the agent may do without asking, and what the modes mean.
 #[tauri::command]
 async fn agent_permissions(project_path: String) -> Result<Value, String> {
@@ -1433,6 +1531,26 @@ async fn agent_playtest_report(project_path: String, report: Value) -> Result<Va
         Some(json!({ "report": report })),
         Duration::from_secs(30),
     ).await
+}
+
+/// Records consent withdrawal and removes the stored playtest report contents.
+#[tauri::command]
+async fn agent_playtest_revoke(
+    project_path: String,
+    evidence_id: String,
+    reason: String,
+) -> Result<Value, String> {
+    let root = project_root(&project_path)?;
+    let metadata = load_runtime(&root)?
+        .ok_or_else(|| "Loopforge Agent has not been started for this project".to_string())?;
+    agent_request(
+        &metadata,
+        "POST",
+        "/v1/playtest/revoke",
+        Some(json!({ "evidence_id": evidence_id, "reason": reason })),
+        Duration::from_secs(30),
+    )
+    .await
 }
 
 /// Picks a screenshot to register as visual evidence.
@@ -1770,6 +1888,10 @@ pub fn run() {
             agent_resolve_approval,
             agent_permissions,
             agent_save_permissions,
+            agent_suggestions,
+            agent_delete_session,
+            agent_questions,
+            agent_answer_question,
             agent_project_history,
             agent_project_reconcile,
             agent_decision,
@@ -1778,6 +1900,7 @@ pub fn run() {
             agent_playtest_draft,
             agent_playtest_protocol,
             agent_playtest_report,
+            agent_playtest_revoke,
             select_capture_file,
             agent_capture,
             agent_evidence,

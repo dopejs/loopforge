@@ -24,6 +24,15 @@ Initial contracts:
 - `visual-artifact-v1`: a Loopforge reference mapped by an application adapter
   to Deckle's public artifact descriptor.
 - `event-envelope-v1`: a cross-process event envelope with revision and scope.
+- `loopforge-playtest-v1`: Workbench-visible playtest stage, protocol identity,
+  tested-build binding and report vocabulary.
+- `loopforge-playtest-protocol-v1`: recorded Markdown protocol metadata binding
+  the experiment, hypothesis revision, source identity and content checksum.
+- `loopforge-playtest-report-v1`: the strict human-observation import contract;
+  it separates observed behavior, interpretation, assistance and sensitive-data
+  handling and rejects unknown fields.
+- `loopforge-decision-v1`: Workbench decision state and the acknowledgement for
+  a recorded human-confirmed outcome.
 
 The schemas intentionally describe references and diagnostics, not engine
 implementation details. Breaking changes require a new `-vN` schema.

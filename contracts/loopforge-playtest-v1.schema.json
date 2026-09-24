@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopforge.dev/contracts/loopforge-playtest-v1.schema.json",
+  "title": "Loopforge playtest state",
+  "description": "Workbench-visible state for drafting a free-form Markdown protocol and importing a structured external observation report.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "stage",
+    "allowed",
+    "protocol",
+    "report",
+    "revocation_warning",
+    "build_identity",
+    "consent_values",
+    "fields",
+    "list_fields"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "loopforge-playtest-v1"
+    },
+    "stage": {
+      "type": "string"
+    },
+    "allowed": {
+      "type": "boolean"
+    },
+    "protocol": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol_id",
+            "created_at",
+            "build_identity"
+          ],
+          "properties": {
+            "protocol_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "created_at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "build_identity": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "report": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "evidence_id",
+            "revoked",
+            "revoked_at",
+            "artifact_deleted"
+          ],
+          "properties": {
+            "evidence_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "revoked": {
+              "type": "boolean"
+            },
+            "revoked_at": {
+              "type": "string"
+            },
+            "artifact_deleted": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "revocation_warning": {
+      "type": "string"
+    },
+    "build_identity": {
+      "type": "string"
+    },
+    "consent_values": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "obtained",
+          "not_required"
+        ]
+      }
+    },
+    "fields": {
+      "type": "array",
+      "minItems": 13,
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "list_fields": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "raw_observations",
+          "confusion_points",
+          "failure_points",
+          "abandonment_points",
+          "strategies"
+        ]
+      }
+    }
+  }
+}

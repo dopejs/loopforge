@@ -88,6 +88,19 @@ describe("EvidencePanel", () => {
     expect(row.textContent).toContain("linked, not copied");
   });
 
+  it("shows revoked evidence as revoked rather than an active observation", async () => {
+    invoke.mockImplementation((command: string) =>
+      command === "agent_evidence"
+        ? Promise.resolve({ evidence: [evidence({ revoked: true })] })
+        : Promise.resolve(null)
+    );
+
+    render(<EvidencePanel projectRoot="/p" />);
+
+    expect(await screen.findByText("Revoked")).toBeTruthy();
+    expect(screen.queryByText("Observation")).toBeNull();
+  });
+
   it("treats a cancelled picker as nothing happening", async () => {
     const onRegistered = vi.fn();
     invoke.mockImplementation((command: string) => {

@@ -102,6 +102,9 @@ defaults are:
 
 Manual evidence never bypasses schema, checksum, subject, freshness, consent,
 or approval requirements.
+Godot build and smoke-test gates require tool-generated adapter records. The
+external playtest gate requires a report imported against a recorded protocol;
+generic manual evidence registration cannot satisfy it.
 
 The `keep`, `kill`, and `refactor` commands are the only supported way to leave
 `PROTOTYPE_DECISION`. They record the decision and resulting transition as one

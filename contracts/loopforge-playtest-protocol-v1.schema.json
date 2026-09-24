@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopforge.dev/contracts/loopforge-playtest-protocol-v1.schema.json",
+  "title": "Loopforge recorded playtest protocol",
+  "description": "The immutable metadata binding a facilitator's Markdown protocol to an experiment, hypothesis revision and tested source. The protocol body remains free-form Markdown.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "protocol_id",
+    "experiment_id",
+    "hypothesis_revision",
+    "path",
+    "checksum",
+    "source_identity",
+    "build_identity",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "protocol_id": { "type": "string", "minLength": 1 },
+    "experiment_id": { "type": "string", "minLength": 1 },
+    "hypothesis_revision": { "type": "integer", "minimum": 1 },
+    "path": {
+      "type": "string",
+      "pattern": "^\\.loopforge/playtests/[^/]+-protocol\\.md$"
+    },
+    "checksum": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "source_identity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "digest"],
+          "properties": {
+            "kind": { "const": "project-fingerprint" },
+            "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "commit", "dirty"],
+          "properties": {
+            "kind": { "const": "git" },
+            "commit": { "type": ["string", "null"] },
+            "dirty": { "type": "boolean" },
+            "dirty_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+          }
+        }
+      ]
+    },
+    "build_identity": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "registration_revision": { "type": "integer", "minimum": 1 }
+  }
+}

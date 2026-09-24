@@ -5,12 +5,12 @@ import { errorMessage } from "../daemon";
 import { isDesktopRuntime } from "../agent";
 import {
   PLAYTEST_LIST_FIELDS,
-  PLAYTEST_TEXT_FIELDS,
   type PlaytestReport,
   type PlaytestState,
   draftProtocol,
   emptyReport,
   importReport,
+  revokeReport,
   saveProtocol,
   serializeReport,
   toLines,
@@ -19,9 +19,12 @@ import {
 import type { MessageKey } from "../i18n/locales/en";
 
 const FIELD_KEY: Record<string, MessageKey> = {
+  build_identity: "playtest.field.build_identity",
   participant_context: "playtest.field.participant_context",
+  assistance_given: "playtest.field.assistance_given",
   comprehension_time: "playtest.field.comprehension_time",
   replay_behavior: "playtest.field.replay_behavior",
+  sensitive_data: "playtest.field.sensitive_data",
   raw_observations: "playtest.field.raw_observations",
   confusion_points: "playtest.field.confusion_points",
   failure_points: "playtest.field.failure_points",
@@ -169,17 +172,19 @@ function ProtocolDialog({
  */
 function ReportDialog({
   projectRoot,
+  buildIdentity,
   consentValues,
   onClose,
   onSaved
 }: {
   projectRoot: string;
+  buildIdentity: string;
   consentValues: readonly string[];
   onClose: () => void;
   onSaved: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
-  const [form, setForm] = useState<PlaytestReport>(emptyReport());
+  const [form, setForm] = useState<PlaytestReport>(emptyReport(buildIdentity));
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string>();
 
@@ -223,6 +228,18 @@ function ReportDialog({
           </div>
           <label className="hypothesis-field">
             <span className="hypothesis-field-head">
+              <span>{t("playtest.field.build_identity")}</span>
+            </span>
+            <textarea
+              className="hypothesis-text mono"
+              rows={2}
+              value={form.build_identity}
+              readOnly
+            />
+          </label>
+          <p className="settings-note">{t("playtest.buildIdentityNote")}</p>
+          <label className="hypothesis-field">
+            <span className="hypothesis-field-head">
               <span>{t("playtest.field.participant_context")}</span>
             </span>
             <textarea
@@ -235,6 +252,17 @@ function ReportDialog({
           {/* A note about a real person, so the privacy expectation is stated
               where the text is entered rather than buried in documentation. */}
           <p className="settings-note">{t("playtest.privacyNote")}</p>
+          <label className="hypothesis-field">
+            <span className="hypothesis-field-head">
+              <span>{t("playtest.field.sensitive_data")}</span>
+            </span>
+            <textarea
+              className="hypothesis-text"
+              rows={2}
+              value={form.sensitive_data}
+              onChange={(event) => set("sensitive_data", event.target.value)}
+            />
+          </label>
 
           {/*
             A fieldset rather than a label: a label associates with one form
@@ -263,6 +291,17 @@ function ReportDialog({
             <span className="section-title">{t("playtest.observed")}</span>
           </div>
           <p className="settings-note">{t("playtest.observedNote")}</p>
+          <label className="hypothesis-field">
+            <span className="hypothesis-field-head">
+              <span>{t("playtest.field.assistance_given")}</span>
+            </span>
+            <textarea
+              className="hypothesis-text"
+              rows={2}
+              value={form.assistance_given}
+              onChange={(event) => set("assistance_given", event.target.value)}
+            />
+          </label>
           {(["raw_observations", ...PLAYTEST_LIST_FIELDS.slice(1)] as const).map((field) => (
             <label key={field} className="hypothesis-field">
               <span className="hypothesis-field-head">
@@ -335,6 +374,92 @@ function ReportDialog({
   );
 }
 
+function RevocationDialog({
+  projectRoot,
+  evidenceId,
+  onClose,
+  onRevoked
+}: {
+  projectRoot: string;
+  evidenceId: string;
+  onClose: () => void;
+  onRevoked: () => void;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
+
+  const revoke = async (): Promise<void> => {
+    if (busy || !reason.trim()) return;
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      const result = await revokeReport(projectRoot, evidenceId, reason.trim());
+      onRevoked();
+      if (result.revocation_warning) {
+        setFailure(
+          t("playtest.revokeDeleteWarning", { reason: result.revocation_warning })
+        );
+      } else {
+        onClose();
+      }
+    } catch (error: unknown) {
+      setFailure(errorMessage(error, t("playtest.revokeFailed")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("playtest.revokeTitle")}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="modal-head">
+          <strong>{t("playtest.revokeTitle")}</strong>
+          <p className="wizard-note">{t("playtest.revokeIntro")}</p>
+        </header>
+        <div className="modal-body">
+          <label className="hypothesis-field">
+            <span className="hypothesis-field-head">
+              <span>{t("playtest.revokeReason")}</span>
+            </span>
+            <textarea
+              className="hypothesis-text"
+              rows={3}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </label>
+          <p className="settings-note tone-bad">{t("playtest.revokeWarning")}</p>
+          {failure && <p className="settings-note tone-bad">{failure}</p>}
+        </div>
+        <footer className="modal-foot">
+          <span />
+          <div className="card-actions">
+            <button type="button" className="secondary-button" onClick={onClose}>
+              {t("action.cancel")}
+            </button>
+            <button
+              type="button"
+              className="danger-button"
+              onClick={() => void revoke()}
+              disabled={busy || !reason.trim()}
+            >
+              {busy ? t("playtest.revoking") : t("playtest.confirmRevoke")}
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The playtest step: write a protocol, run it elsewhere, bring back a report.
  *
@@ -352,6 +477,7 @@ export function PlaytestPanel({
   const { t } = useI18n();
   const { playtest, reason, reload } = usePlaytest(projectRoot, true);
   const [editing, setEditing] = useState<"protocol" | "report" | null>(null);
+  const [revoking, setRevoking] = useState(false);
 
   if (!playtest || reason) return null;
 
@@ -362,7 +488,7 @@ export function PlaytestPanel({
     <>
       <div className="settings-section">
         <span className="section-title">{t("playtest.section")}</span>
-        {state.allowed && (
+        {state.allowed && (!state.report || state.report.revoked) && (
           <button
             type="button"
             className="primary-button small"
@@ -396,6 +522,34 @@ export function PlaytestPanel({
         )}
       </Card>
 
+      {state.report && (
+        <Card className="suite-list">
+          <div className="settings-row">
+            <div className="row-label">
+              <span>
+                {state.report.revoked
+                  ? t("playtest.reportRevoked")
+                  : t("playtest.reportRecorded")}
+              </span>
+              <small className="mono">
+                {state.report.revoked_at || state.report.evidence_id}
+              </small>
+            </div>
+            {(!state.report.revoked || !state.report.artifact_deleted) && (
+              <button
+                type="button"
+                className="danger-button small"
+                onClick={() => setRevoking(true)}
+              >
+                {state.report.revoked
+                  ? t("playtest.retryDelete")
+                  : t("playtest.revoke")}
+              </button>
+            )}
+          </div>
+        </Card>
+      )}
+
       {editing === "protocol" && (
         <ProtocolDialog
           projectRoot={projectRoot}
@@ -406,9 +560,21 @@ export function PlaytestPanel({
       {editing === "report" && (
         <ReportDialog
           projectRoot={projectRoot}
+          buildIdentity={state.build_identity}
           consentValues={state.consent_values}
           onClose={() => setEditing(null)}
           onSaved={() => {
+            reload();
+            onImported?.();
+          }}
+        />
+      )}
+      {revoking && state.report && (
+        <RevocationDialog
+          projectRoot={projectRoot}
+          evidenceId={state.report.evidence_id}
+          onClose={() => setRevoking(false)}
+          onRevoked={() => {
             reload();
             onImported?.();
           }}

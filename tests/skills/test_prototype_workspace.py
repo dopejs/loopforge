@@ -213,6 +213,51 @@ class PrototypeWorkspaceTests(unittest.TestCase):
         )
         self.assertEqual(missing["details"]["fields"], ["build_identity"])
 
+    def test_playtest_report_rejects_unknown_blank_and_unbounded_content(self) -> None:
+        report = self.project / "report.json"
+        payload = {
+            "build_identity": "sha256:tested-build",
+            "participant_context": "First exposure; action player.",
+            "consent_status": "obtained",
+            "assistance_given": "None.",
+            "raw_observations": ["Charged after fourteen seconds."],
+            "comprehension_time": "14 seconds",
+            "confusion_points": [],
+            "failure_points": [],
+            "abandonment_points": [],
+            "strategies": ["Waited for an opening."],
+            "replay_behavior": "Restarted once without prompting.",
+            "interpretation": "One participant understood the timing risk.",
+            "sensitive_data": "No identifying data collected.",
+            "mood": "positive",
+        }
+        report.write_text(json.dumps(payload))
+        unknown = validate_draft("playtest-report", report)
+        self.assertEqual(unknown.returncode, 2)
+        self.assertIn(
+            "PLAYTEST_FIELDS_UNKNOWN",
+            {item["code"] for item in json.loads(unknown.stdout)["diagnostics"]},
+        )
+
+        payload.pop("mood")
+        payload["raw_observations"] = ["   "]
+        report.write_text(json.dumps(payload))
+        blank = validate_draft("playtest-report", report)
+        self.assertEqual(blank.returncode, 2)
+        self.assertIn(
+            "PLAYTEST_FIELD_INVALID",
+            {item["code"] for item in json.loads(blank.stdout)["diagnostics"]},
+        )
+
+        payload["raw_observations"] = ["x" * 4_001]
+        report.write_text(json.dumps(payload))
+        oversized = validate_draft("playtest-report", report)
+        self.assertEqual(oversized.returncode, 2)
+        self.assertIn(
+            "PLAYTEST_FIELD_INVALID",
+            {item["code"] for item in json.loads(oversized.stdout)["diagnostics"]},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

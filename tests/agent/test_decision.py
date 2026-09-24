@@ -7,12 +7,14 @@ playtest never supported.
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from loopforge.project import HYPOTHESIS_FIELDS, LoopforgeProject
 from loopforge_agent.application import LoopforgeAgent, LoopforgeAgentError
+
 from tests.agent.test_evidence import PNG
 from tests.agent.test_playtest import report
 
@@ -53,7 +55,9 @@ class DecisionTests(unittest.TestCase):
         if with_playtest:
             self.agent.advance("PLAYTEST_REQUIRED", **APPROVAL)
             self.agent.create_playtest_protocol("# Protocol\n\nWatch.")
-            self.agent.import_playtest_report(report())
+            self.agent.import_playtest_report(
+                report(build_identity=self.agent.playtest()["build_identity"])
+            )
             self.agent.advance("PROTOTYPE_DECISION", **APPROVAL)
         else:
             # The early path: prototyping straight to a decision. It needs its
@@ -63,7 +67,12 @@ class DecisionTests(unittest.TestCase):
             note = self.root / "scope.md"
             note.write_text("The mechanic needs netcode the project cannot fund.")
             self.agent.project.add_evidence(
-                "technical", note, "human_attested", "observation", None, "operator-note"
+                "technical",
+                note,
+                "human_attested",
+                "observation",
+                None,
+                "operator-note",
             )
             self.agent.advance("PROTOTYPE_DECISION", reason="scope", **APPROVAL)
 
@@ -77,7 +86,9 @@ class DecisionTests(unittest.TestCase):
     def test_the_three_outcomes_are_offered_as_equals(self) -> None:
         """Order and completeness come from the core. A surface that promoted
         `keep` would bias the judgement the product exists to make."""
-        self.assertEqual(self.agent.decision()["decisions"], ["keep", "kill", "refactor"])
+        self.assertEqual(
+            self.agent.decision()["decisions"], ["keep", "kill", "refactor"]
+        )
 
     def test_state_reports_the_stage_rather_than_failing(self) -> None:
         self.agent.project.init()
@@ -86,18 +97,46 @@ class DecisionTests(unittest.TestCase):
         self.assertFalse(state["allowed"])
         self.assertIsNone(state["recorded"])
 
+    def test_state_and_mutation_outputs_stay_within_the_contract(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        schema = json.loads(
+            (root / "contracts" / "loopforge-decision-v1.schema.json").read_text()
+        )
+        state_properties = set(schema["oneOf"][0]["properties"])
+        mutation_properties = set(schema["oneOf"][1]["properties"])
+
+        self.agent.project.init()
+        self.assertEqual(set(self.agent.decision()), state_properties)
+
+        self._reach_decision(with_playtest=False)
+        result = self.agent.decide(
+            "kill",
+            self._evidence_ids(),
+            "op_local",
+            "Local Operator",
+            "The approach is outside the experiment's scope.",
+        )
+        self.assertEqual(set(result), mutation_properties)
+
     def test_a_keep_supports_the_fun_claim_once_the_playtest_is_cited(self) -> None:
         self._reach_decision()
         self.assertTrue(self.agent.decision()["allowed"])
 
-        result = self.agent.decide("keep", self._evidence_ids(), rationale="It reads.", **{
-            "approver_id": "op_local",
-            "approver_name": "Local Operator",
-        })
+        result = self.agent.decide(
+            "keep",
+            self._evidence_ids(),
+            rationale="It reads.",
+            **{
+                "approver_id": "op_local",
+                "approver_name": "Local Operator",
+            },
+        )
 
         self.assertEqual(result["decision"], "keep")
         self.assertEqual(result["stage"], "VERTICAL_SLICE")
-        claims = {c["claim"]: c["status"] for c in self.agent.project_status()["claims"]}
+        claims = {
+            c["claim"]: c["status"] for c in self.agent.project_status()["claims"]
+        }
         self.assertEqual(claims["FUN_HYPOTHESIS_SUPPORTED"], "satisfied")
 
     def test_a_keep_that_does_not_cite_the_playtest_is_refused(self) -> None:
@@ -121,13 +160,37 @@ class DecisionTests(unittest.TestCase):
             "DECISION_PLAYTEST_NOT_CITED",
         )
 
+    def test_an_early_technical_or_scope_path_cannot_keep(self) -> None:
+        self._reach_decision(with_playtest=False)
+
+        with self.assertRaises(Exception) as caught:
+            self.agent.decide(
+                "keep",
+                self._evidence_ids(),
+                "op_local",
+                "Local Operator",
+                "The technical evidence is enough.",
+            )
+
+        self.assertEqual(
+            getattr(caught.exception, "diagnostic_code", ""),
+            "GATE_NOT_SATISFIED",
+        )
+        claims = {
+            c["claim"]: c["status"] for c in self.agent.project_status()["claims"]
+        }
+        self.assertEqual(claims["HUMAN_PLAYTESTED"], "unknown")
+        self.assertEqual(claims["FUN_HYPOTHESIS_SUPPORTED"], "unknown")
+
     def test_a_kill_records_a_failed_claim_rather_than_an_unknown_one(self) -> None:
         self._reach_decision(with_playtest=False)
         result = self.agent.decide(
             "kill", self._evidence_ids(), "op_local", "Local Operator", "Out of scope."
         )
         self.assertEqual(result["stage"], "KILLED")
-        claims = {c["claim"]: c["status"] for c in self.agent.project_status()["claims"]}
+        claims = {
+            c["claim"]: c["status"] for c in self.agent.project_status()["claims"]
+        }
         self.assertEqual(claims["FUN_HYPOTHESIS_SUPPORTED"], "failed")
 
     def test_a_refactor_returns_to_prototyping_with_a_new_hypothesis(self) -> None:
@@ -149,14 +212,21 @@ class DecisionTests(unittest.TestCase):
         self._reach_decision()
         with self.assertRaises(LoopforgeAgentError) as caught:
             self.agent.decide(
-                "refactor", self._evidence_ids(), "op_local", "Local Operator", "Retest."
+                "refactor",
+                self._evidence_ids(),
+                "op_local",
+                "Local Operator",
+                "Retest.",
             )
         self.assertEqual(caught.exception.code, "HYPOTHESIS_INCOMPLETE")
 
     def test_a_decision_without_evidence_is_refused(self) -> None:
         self._reach_decision()
         for value in ([], None, "evd_1", ["", "  "]):
-            with self.subTest(value=value), self.assertRaises(LoopforgeAgentError) as caught:
+            with (
+                self.subTest(value=value),
+                self.assertRaises(LoopforgeAgentError) as caught,
+            ):
                 self.agent.decide("kill", value, "op_local", "Local Operator", "No.")
             self.assertEqual(caught.exception.code, "DECISION_EVIDENCE_MISSING")
 
@@ -165,20 +235,84 @@ class DecisionTests(unittest.TestCase):
         later has to weigh the decision by."""
         self._reach_decision()
         for value in ("", "   \n "):
-            with self.subTest(value=value), self.assertRaises(LoopforgeAgentError) as caught:
+            with (
+                self.subTest(value=value),
+                self.assertRaises(LoopforgeAgentError) as caught,
+            ):
                 self.agent.decide("kill", self._evidence_ids(), "op_local", "Op", value)
             self.assertEqual(caught.exception.code, "DECISION_RATIONALE_MISSING")
 
     def test_a_decision_without_an_approver_is_refused(self) -> None:
         self._reach_decision()
         for approver_id, approver_name in (("", "Op"), ("op_1", ""), (None, None)):
-            with self.subTest(approver_id=approver_id), self.assertRaises(
-                LoopforgeAgentError
-            ) as caught:
+            with (
+                self.subTest(approver_id=approver_id),
+                self.assertRaises(LoopforgeAgentError) as caught,
+            ):
                 self.agent.decide(
                     "kill", self._evidence_ids(), approver_id, approver_name, "No."
                 )
             self.assertEqual(caught.exception.code, "DECISION_APPROVER_MISSING")
+
+    def test_a_keep_cannot_rely_on_stale_playtest_evidence(self) -> None:
+        self._reach_decision(with_playtest=True)
+        (self.root / "changed.gd").write_text("extends Node\n")
+
+        with self.assertRaises(Exception) as caught:
+            self.agent.decide(
+                "keep",
+                self._evidence_ids(),
+                "op_local",
+                "Local Operator",
+                "The observed behavior supported the hypothesis.",
+            )
+
+        self.assertEqual(
+            getattr(caught.exception, "diagnostic_code", ""),
+            "GATE_NOT_SATISFIED",
+        )
+
+    def test_a_decision_cannot_cite_revoked_playtest_evidence(self) -> None:
+        self._reach_decision(with_playtest=True)
+        playtest_id = self._evidence_ids("playtest")[0]
+        self.agent.project.revoke_playtest_evidence(
+            playtest_id,
+            "The participant withdrew consent.",
+            expected_revision=None,
+        )
+
+        with self.assertRaises(Exception) as caught:
+            self.agent.decide(
+                "keep",
+                [playtest_id],
+                "op_local",
+                "Local Operator",
+                "The report had appeared to support the hypothesis.",
+            )
+
+        self.assertEqual(
+            getattr(caught.exception, "diagnostic_code", ""),
+            "DECISION_EVIDENCE_REVOKED",
+        )
+
+    def test_a_decision_cannot_cite_a_deleted_artifact(self) -> None:
+        self._reach_decision(with_playtest=False)
+        evidence = self.agent.project.list_evidence()["evidence"][-1]
+        (self.root / evidence["artifact"]["path"]).unlink()
+
+        with self.assertRaises(Exception) as caught:
+            self.agent.decide(
+                "kill",
+                [evidence["evidence_id"]],
+                "op_local",
+                "Local Operator",
+                "The cited scope evidence must remain inspectable.",
+            )
+
+        self.assertEqual(
+            getattr(caught.exception, "diagnostic_code", ""),
+            "DECISION_EVIDENCE_INVALID",
+        )
 
     def test_an_unknown_outcome_is_refused(self) -> None:
         with self.assertRaises(LoopforgeAgentError) as caught:
